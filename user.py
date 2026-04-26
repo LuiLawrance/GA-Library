@@ -34,7 +34,7 @@ def _save_users(data: dict):
 
 def check_user(username: str):
     users = _load_users()
-    
+
     if username in users:
         return True
     else:
@@ -55,6 +55,17 @@ def new_user(username: str, password: str):
     _save_users(users)
     print(f"User '{username}' created.")
     return True
+
+
+def reset_password(username: str):
+    users = _load_users()
+
+    if username in users:
+        new_password = input("Enter new password: ")
+        users[username]['password'] = new_password
+        _save_users(users)
+    else:
+        print(f"User '{username}' does not exist.")
 
 
 def user_login(username: str, password: str):

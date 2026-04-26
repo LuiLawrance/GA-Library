@@ -7,7 +7,7 @@ def main():
 
     while True:
         input_user = input(
-            "\nEnter your username, 1 to create a new user, or 0 to exit: "
+            "\nEnter your username, 1 to create a new user, 2 to reset your password, or 0 to exit: "
         ).strip()
 
         if input_user == "0":
@@ -27,6 +27,18 @@ def main():
 
             password = input("Enter your password: ").strip()
             user.new_user(username, password)
+
+        elif input_user == "2":
+            username = input("Enter your username: ").strip()
+
+            while not username:
+                print("Username cannot be empty.")
+                username = input("Enter new username: ").strip()
+
+            if user.check_user(username):
+                user.reset_password(username)
+            else:
+                print("Username does not exist.")
 
         else:
             if user.check_user(input_user):
