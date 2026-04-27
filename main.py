@@ -25,7 +25,7 @@ def main():
                 if input_card == "0":
                     break
                 else:
-                    print(api_ga.card_search(input_card))
+                    api_ga.write_cards(api_ga.card_search(input_card))
 
         elif input_user == "4":
             username = input("Enter new username: ").strip()

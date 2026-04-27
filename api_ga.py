@@ -33,3 +33,21 @@ def card_search(card_name: str):
     except requests.exceptions.RequestException as e:
         print(f"Error fetching card '{card_name}': {e}")
         return None
+
+
+def write_cards(data):
+    if not data:
+        print("No data to save.")
+        return
+
+    try:
+        file.new_json(PATH_CARDS)
+
+        # Write JSON to file
+        with open(PATH_CARDS, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+
+        print(f"Data saved to {PATH_CARDS}")
+
+    except Exception as e:
+        print(f"Error saving file: {e}")
