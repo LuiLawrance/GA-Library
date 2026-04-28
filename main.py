@@ -16,7 +16,7 @@ def main():
 
         elif input_user == "1":
             while True:
-                input_card = input("Enter your card name or 0 to exit: ").strip()
+                input_card = input("\nEnter your card name or 0 to exit: ").strip()
 
                 while not input_card:
                     print("Card name cannot be empty.")
@@ -25,7 +25,7 @@ def main():
                 if input_card == "0":
                     break
                 else:
-                    api_ga.write_cards(api_ga.card_search(input_card))
+                    api_ga.card_search(input_card)
 
         elif input_user == "4":
             username = input("Enter new username: ").strip()
