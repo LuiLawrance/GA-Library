@@ -22,7 +22,7 @@ def _format_card_name(card_name: str) -> str:
     return name.strip("-")
 
 
-def _write_cards(data: dict):
+def _write_cards_id(data: dict):
     if not data:
         print("No data to save.")
         return None
@@ -145,7 +145,27 @@ def _write_cards(data: dict):
         json.dump(existing_data, f, indent=4)
 
     print(f"Saved '{data.get('name')}' as card ID '{card_id}'")
+    _write_cards_name(data.get("name"), card_id)
     return card_id
+
+
+def _write_cards_name(card_name: str, card_id: str):
+    path = file.new_json(PATH_NAMES)
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            name_data = json.load(f)
+    except json.JSONDecodeError:
+        name_data = {}
+
+    key = card_name.lower().strip()
+
+    name_data[key] = card_id
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(name_data, f, indent=4)
+
+    print(f"Indexed '{card_name}' → {card_id}")
 
 
 def card_search(card_name: str):
@@ -186,7 +206,7 @@ def card_search(card_name: str):
         response.raise_for_status()
         data = response.json()
 
-        return _write_cards(data)
+        return _write_cards_id(data)
 
     except requests.exceptions.RequestException as e:
         print(f"Error fetching card '{card_name}': {e}")
