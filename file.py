@@ -28,8 +28,6 @@ def new_dir(path_str: str) -> Path:
     # Create directory (and parents) if they don't exist
     dir_path.mkdir(parents=True, exist_ok=True)
 
-    print(f"Directory ensured: {dir_path}")
-
     return dir_path
 
 
