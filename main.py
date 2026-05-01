@@ -1,3 +1,4 @@
+import api_ga
 import sys
 import user
 
@@ -7,14 +8,26 @@ def main():
 
     while True:
         input_user = input(
-            "\nEnter your username, 1 to create a new user, 2 to reset your password, or 0 to exit: "
-        ).strip()
+            "\nEnter your username, 1 to search for a card, 4 to create a new user, 5 to reset your password, or 0 to exit: ").strip()
 
         if input_user == "0":
             print("Exiting program.")
             sys.exit()
 
         elif input_user == "1":
+            while True:
+                input_card = input("\nEnter your card name or 0 to exit: ").strip()
+
+                while not input_card:
+                    print("Card name cannot be empty.")
+                    input_card = input("Enter your card name or 0 to exit: ").strip()
+
+                if input_card == "0":
+                    break
+                else:
+                    api_ga.card_search(input_card)
+
+        elif input_user == "4":
             username = input("Enter new username: ").strip()
 
             while not username:
@@ -28,7 +41,7 @@ def main():
             password = input("Enter your password: ").strip()
             user.new_user(username, password)
 
-        elif input_user == "2":
+        elif input_user == "5":
             username = input("Enter your username: ").strip()
 
             while not username:
