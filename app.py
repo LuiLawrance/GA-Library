@@ -28,6 +28,10 @@ HTML = """
         .autocomplete-items div:hover {
             background-color: #eee;
         }
+
+        .autocomplete-active {
+            background-color: #ddd;
+        }
     </style>
 </head>
 <body>
@@ -39,7 +43,6 @@ HTML = """
                 id="cardInput"
                 type="text"
                 name="card_name"
-                value="{{ display_name or '' }}"
                 placeholder="Enter card name"
                 required
                 style="width: 300px;"
@@ -68,14 +71,18 @@ const names = {{ saved_names | tojson }};
 const input = document.getElementById("cardInput");
 const list = document.getElementById("autocomplete-list");
 
+let currentFocus = -1;
+
 window.onload = function() {
     input.value = "";
+    list.innerHTML = "";
     input.focus();
 };
 
 input.addEventListener("input", function() {
     const value = this.value.toLowerCase();
     list.innerHTML = "";
+    currentFocus = -1;
 
     if (value.length < 2) return;
 
@@ -93,6 +100,42 @@ input.addEventListener("input", function() {
         }
     });
 });
+
+input.addEventListener("keydown", function(e) {
+    let items = list.getElementsByTagName("div");
+
+    if (e.key === "ArrowDown") {
+        currentFocus++;
+        addActive(items);
+        e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+        currentFocus--;
+        addActive(items);
+        e.preventDefault();
+    } else if (e.key === "Enter") {
+        if (currentFocus > -1 && items[currentFocus]) {
+            e.preventDefault();
+            items[currentFocus].click();
+        }
+    }
+});
+
+function addActive(items) {
+    if (!items.length) return;
+
+    removeActive(items);
+
+    if (currentFocus >= items.length) currentFocus = 0;
+    if (currentFocus < 0) currentFocus = items.length - 1;
+
+    items[currentFocus].classList.add("autocomplete-active");
+}
+
+function removeActive(items) {
+    for (let i = 0; i < items.length; i++) {
+        items[i].classList.remove("autocomplete-active");
+    }
+}
 
 document.addEventListener("click", function(e) {
     if (e.target !== input) {
