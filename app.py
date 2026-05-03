@@ -39,6 +39,7 @@ HTML = """
                 id="cardInput"
                 type="text"
                 name="card_name"
+                value="{{ display_name or '' }}"
                 placeholder="Enter card name"
                 required
                 style="width: 300px;"
@@ -53,10 +54,10 @@ HTML = """
         <p><strong>{{ error }}</strong></p>
     {% endif %}
 
-    {% if images %}
-        <h2>{{ card_name }}</h2>
+    {% if card_images %}
+        <h2>{{ display_name }}</h2>
 
-        {% for image in images %}
+        {% for image in card_images %}
             <img src="{{ image }}" style="width:250px; margin:10px;">
         {% endfor %}
     {% endif %}
@@ -66,6 +67,11 @@ const names = {{ saved_names | tojson }};
 
 const input = document.getElementById("cardInput");
 const list = document.getElementById("autocomplete-list");
+
+window.onload = function() {
+    input.value = "";
+    input.focus();
+};
 
 input.addEventListener("input", function() {
     const value = this.value.toLowerCase();
@@ -100,7 +106,7 @@ document.addEventListener("click", function(e) {
 """
 
 
-def load_card_names():
+def load_card_names() -> list[str]:
     path = api_ga.file.new_json(api_ga.PATH_NAMES)
 
     try:
@@ -109,22 +115,28 @@ def load_card_names():
     except json.JSONDecodeError:
         return []
 
-    # Return display names only
-    return sorted([v["name"] for v in names_data.values()])
+    saved_names: list[str] = []
+
+    for key, value in names_data.items():
+        if isinstance(value, dict):
+            saved_names.append(str(value.get("name", key)))
+        elif isinstance(value, str):
+            saved_names.append(str(key))
+
+    return sorted(saved_names, key=lambda name: name.lower())
 
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     error = None
-    images = []
-    card_name = None
+    card_images = []
     display_name = None
 
     if request.method == "POST":
-        card_name = request.form.get("card_name", "").strip()
-        display_name = card_name
+        search_name = request.form.get("card_name", "").strip()
+        display_name = search_name
 
-        card_id = api_ga.card_search(card_name)
+        card_id = api_ga.card_search(search_name)
 
         if not card_id:
             error = "A card does not exist."
@@ -135,29 +147,28 @@ def index():
                 cards = json.load(f)
 
             card_data = cards.get(card_id, {})
-
-            display_name = card_data.get("name", card_name)
+            display_name = card_data.get("name", search_name)
 
             for edition in card_data.get("editions", []):
                 uuid = edition.get("uuid")
 
                 if uuid:
-                    images.append(f"/images/{uuid}.jpg")
+                    card_images.append(f"/images/{uuid}.jpg")
 
-            if not images:
+            if not card_images:
                 error = "A card does not exist."
 
     return render_template_string(
         HTML,
         error=error,
-        images=images,
-        card_name=display_name,
+        card_images=card_images,
+        display_name=display_name,
         saved_names=load_card_names()
     )
 
 
 @app.route("/images/<filename>")
-def images(filename):
+def serve_image(filename):
     image_folder = Path(api_ga.PATH_IMAGES)
     return send_from_directory(image_folder, filename)
 
