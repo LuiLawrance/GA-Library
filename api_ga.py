@@ -17,41 +17,6 @@ PATH_NAMES = "DATA_CLIENT/GA_CARDS/GA_NAMES.json"
 PATH_USERS = "DATA_CLIENT/GA_USERS/GA_USERS.json"
 
 
-def download_image(uuid: str):
-    file.new_dir(PATH_IMAGES)
-
-    file_path = Path(PATH_IMAGES) / f"{uuid}.jpg"
-
-    if file_path.exists():
-        print(f"Image already exists: {uuid}.jpg")
-        return
-
-    # Build URL from LINK_API
-    url = f"{LINK_API}images/{uuid}.jpg"
-
-    try:
-        response = requests.get(url, timeout=TIMEOUT)
-
-        if response.status_code == 200:
-            with open(file_path, "wb") as f:
-                f.write(response.content)
-
-            print(f"Downloaded image: {uuid}.jpg")
-        else:
-            print(f"Failed to download image ({response.status_code}): {uuid}")
-
-    except requests.exceptions.RequestException:
-        print(f"Error downloading image: {uuid}")
-
-
-def download_image_all(card_data: dict):
-    for edition in card_data.get("editions", []):
-        uuid = edition.get("uuid")
-
-        if uuid:
-            download_image(uuid)
-
-
 def _format_card_name(card_name: str) -> str:
     name = card_name.lower().strip()
     name = re.sub(r"[^a-z0-9\s]", "", name)
@@ -197,9 +162,14 @@ def _write_cards_name(card_name: str, card_id: str):
     except json.JSONDecodeError:
         name_data = {}
 
-    key = card_name.lower().strip()
+    # Normalized key for lookup
+    key = _format_card_name(card_name)
 
-    name_data[key] = card_id
+    # Store BOTH display + id
+    name_data[key] = {
+        "name": card_name,  # preserves capitalization + punctuation
+        "id": card_id
+    }
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(name_data, f, indent=4)
@@ -250,3 +220,38 @@ def card_search(card_name: str):
     except requests.exceptions.RequestException as e:
         print(f"Error fetching card '{card_name}': {e}")
         return None
+
+
+def download_image(uuid: str):
+    file.new_dir(PATH_IMAGES)
+
+    file_path = Path(PATH_IMAGES) / f"{uuid}.jpg"
+
+    if file_path.exists():
+        print(f"Image already exists: {uuid}.jpg")
+        return
+
+    # Build URL from LINK_API
+    url = f"{LINK_API}images/{uuid}.jpg"
+
+    try:
+        response = requests.get(url, timeout=TIMEOUT)
+
+        if response.status_code == 200:
+            with open(file_path, "wb") as f:
+                f.write(response.content)
+
+            print(f"Downloaded image: {uuid}.jpg")
+        else:
+            print(f"Failed to download image ({response.status_code}): {uuid}")
+
+    except requests.exceptions.RequestException:
+        print(f"Error downloading image: {uuid}")
+
+
+def download_image_all(card_data: dict):
+    for edition in card_data.get("editions", []):
+        uuid = edition.get("uuid")
+
+        if uuid:
+            download_image(uuid)
