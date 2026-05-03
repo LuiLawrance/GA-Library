@@ -71,7 +71,7 @@ input.addEventListener("input", function() {
     const value = this.value.toLowerCase();
     list.innerHTML = "";
 
-    if (!value) return;
+    if (value.length < 2) return;
 
     names.forEach(name => {
         if (name.toLowerCase().includes(value)) {
@@ -109,7 +109,8 @@ def load_card_names():
     except json.JSONDecodeError:
         return []
 
-    return sorted(names_data.keys())
+    # Return display names only
+    return sorted([v["name"] for v in names_data.values()])
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -117,9 +118,11 @@ def index():
     error = None
     images = []
     card_name = None
+    display_name = None
 
     if request.method == "POST":
         card_name = request.form.get("card_name", "").strip()
+        display_name = card_name
 
         card_id = api_ga.card_search(card_name)
 
@@ -132,6 +135,8 @@ def index():
                 cards = json.load(f)
 
             card_data = cards.get(card_id, {})
+
+            display_name = card_data.get("name", card_name)
 
             for edition in card_data.get("editions", []):
                 uuid = edition.get("uuid")
@@ -146,7 +151,7 @@ def index():
         HTML,
         error=error,
         images=images,
-        card_name=card_name,
+        card_name=display_name,
         saved_names=load_card_names()
     )
 
