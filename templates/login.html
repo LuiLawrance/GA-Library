@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login</title>
+</head>
+<body>
+<h1>Login or Create User</h1>
+
+{% if error %}
+<p><strong>{{ error }}</strong></p>
+{% endif %}
+
+{% if message %}
+<p><strong>{{ message }}</strong></p>
+{% endif %}
+
+<form method="POST">
+    <input
+            type="text"
+            name="username"
+            placeholder="Username"
+            required
+    >
+
+    <br><br>
+
+    <input
+            type="password"
+            name="password"
+            placeholder="Password"
+            required
+    >
+
+    <br><br>
+
+    <button type="submit" name="action" value="login">Login</button>
+    <button type="submit" name="action" value="create">Create New User</button>
+</form>
+
+<br>
+
+<a href="/">Back to Search</a>
+</body>
+</html>
