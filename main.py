@@ -60,12 +60,17 @@ def main():
 
                 if current_user:
                     while True:
-                        user_input = input("You have reached the end. Please enter 0 to exit: ")
+                        input_card = input("\nEnter a card name to search, or 0 to log out: ").strip()
 
-                        if user_input == "0":
+                        while not input_card:
+                            print("Card name cannot be empty.")
+                            input_card = input("Enter a card name to search, or 0 to log out: ").strip()
+
+                        if input_card == "0":
+                            print(f"Logged out of {current_user}.")
                             break
-                        else:
-                            print("The only available option is 0")
+
+                        api_ga.card_search(input_card)
 
             else:
                 print("User does not exist.")

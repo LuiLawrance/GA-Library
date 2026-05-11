@@ -50,6 +50,7 @@ def new_user(username: str, password: str):
 
     users[username] = {
         'password': password,
+        'saved_cards': {}
     }
 
     _save_users(users)
@@ -79,5 +80,5 @@ def user_login(username: str, password: str):
         print(f"Password incorrect.")
         return None
 
-    print(f"\nWelcome back, {username}!\n")
+    print(f"\nWelcome back, {username}!")
     return username
