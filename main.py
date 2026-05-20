@@ -28,7 +28,7 @@ def main():
                 card_id = api_ga.card_search(input_card)
 
                 if card_id:
-                    api_ga.print_card(card_id)
+                    api_ga.print_card(card_id, "")
 
         elif input_user == "4":
             username = input("Enter new username: ").strip()
@@ -73,7 +73,10 @@ def main():
                             print(f"Logged out of {current_user}.")
                             break
 
-                        api_ga.card_search(input_card)
+                        card_id = api_ga.card_search(input_card)
+
+                        if card_id:
+                            api_ga.print_card(card_id, current_user)
 
             else:
                 print("User does not exist.")

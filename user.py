@@ -50,7 +50,7 @@ def new_user(username: str, password: str):
 
     users[username] = {
         'password': password,
-        'saved_cards': {}
+        'inventory': {}
     }
 
     _save_users(users)

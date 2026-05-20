@@ -257,11 +257,11 @@ def card_search(card_name: str):
         return None
 
 
-def print_card(card_id: str):
-    path = file.new_json(PATH_CARDS)
+def print_card(card_id: str, username: str = ""):
+    path_cards = file.new_json(PATH_CARDS)
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path_cards, "r", encoding="utf-8") as f:
             existing_data = json.load(f)
     except json.JSONDecodeError:
         print("Failed to load card database.")
@@ -272,6 +272,23 @@ def print_card(card_id: str):
     if not card_data:
         print(f"Card ID '{card_id}' not found.")
         return
+
+    user_data = None
+
+    if username:
+        path_users = file.new_json(PATH_USERS)
+
+        try:
+            with open(path_users, "r", encoding="utf-8") as f:
+                users = json.load(f)
+        except json.JSONDecodeError:
+            users = {}
+
+        if username not in users:
+            print(f"User '{username}' does not exist.")
+            return
+
+        user_data = users[username]
 
     rarity_map = {
         1: "C",
@@ -285,32 +302,29 @@ def print_card(card_id: str):
         9: "CPR"
     }
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 80)
     print(f"{card_data.get('name', 'Unknown Card')}")
-    print("=" * 60)
+    print("=" * 80)
 
     print("\nEditions:")
-    print("-" * 60)
-
-    editions = card_data.get("editions", [])
+    print("-" * 80)
 
     raw_lines = []
 
-    for edition in editions:
+    for edition in card_data.get("editions", []):
         if not isinstance(edition, dict):
             continue
 
+        edition_id = edition.get("uuid")
         set_prefix = edition.get("set_prefix", "UNK")
         collector_number = edition.get("collector_number", "?")
-
         rarity_value = edition.get("rarity")
+        circulation = edition.get("circulation", {})
 
         if isinstance(rarity_value, int):
             rarity_display = rarity_map.get(rarity_value, str(rarity_value))
         else:
             rarity_display = "?"
-
-        circulation = edition.get("circulation", {})
 
         if not isinstance(circulation, dict):
             continue
@@ -320,18 +334,18 @@ def print_card(card_id: str):
                 continue
 
             finish_display = str(finish_name).replace("_", " ").title()
-
+            foil_id = finish_data.get("uuid_foil")
             population = finish_data.get("population")
-            printing = finish_data.get("printing")
 
-            raw_lines.append({
-                "prefix": str(set_prefix),
-                "number": f"#{collector_number}",
-                "rarity": rarity_display,
-                "finish": finish_display,
-                "population": population,
-                "printing": printing
-            })
+            if foil_id:
+                raw_lines.append({
+                    "prefix": str(set_prefix),
+                    "number": f"#{collector_number}",
+                    "rarity": rarity_display,
+                    "finish": finish_display,
+                    "uuid": foil_id,
+                    "population": population
+                })
 
             variants = finish_data.get("variants", [])
 
@@ -342,33 +356,61 @@ def print_card(card_id: str):
                 if not isinstance(variant, dict):
                     continue
 
+                variant_id = variant.get("uuid_variant")
+
+                if not variant_id:
+                    continue
+
                 raw_lines.append({
                     "prefix": str(set_prefix),
                     "number": f"#{collector_number}",
                     "rarity": rarity_display,
                     "finish": variant.get("description") or finish_display,
-                    "population": variant.get("population"),
-                    "printing": variant.get("printing")
+                    "uuid": variant_id,
+                    "population": variant.get("population")
                 })
 
     if not raw_lines:
-        print("No edition data available.")
+        print("No edition UUIDs available.")
         return
 
     prefix_width = max(len(o["prefix"]) for o in raw_lines)
     number_width = max(len(o["number"]) for o in raw_lines)
     rarity_width = max(len(o["rarity"]) for o in raw_lines)
     finish_width = max(len(o["finish"]) for o in raw_lines)
+    uuid_width = max(len(o["uuid"]) for o in raw_lines)
+
+    inventory = {}
+
+    if user_data:
+        inventory = user_data.get("inventory", {})
+
+        if not isinstance(inventory, dict):
+            inventory = {}
+
+    formatted_lines = []
 
     for o in raw_lines:
         prefix = o["prefix"].ljust(prefix_width)
         number = o["number"].rjust(number_width)
         rarity = o["rarity"].ljust(rarity_width)
         finish = o["finish"].ljust(finish_width)
+        uuid = o["uuid"].ljust(uuid_width)
 
-        line = f"{prefix} {number} {rarity} | {finish}"
+        line = f"{prefix} {number} {rarity} | {finish} | {uuid}"
 
         if o["population"] is not None:
             line += f" [≈{o['population']}]"
 
-        print(line)
+        formatted_lines.append((line, o))
+
+    line_width = max(len(line) for line, _ in formatted_lines)
+
+    for line, o in formatted_lines:
+        final_line = line.ljust(line_width)
+
+        if user_data:
+            quantity = inventory.get(o["uuid"], 0)
+            final_line += f"  | You Have: {quantity}"
+
+        print(final_line)
