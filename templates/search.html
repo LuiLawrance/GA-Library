@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Grand Archive Search</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 40px;
+            background-color: #2b2b2b;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 48px;
+        }
+
+        .main-container {
+            display: flex;
+            align-items: flex-start;
+            gap: 40px;
+        }
+
+        .search-container {
+            flex-shrink: 0;
+        }
+
+        .search-box {
+            width: 450px;
+            min-height: 300px;
+
+            padding: 15px;
+
+            font-size: 18px;
+            font-family: Arial, sans-serif;
+            line-height: 1.5;
+
+            color: white;
+            background-color: #4a4a4a;
+
+            border: none;
+            border-radius: 12px;
+
+            resize: none;
+            overflow: hidden;
+
+            outline: none;
+        }
+
+        .search-box::placeholder {
+            color: #d0d0d0;
+        }
+
+        .results-container {
+            display: flex;
+            flex-wrap: wrap;
+
+            gap: 24px;
+
+            justify-content: flex-start;
+            align-content: flex-start;
+
+            width: 100%;
+        }
+
+        .card-image {
+            width: 250px;
+
+            border-radius: 12px;
+
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        .error {
+            margin-top: 20px;
+            color: #ff7b7b;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Grand Archive Search</h1>
+
+<div class="main-container">
+
+    <form method="POST" class="search-container" id="searchForm">
+
+        <textarea
+                class="search-box"
+                id="searchBox"
+                name="card_name"
+                placeholder="Enter one or more card names..."
+        ></textarea>
+
+    </form>
+
+    <div class="results-container">
+
+        {% if card_images %}
+        {% for image in card_images %}
+        <img
+                src="{{ image }}"
+                class="card-image"
+                alt="Card Image"
+        >
+        {% endfor %}
+        {% endif %}
+
+    </div>
+
+</div>
+
+<script>
+    const textarea = document.getElementById("searchBox");
+    const form = document.getElementById("searchForm");
+
+    let typingTimer;
+    const typingDelay = 800;
+
+    function autoResize() {
+        textarea.style.height = "auto";
+        textarea.style.height = textarea.scrollHeight + "px";
+    }
+
+    textarea.addEventListener("input", function () {
+        autoResize();
+
+        clearTimeout(typingTimer);
+
+        typingTimer = setTimeout(() => {
+            if (textarea.value.trim() !== "") {
+                form.submit();
+            }
+        }, typingDelay);
+    });
+
+    window.onload = autoResize;
+</script>
+
+</body>
+</html>
