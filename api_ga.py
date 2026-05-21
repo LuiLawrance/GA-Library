@@ -11,6 +11,7 @@ LINK_API = "https://api.gatcg.com/cards/"
 
 PATH_CARDS = "DATA_CLIENT/GA_CARDS/GA_CARDS.json"
 PATH_COLLECTIONS = "DATA_CLIENT/GA_COLLECTIONS/GA_COLLECTIONS.json"
+PATH_FOILS = "DATA_CLIENT/GA_CARDS/GA_FOILS.json"
 PATH_IMAGES = "DATA_CLIENT/GA_CARDS/GA_IMAGES/"
 PATH_NAMES = "DATA_CLIENT/GA_CARDS/GA_NAMES.json"
 PATH_USERS = "DATA_CLIENT/GA_USERS/GA_USERS.json"
@@ -81,6 +82,55 @@ def _parse_api_datetime(value: str | None):
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _write_cards_foils(card_id: str, edition: dict):
+    path = file.new_json(PATH_FOILS)
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            foil_data = json.load(f)
+    except json.JSONDecodeError:
+        foil_data = {}
+
+    edition_id = edition.get("uuid")
+
+    circulation = edition.get("circulation", {})
+
+    if not isinstance(circulation, dict):
+        return
+
+    for finish_data in circulation.values():
+        if not isinstance(finish_data, dict):
+            continue
+
+        foil_id = finish_data.get("uuid_foil")
+
+        if foil_id:
+            foil_data[foil_id] = {
+                "id": card_id,
+                "edition_id": edition_id
+            }
+
+        variants = finish_data.get("variants", [])
+
+        if not isinstance(variants, list):
+            continue
+
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+
+            variant_id = variant.get("uuid_variant")
+
+            if variant_id:
+                foil_data[variant_id] = {
+                    "id": card_id,
+                    "edition_id": edition_id
+                }
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(foil_data, f, indent=4)
 
 
 def _write_cards_id(data: dict):
@@ -203,13 +253,21 @@ def _write_cards_id(data: dict):
 
     existing_data[card_id] = selected_data
 
+    for edition in trimmed_editions:
+        _write_cards_foils(card_id, edition)
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(existing_data, f, indent=4)
 
     _download_image_all(data)
 
-    print(f"Saved '{data.get('name')}' as card ID '{card_id}'")
-    _write_cards_name(data.get("name"), card_id)
+    card_name = data.get("name")
+
+    if not isinstance(card_name, str):
+        card_name = "Unknown Card"
+
+    print(f"Saved '{card_name}' as card ID '{card_id}'")
+    _write_cards_name(card_name, card_id)
     return card_id
 
 
@@ -284,6 +342,279 @@ def card_search(card_name: str):
         print(f"API data is newer. Updating '{card_name}'.")
 
     return _write_cards_id(api_data)
+
+
+def inv_add(username: str, foil_id: str):
+    path_users = file.new_json(PATH_USERS)
+
+    try:
+        with open(path_users, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    except json.JSONDecodeError:
+        users = {}
+
+    if username not in users:
+        print(f"User '{username}' does not exist.")
+        return False
+
+    user_data = users[username]
+
+    inventory = user_data.get("inventory", {})
+
+    if not isinstance(inventory, dict):
+        inventory = {}
+
+    current_count = inventory.get(foil_id, 0)
+
+    if not isinstance(current_count, int):
+        current_count = 0
+
+    inventory[foil_id] = current_count + 1
+
+    user_data["inventory"] = inventory
+    users[username] = user_data
+
+    with open(path_users, "w", encoding="utf-8") as f:
+        json.dump(users, f, indent=4)
+
+    print(f"Added 1x '{foil_id}' to '{username}' inventory.")
+    return True
+
+
+def inv_backend(username: str, card_id: str):
+    path_cards = file.new_json(PATH_CARDS)
+
+    try:
+        with open(path_cards, "r", encoding="utf-8") as f:
+            cards = json.load(f)
+    except json.JSONDecodeError:
+        print("Failed to load card database.")
+        return False
+
+    card_data = cards.get(card_id)
+
+    if not card_data:
+        print(f"Card ID '{card_id}' not found.")
+        return False
+
+    path_users = file.new_json(PATH_USERS)
+
+    try:
+        with open(path_users, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    except json.JSONDecodeError:
+        users = {}
+
+    if username not in users:
+        print(f"User '{username}' does not exist.")
+        return False
+
+    print_card(card_id, username)
+
+    options = []
+
+    rarity_map = {
+        1: "C",
+        2: "U",
+        3: "R",
+        4: "SR",
+        5: "UR",
+        6: "PR",
+        7: "CSR",
+        8: "CUR",
+        9: "CPR"
+    }
+
+    for edition in card_data.get("editions", []):
+        if not isinstance(edition, dict):
+            continue
+
+        set_prefix = edition.get("set_prefix", "UNK")
+        collector_number = edition.get("collector_number", "?")
+        rarity_value = edition.get("rarity")
+        circulation = edition.get("circulation", {})
+
+        if isinstance(rarity_value, int):
+            rarity_display = rarity_map.get(rarity_value, str(rarity_value))
+        else:
+            rarity_display = "?"
+
+        if not isinstance(circulation, dict):
+            continue
+
+        for finish_name, finish_data in circulation.items():
+            if not isinstance(finish_data, dict):
+                continue
+
+            finish_display = str(finish_name).replace("_", " ").title()
+            foil_id = finish_data.get("uuid_foil")
+
+            if foil_id:
+                options.append({
+                    "label": f"{set_prefix} #{collector_number} {rarity_display} | {finish_display}",
+                    "foil_id": foil_id
+                })
+
+            variants = finish_data.get("variants", [])
+
+            if not isinstance(variants, list):
+                continue
+
+            for variant in variants:
+                if not isinstance(variant, dict):
+                    continue
+
+                variant_id = variant.get("uuid_variant")
+
+                if variant_id:
+                    options.append({
+                        "label": f"{set_prefix} #{collector_number} {rarity_display} | {variant.get('description') or finish_display}",
+                        "foil_id": variant_id
+                    })
+
+    if not options:
+        print("No inventory options available.")
+        return False
+
+    inventory = users[username].get("inventory", {})
+
+    if not isinstance(inventory, dict):
+        inventory = {}
+
+    print("\nInventory Options:")
+    print("-" * 80)
+
+    index_width = len(str(len(options)))
+    label_width = max(len(option["label"]) for option in options)
+    foil_width = max(len(option["foil_id"]) for option in options)
+
+    for index, option in enumerate(options, start=1):
+        number = str(index).rjust(index_width)
+        label = option["label"].ljust(label_width)
+        foil_id = option["foil_id"].ljust(foil_width)
+        quantity = inventory.get(option["foil_id"], 0)
+
+        print(f"{number}. {label} | {foil_id} | You Have: {quantity}")
+
+    choice = input("\nSelect an option number, or 0 to cancel: ").strip()
+
+    if choice == "0":
+        print("Cancelled.")
+        return False
+
+    if not choice.isdigit():
+        print("Invalid option.")
+        return False
+
+    choice_index = int(choice)
+
+    if choice_index < 1 or choice_index > len(options):
+        print("Invalid option.")
+        return False
+
+    selected = options[choice_index - 1]
+    foil_id = selected["foil_id"]
+
+    action = input(
+        "Enter '+', '-', or a number to set quantity (blank to cancel): "
+    ).strip()
+
+    if not action:
+        print("Cancelled.")
+        return False
+
+    if action == "+":
+        return inv_add(username, foil_id)
+
+    if action == "-":
+        return inv_sub(username, foil_id)
+
+    if action.isdigit():
+        return inv_set(username, foil_id, int(action))
+
+    print("Invalid input. Cancelled.")
+    return False
+
+
+def inv_set(username: str, foil_id: str, count: int):
+    path_users = file.new_json(PATH_USERS)
+
+    try:
+        with open(path_users, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    except json.JSONDecodeError:
+        users = {}
+
+    if username not in users:
+        print(f"User '{username}' does not exist.")
+        return False
+
+    if not isinstance(count, int):
+        print("Count must be an integer.")
+        return False
+
+    user_data = users[username]
+
+    inventory = user_data.get("inventory", {})
+
+    if not isinstance(inventory, dict):
+        inventory = {}
+
+    if count <= 0:
+        inventory.pop(foil_id, None)
+        print(f"Removed '{foil_id}' from '{username}' inventory.")
+    else:
+        inventory[foil_id] = count
+        print(f"Set '{foil_id}' to {count} for '{username}'.")
+
+    user_data["inventory"] = inventory
+    users[username] = user_data
+
+    with open(path_users, "w", encoding="utf-8") as f:
+        json.dump(users, f, indent=4)
+
+    return True
+
+
+def inv_sub(username: str, foil_id: str):
+    path_users = file.new_json(PATH_USERS)
+
+    try:
+        with open(path_users, "r", encoding="utf-8") as f:
+            users = json.load(f)
+    except json.JSONDecodeError:
+        users = {}
+
+    if username not in users:
+        print(f"User '{username}' does not exist.")
+        return False
+
+    user_data = users[username]
+
+    inventory = user_data.get("inventory", {})
+
+    if not isinstance(inventory, dict):
+        inventory = {}
+
+    current_count = inventory.get(foil_id, 0)
+
+    if not isinstance(current_count, int):
+        current_count = 0
+
+    if current_count <= 1:
+        inventory.pop(foil_id, None)
+        print(f"Removed '{foil_id}' from '{username}' inventory.")
+    else:
+        inventory[foil_id] = current_count - 1
+        print(f"Removed 1x '{foil_id}' from '{username}' inventory.")
+
+    user_data["inventory"] = inventory
+    users[username] = user_data
+
+    with open(path_users, "w", encoding="utf-8") as f:
+        json.dump(users, f, indent=4)
+
+    return True
 
 
 def print_card(card_id: str, username: str = ""):

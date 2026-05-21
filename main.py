@@ -76,7 +76,7 @@ def main():
                         card_id = api_ga.card_search(input_card)
 
                         if card_id:
-                            api_ga.print_card(card_id, current_user)
+                            api_ga.inv_backend(current_user, card_id)
 
             else:
                 print("User does not exist.")
