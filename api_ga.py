@@ -6,7 +6,6 @@ import re
 import requests
 
 TIMEOUT = 10
-UPDATE_THRESHOLD_DAYS = 30
 
 LINK_API = "https://api.gatcg.com/cards/"
 
@@ -57,6 +56,31 @@ def _format_card_name(card_name: str) -> str:
     name = re.sub(r"[^a-z0-9\s]", "", name)
     name = re.sub(r"\s+", "-", name)
     return name.strip("-")
+
+
+def _get_latest_api_update(data: dict):
+    latest = None
+
+    for edition in data.get("editions", []):
+        if not isinstance(edition, dict):
+            continue
+
+        parsed = _parse_api_datetime(edition.get("last_update"))
+
+        if parsed and (latest is None or parsed > latest):
+            latest = parsed
+
+    return latest
+
+
+def _parse_api_datetime(value: str | None):
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _write_cards_id(data: dict):
@@ -145,6 +169,7 @@ def _write_cards_id(data: dict):
             "rarity": edition.get("rarity"),
             "set_name": set_data.get("name"),
             "set_prefix": set_data.get("prefix"),
+            "last_update": edition.get("last_update"),
             "circulation": circulation_data
         })
 
@@ -153,7 +178,7 @@ def _write_cards_id(data: dict):
 
     selected_data = {
         "name": data.get("name"),
-        "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "last_update": _get_latest_api_update(data).isoformat() if _get_latest_api_update(data) else None,
         "level": data.get("level"),
         "life": data.get("life"),
         "power": data.get("power"),
@@ -221,40 +246,44 @@ def card_search(card_name: str):
     except json.JSONDecodeError:
         existing_data = {}
 
-    # --- Check local storage ---
-    for stored_card_id, stored_card in existing_data.items():
-        if stored_card.get("name", "").lower() == card_name.lower():
-            updated_str = stored_card.get("updated")
-
-            if updated_str:
-                try:
-                    last_updated = datetime.strptime(updated_str, "%Y-%m-%d %H:%M:%S")
-                    days_since = (datetime.now() - last_updated).days
-
-                    if days_since < UPDATE_THRESHOLD_DAYS:
-                        print(f"Using cached data for '{card_name}' (updated {updated_str})")
-                        return stored_card_id
-
-                    print(f"Cached data is old. Refreshing from API.")
-                    break
-
-                except ValueError:
-                    print("Invalid timestamp. Refreshing from API.")
-                    break
-
     slug = _format_card_name(card_name)
     url = LINK_API + slug
 
     try:
         response = requests.get(url, timeout=TIMEOUT)
         response.raise_for_status()
-        data = response.json()
-
-        return _write_cards_id(data)
+        api_data = response.json()
 
     except requests.exceptions.RequestException as e:
         print(f"Error fetching card '{card_name}': {e}")
         return None
+
+    api_editions = api_data.get("editions", [])
+
+    if not api_editions:
+        print("No editions found in API response.")
+        return None
+
+    card_id = api_editions[0].get("card_id")
+
+    if not card_id:
+        print("No card_id found in API response.")
+        return None
+
+    api_last_update = _get_latest_api_update(api_data)
+
+    cached_card = existing_data.get(card_id)
+
+    if cached_card:
+        cached_last_update = _parse_api_datetime(cached_card.get("last_update"))
+
+        if api_last_update and cached_last_update and api_last_update <= cached_last_update:
+            print(f"Using cached data for '{card_name}'")
+            return card_id
+
+        print(f"API data is newer. Updating '{card_name}'.")
+
+    return _write_cards_id(api_data)
 
 
 def print_card(card_id: str, username: str = ""):
