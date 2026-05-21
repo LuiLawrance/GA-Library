@@ -24,8 +24,11 @@ def main():
 
                 if input_card == "0":
                     break
-                else:
-                    api_ga.card_search(input_card)
+
+                card_id = api_ga.card_search(input_card)
+
+                if card_id:
+                    api_ga.print_card(card_id, "")
 
         elif input_user == "4":
             username = input("Enter new username: ").strip()
@@ -60,12 +63,20 @@ def main():
 
                 if current_user:
                     while True:
-                        user_input = input("You have reached the end. Please enter 0 to exit: ")
+                        input_card = input("\nEnter a card name to search, or 0 to log out: ").strip()
 
-                        if user_input == "0":
+                        while not input_card:
+                            print("Card name cannot be empty.")
+                            input_card = input("Enter a card name to search, or 0 to log out: ").strip()
+
+                        if input_card == "0":
+                            print(f"Logged out of {current_user}.")
                             break
-                        else:
-                            print("The only available option is 0")
+
+                        card_id = api_ga.card_search(input_card)
+
+                        if card_id:
+                            api_ga.inv_backend(current_user, card_id)
 
             else:
                 print("User does not exist.")
