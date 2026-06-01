@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime
+from tqdm import tqdm
 from util_file import new_dir, new_json
 
 import json
@@ -7,11 +8,13 @@ import requests
 
 API_CARD = "https://api.gatcg.com/cards/"
 API_IMAGE = "https://api.gatcg.com/cards/images/"
+API_SET = "https://api.gatcg.com/cards/search"
 
 DIR_SETS = "DATA_GA/SETS_GA"
 DIR_IMAGES = "DATA_GA/IMAGES_GA"
 
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"
+JSON_ERRORS = "DATA_GA/CARDS_GA/ERRORS.json"
 JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"
 JSON_RULES = "DATA_GA/CARDS_GA/RULES.json"
 JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"
@@ -180,6 +183,12 @@ def _image_download(card_data: dict, debug: bool = False) -> None:
         except requests.exceptions.HTTPError as e:
             error_count += 1
 
+            _log_error(
+                edition_id,
+                e,
+                debug
+            )
+
             print(
                 f"Image HTTP Error | "
                 f"edition_id={edition_id} | "
@@ -189,6 +198,12 @@ def _image_download(card_data: dict, debug: bool = False) -> None:
         except requests.exceptions.RequestException as e:
             error_count += 1
 
+            _log_error(
+                edition_id,
+                e,
+                debug
+            )
+
             print(
                 f"Image Request Error | "
                 f"edition_id={edition_id} | "
@@ -197,6 +212,12 @@ def _image_download(card_data: dict, debug: bool = False) -> None:
 
         except Exception as e:
             error_count += 1
+
+            _log_error(
+                edition_id,
+                e,
+                debug
+            )
 
             print(
                 f"Image Save Error | "
@@ -210,6 +231,30 @@ def _image_download(card_data: dict, debug: bool = False) -> None:
             f"downloaded={image_count} | "
             f"skipped={skipped_count} | "
             f"errors={error_count}"
+        )
+
+
+def _log_error(identifier: str, error: Exception | str, debug: bool = False) -> None:
+    error_file = new_json(JSON_ERRORS)
+
+    with error_file.open("r", encoding="utf-8") as f:
+        error_data = json.load(f)
+
+    timestamp = datetime.now().isoformat()
+
+    error_data[f"{timestamp}_{identifier}"] = {
+        "timestamp": timestamp,
+        "identifier": identifier,
+        "error": str(error)
+    }
+
+    with error_file.open("w", encoding="utf-8") as f:
+        json.dump(error_data, f, indent=4)
+
+    if debug:
+        print(
+            f"Logged error | "
+            f"{identifier}"
         )
 
 
@@ -643,5 +688,111 @@ def card_search(card_names: list[str], debug: bool = False) -> dict[str, dict]:
             continue
 
         results[card_name] = _api_search(slug, debug)
+
+    return results
+
+
+def set_search(
+        set_prefix: str,
+        debug: bool = False
+) -> dict:
+    results = {}
+
+    page = 1
+    total_pages = 1
+
+    progress = None
+
+    while page <= total_pages:
+        response = requests.get(
+            API_SET,
+            params={
+                "prefix": set_prefix,
+                "page": page
+            },
+            timeout=10
+        )
+
+        response.raise_for_status()
+
+        search_data = response.json()
+
+        total_pages = search_data.get("total_pages", 1)
+
+        if progress is None:
+            progress = tqdm(
+                total=search_data.get(
+                    "total_cards",
+                    0
+                ),
+                desc=set_prefix.upper(),
+                unit="card"
+            )
+
+        cards = (
+                search_data.get("data")
+                or search_data.get("cards")
+                or search_data.get("results")
+                or []
+        )
+
+        if debug:
+            print(
+                f"Processing "
+                f"{set_prefix.upper()} "
+                f"page {page}/{total_pages}"
+            )
+
+            print(
+                f"Cards found: "
+                f"{len(cards)}"
+            )
+
+        for card_data in cards:
+            try:
+                card_name = card_data["name"]
+                slug = _format_search(card_name, debug)
+
+                if _check_local(slug, debug):
+                    continue
+
+                _image_download(card_data, debug)
+                _update_edition(card_data, debug)
+                _update_info(card_data, debug)
+                _update_rule(card_data, debug)
+                _update_sets(card_data, debug)
+                _update_slug(slug, card_data, debug)
+                _update_thema(card_data, debug)
+                _update_update(card_data, debug)
+
+                results[card_name] = card_data
+
+            except Exception as e:
+                _log_error(
+                    card_data.get("name", "unknown"),
+                    e,
+                    debug
+                )
+
+                print(
+                    f"Card processing failed: "
+                    f"{card_data.get('name', 'unknown')} | "
+                    f"{e}"
+                )
+
+            finally:
+                progress.update(1)
+
+        page += 1
+
+    if progress:
+        progress.close()
+
+    if debug:
+        print(
+            f"Completed set search: "
+            f"{set_prefix.upper()} | "
+            f"updated={len(results)}"
+        )
 
     return results
