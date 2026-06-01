@@ -1,3 +1,4 @@
+from datetime import date
 from util_file import new_dir, new_json
 
 import json
@@ -10,11 +11,14 @@ API_IMAGE = "https://api.gatcg.com/cards/images/"
 DIR_SETS = "DATA_GA/SETS_GA"
 DIR_IMAGES = "DATA_GA/IMAGES_GA"
 
-JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"  # Stores which CARD ID each EDITION ID belongs to
-JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"  # Stores the effects, artist, legality, and accompanying EDITION IDs
+JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"
+JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"
 JSON_RULES = "DATA_GA/CARDS_GA/RULES.json"
-JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"  # Stores the slugs of each card and which CARD ID it belongs to
+JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"
 JSON_THEMA = "DATA_GA/CARDS_GA/THEMA.json"
+JSON_UPDATE = "DATA_GA/CARDS_GA/UPDATE.json"
+
+UPDATE_THRESHOLD = 30
 
 
 def _api_search(slug: str, debug: bool = False) -> dict:
@@ -43,6 +47,7 @@ def _api_search(slug: str, debug: bool = False) -> dict:
         _update_sets(card_data, debug)
         _update_slug(slug, card_data, debug)
         _update_thema(card_data, debug)
+        _update_update(card_data, debug)
 
         return card_data
 
@@ -63,19 +68,51 @@ def _api_search(slug: str, debug: bool = False) -> dict:
 
 def _check_local(slug: str, debug: bool = False) -> bool:
     slug_file = new_json(JSON_SLUGS)
+    update_file = new_json(JSON_UPDATE)
 
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
 
-    exists_locally = slug in slug_data
+    with update_file.open("r", encoding="utf-8") as f:
+        update_data = json.load(f)
 
-    if debug:
-        if exists_locally:
-            print(f"Found locally: {slug}")
-        else:
+    if slug not in slug_data:
+        if debug:
             print(f"Not found locally: {slug}")
 
-    return exists_locally
+        return False
+
+    card_id = slug_data[slug]["card_id"]
+    last_updated = update_data.get(card_id)
+
+    if not last_updated:
+        if debug:
+            print(f"No update date found: {slug}")
+
+        return False
+
+    days_since_update = (
+            date.today() - date.fromisoformat(last_updated)
+    ).days
+
+    if days_since_update > UPDATE_THRESHOLD:
+        if debug:
+            print(
+                f"Update needed: {slug} | "
+                f"last_updated={last_updated} | "
+                f"days={days_since_update}"
+            )
+
+        return False
+
+    if debug:
+        print(
+            f"Found locally: {slug} | "
+            f"last_updated={last_updated} | "
+            f"days={days_since_update}"
+        )
+
+    return True
 
 
 def _format_search(card_name: str, debug: bool = False) -> str:
@@ -312,6 +349,11 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
 
         illustrator = edition["illustrator"]
 
+        date_created = edition.get("created_at")
+
+        if date_created:
+            date_created = date_created.split("T")[0]
+
         flavor = edition.get("flavor")
 
         if not flavor:
@@ -327,6 +369,7 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
                 editions[edition_id].pop("foil_ids")
             )
 
+        editions[edition_id]["date_created"] = date_created
         editions[edition_id]["flavor"] = flavor
         editions[edition_id]["illustrator"] = illustrator
         editions[edition_id]["rarity"] = rarity
@@ -566,6 +609,27 @@ def _update_thema(card_data: dict, debug: bool = False) -> None:
         print(
             f"Updated THEMA.json | "
             f"editions={edition_count}"
+        )
+
+
+def _update_update(card_data: dict, debug: bool = False) -> None:
+    card_id = card_data["editions"][0]["card_id"]
+
+    update_file = new_json(JSON_UPDATE)
+
+    with update_file.open("r", encoding="utf-8") as f:
+        update_data = json.load(f)
+
+    update_data[card_id] = date.today().isoformat()
+
+    with update_file.open("w", encoding="utf-8") as f:
+        json.dump(update_data, f, indent=4)
+
+    if debug:
+        print(
+            f"Updated UPDATE.json | "
+            f"card_id={card_id} | "
+            f"date={update_data[card_id]}"
         )
 
 
