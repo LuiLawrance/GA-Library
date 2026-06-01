@@ -233,8 +233,39 @@ def _update_edition(card_data: dict, debug: bool = False) -> None:
 
 def _update_info(card_data: dict, debug: bool = False) -> None:
     card_id = card_data["editions"][0]["card_id"]
+
     effect = card_data.get("effect")
     effect_raw = card_data.get("effect_raw")
+
+    legality_data = card_data.get("legality") or {}
+
+    legality = {
+        "draft": True,
+        "pantheon": True,
+        "standard": True
+    }
+
+    for format_name, format_data in legality_data.items():
+        if format_data.get("limit") == 0:
+            legality[format_name.lower()] = False
+
+    types = card_data.get("types", [])
+    subtypes = card_data.get("subtypes", [])
+
+    combined_types = []
+
+    for value in types + subtypes:
+        if value not in combined_types:
+            combined_types.append(value)
+
+    stats = {
+        "cost_memory": card_data.get("cost_memory"),
+        "cost_reserve": card_data.get("cost_reserve"),
+        "durability": card_data.get("durability"),
+        "level": card_data.get("level"),
+        "life": card_data.get("life"),
+        "power": card_data.get("power")
+    }
 
     info_file = new_json(JSON_INFO)
 
@@ -249,9 +280,18 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
 
     info_data[card_id]["effect"] = effect
     info_data[card_id]["effect_raw"] = effect_raw
+    info_data[card_id]["legality"] = legality
+    info_data[card_id]["types"] = combined_types
+    info_data[card_id]["stats"] = stats
 
     if "editions" not in info_data[card_id]:
         info_data[card_id]["editions"] = {}
+
+    if debug:
+        print(
+            f"Card metadata | "
+            f"types={len(combined_types)}"
+        )
 
     edition_count = 0
     foil_count = 0
