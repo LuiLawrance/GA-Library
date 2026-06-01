@@ -90,6 +90,7 @@ def _update_foil(card_data: dict, debug: bool = False) -> None:
         foil_data = json.load(f)
 
     foil_count = 0
+    variant_count = 0
 
     for edition in card_data["editions"]:
         card_id = edition["card_id"]
@@ -110,11 +111,26 @@ def _update_foil(card_data: dict, debug: bool = False) -> None:
 
             foil_count += 1
 
+            for variant in foil.get("variants", []):
+                variant_id = variant["uuid"]
+
+                foil_data[variant_id] = {
+                    "card_id": card_id,
+                    "edition_id": edition_id,
+                    "parent_foil_id": foil_id
+                }
+
+                variant_count += 1
+
     with foil_file.open("w", encoding="utf-8") as f:
         json.dump(foil_data, f, indent=4)
 
     if debug:
-        print(f"Updated FOILS.json with {foil_count} foil entries")
+        print(
+            f"Updated FOILS.json | "
+            f"foils={foil_count} | "
+            f"variants={variant_count}"
+        )
 
 
 def _update_info(card_data: dict, debug: bool = False) -> None:
@@ -133,6 +149,7 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
 
     edition_count = 0
     foil_count = 0
+    variant_count = 0
 
     for edition in card_data["editions"]:
         edition_id = edition["uuid"]
@@ -159,10 +176,21 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
             foil_id = foil["uuid"]
 
             info_data[card_id][edition_id]["foils"][foil_id] = {
-                "kind": foil["kind"]
+                "kind": foil["kind"],
+                "variants": {}
             }
 
             foil_count += 1
+
+            for variant in foil.get("variants", []):
+                variant_id = variant["uuid"]
+                variant_kind = variant.get("description", variant["kind"])
+
+                info_data[card_id][edition_id]["foils"][foil_id]["variants"][variant_id] = {
+                    "kind": variant_kind
+                }
+
+                variant_count += 1
 
     with info_file.open("w", encoding="utf-8") as f:
         json.dump(info_data, f, indent=4)
@@ -171,7 +199,8 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         print(
             f"Updated INFO.json | card_id={card_id} "
             f"| editions={edition_count} "
-            f"| foils={foil_count}"
+            f"| foils={foil_count} "
+            f"| variants={variant_count}"
         )
 
 
