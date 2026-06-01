@@ -12,6 +12,7 @@ DIR_IMAGES = "DATA_GA/IMAGES_GA"
 
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"  # Stores which CARD ID each EDITION ID belongs to
 JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"  # Stores the effects, artist, legality, and accompanying EDITION IDs
+JSON_RULES = "DATA_GA/CARDS_GA/RULES.json"
 JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"  # Stores the slugs of each card and which CARD ID it belongs to
 JSON_THEMA = "DATA_GA/CARDS_GA/THEMA.json"
 
@@ -38,6 +39,7 @@ def _api_search(slug: str, debug: bool = False) -> dict:
         _image_download(card_data, debug)
         _update_edition(card_data, debug)
         _update_info(card_data, debug)
+        _update_rule(card_data, debug)
         _update_sets(card_data, debug)
         _update_slug(slug, card_data, debug)
         _update_thema(card_data, debug)
@@ -235,6 +237,7 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
     card_id = card_data["editions"][0]["card_id"]
 
     effect = card_data.get("effect")
+    effect_html = card_data.get("effect_html")
     effect_raw = card_data.get("effect_raw")
 
     legality_data = card_data.get("legality") or {}
@@ -264,7 +267,8 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         "durability": card_data.get("durability"),
         "level": card_data.get("level"),
         "life": card_data.get("life"),
-        "power": card_data.get("power")
+        "power": card_data.get("power"),
+        "speed": card_data.get("speed")
     }
 
     info_file = new_json(JSON_INFO)
@@ -279,10 +283,11 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
             print(f"Added new card_id: {card_id}")
 
     info_data[card_id]["effect"] = effect
+    info_data[card_id]["effect_html"] = effect_html
     info_data[card_id]["effect_raw"] = effect_raw
     info_data[card_id]["legality"] = legality
-    info_data[card_id]["types"] = combined_types
     info_data[card_id]["stats"] = stats
+    info_data[card_id]["types"] = combined_types
 
     if "editions" not in info_data[card_id]:
         info_data[card_id]["editions"] = {}
@@ -322,11 +327,11 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
                 editions[edition_id].pop("foil_ids")
             )
 
+        editions[edition_id]["flavor"] = flavor
+        editions[edition_id]["illustrator"] = illustrator
         editions[edition_id]["rarity"] = rarity
         editions[edition_id]["set_name"] = set_name
         editions[edition_id]["set_prefix"] = set_prefix
-        editions[edition_id]["illustrator"] = illustrator
-        editions[edition_id]["flavor"] = flavor
 
         if "foils" not in editions[edition_id]:
             editions[edition_id]["foils"] = {}
@@ -385,6 +390,41 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
             f"| editions={edition_count} "
             f"| foils={foil_count} "
             f"| variants={variant_count}"
+        )
+
+
+def _update_rule(card_data: dict, debug: bool = False) -> None:
+    card_id = card_data["editions"][0]["card_id"]
+    rule_data = card_data.get("rule") or []
+
+    rules = []
+
+    for rule in rule_data:
+        rules.append({
+            "date": rule.get("date_added"),
+            "title": rule.get("title") or None,
+            "description": rule.get("description")
+        })
+
+    rules.sort(
+        key=lambda rule: rule.get("date") or ""
+    )
+
+    rule_file = new_json(JSON_RULES)
+
+    with rule_file.open("r", encoding="utf-8") as f:
+        rule_json = json.load(f)
+
+    rule_json[card_id] = rules
+
+    with rule_file.open("w", encoding="utf-8") as f:
+        json.dump(rule_json, f, indent=4)
+
+    if debug:
+        print(
+            f"Updated RULES.json | "
+            f"card_id={card_id} | "
+            f"rules={len(rules)}"
         )
 
 
