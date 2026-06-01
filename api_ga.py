@@ -1,12 +1,14 @@
-from util_file import new_json
+from util_file import new_dir, new_json
 
 import json
 import re
 import requests
 
 API_CARD = "https://api.gatcg.com/cards/"
+API_IMAGE = "https://api.gatcg.com/cards/images/"
 
 DIR_SETS = "DATA_GA/SETS_GA"
+DIR_IMAGES = "DATA_GA/IMAGES_GA"
 
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"  # Stores which CARD ID each EDITION ID belongs to
 JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"  # Stores the effects, artist, legality, and accompanying EDITION IDs
@@ -33,6 +35,7 @@ def _api_search(slug: str, debug: bool = False) -> dict:
                 f"{card_data['name']}"
             )
 
+        _image_download(card_data, debug)
         _update_edition(card_data, debug)
         _update_info(card_data, debug)
         _update_sets(card_data, debug)
@@ -86,6 +89,89 @@ def _format_search(card_name: str, debug: bool = False) -> str:
         print(f"Formatted search: '{card_name}' -> '{slug}'")
 
     return slug
+
+
+def _image_download(card_data: dict, debug: bool = False) -> None:
+    image_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    image_dir = new_dir(DIR_IMAGES)
+
+    for edition in card_data["editions"]:
+        edition_id = edition["uuid"]
+        image_path = edition.get("image")
+
+        if not image_path:
+            continue
+
+        image_name = image_path.split("/")[-1]
+        image_file = image_dir / f"{edition_id}.jpg"
+
+        if image_file.exists() and image_file.stat().st_size > 0:
+            skipped_count += 1
+
+            if debug:
+                print(
+                    f"Image exists: "
+                    f"{edition_id}.jpg"
+                )
+
+            continue
+
+        try:
+            response = requests.get(
+                f"{API_IMAGE}{image_name}",
+                timeout=10
+            )
+
+            response.raise_for_status()
+
+            with image_file.open("wb") as f:
+                f.write(response.content)
+
+            image_count += 1
+
+            if debug:
+                print(
+                    f"Downloaded image: "
+                    f"{edition_id}.jpg"
+                )
+
+        except requests.exceptions.HTTPError as e:
+            error_count += 1
+
+            print(
+                f"Image HTTP Error | "
+                f"edition_id={edition_id} | "
+                f"{e}"
+            )
+
+        except requests.exceptions.RequestException as e:
+            error_count += 1
+
+            print(
+                f"Image Request Error | "
+                f"edition_id={edition_id} | "
+                f"{e}"
+            )
+
+        except Exception as e:
+            error_count += 1
+
+            print(
+                f"Image Save Error | "
+                f"edition_id={edition_id} | "
+                f"{e}"
+            )
+
+    if debug:
+        print(
+            f"Updated IMAGES directory | "
+            f"downloaded={image_count} | "
+            f"skipped={skipped_count} | "
+            f"errors={error_count}"
+        )
 
 
 def _sort_collector_number(collector_number: str, debug: bool = False) -> tuple:
@@ -181,6 +267,11 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
 
         illustrator = edition["illustrator"]
 
+        flavor = edition.get("flavor")
+
+        if not flavor:
+            flavor = None
+
         editions = info_data[card_id]["editions"]
 
         if edition_id not in editions:
@@ -195,6 +286,7 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         editions[edition_id]["set_name"] = set_name
         editions[edition_id]["set_prefix"] = set_prefix
         editions[edition_id]["illustrator"] = illustrator
+        editions[edition_id]["flavor"] = flavor
 
         if "foils" not in editions[edition_id]:
             editions[edition_id]["foils"] = {}
