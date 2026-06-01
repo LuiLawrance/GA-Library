@@ -1,14 +1,18 @@
-from api_ga import api_search
+from api_ga import card_search
 
 
 def main() -> None:
-    card_name = input("Enter card name: ").strip()
+    card_names_input = input(
+        "Enter card names (comma separated): "
+    ).strip()
 
-    try:
-        card_data = api_search(card_name)
-        print(card_data)
-    except Exception as e:
-        print(f"Error: {e}")
+    card_names = [
+        name.strip()
+        for name in card_names_input.split(",")
+        if name.strip()
+    ]
+
+    card_search(card_names)
 
 
 if __name__ == "__main__":
