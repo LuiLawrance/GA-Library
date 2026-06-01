@@ -11,6 +11,7 @@ DIR_SETS = "DATA_GA/SETS_GA"
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"  # Stores which CARD ID each EDITION ID belongs to
 JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"  # Stores the effects, artist, legality, and accompanying EDITION IDs
 JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"  # Stores the slugs of each card and which CARD ID it belongs to
+JSON_THEMA = "DATA_GA/CARDS_GA/THEMA.json"
 
 
 def _api_search(slug: str, debug: bool = False) -> dict:
@@ -36,6 +37,7 @@ def _api_search(slug: str, debug: bool = False) -> dict:
         _update_info(card_data, debug)
         _update_sets(card_data, debug)
         _update_slug(slug, card_data, debug)
+        _update_thema(card_data, debug)
 
         return card_data
 
@@ -145,6 +147,8 @@ def _update_edition(card_data: dict, debug: bool = False) -> None:
 
 def _update_info(card_data: dict, debug: bool = False) -> None:
     card_id = card_data["editions"][0]["card_id"]
+    effect = card_data.get("effect")
+    effect_raw = card_data.get("effect_raw")
 
     info_file = new_json(JSON_INFO)
 
@@ -157,32 +161,43 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         if debug:
             print(f"Added new card_id: {card_id}")
 
+    info_data[card_id]["effect"] = effect
+    info_data[card_id]["effect_raw"] = effect_raw
+
+    if "editions" not in info_data[card_id]:
+        info_data[card_id]["editions"] = {}
+
     edition_count = 0
     foil_count = 0
     variant_count = 0
 
     for edition in card_data["editions"]:
         edition_id = edition["uuid"]
+
         rarity = edition["rarity"]
 
         set_name = edition["set"]["name"]
         set_prefix = edition["set"]["prefix"]
 
-        if edition_id not in info_data[card_id]:
-            info_data[card_id][edition_id] = {}
+        illustrator = edition["illustrator"]
 
-        # Legacy migration
-        if "foil_ids" in info_data[card_id][edition_id]:
-            info_data[card_id][edition_id]["foils"] = (
-                info_data[card_id][edition_id].pop("foil_ids")
+        editions = info_data[card_id]["editions"]
+
+        if edition_id not in editions:
+            editions[edition_id] = {}
+
+        if "foil_ids" in editions[edition_id]:
+            editions[edition_id]["foils"] = (
+                editions[edition_id].pop("foil_ids")
             )
 
-        info_data[card_id][edition_id]["rarity"] = rarity
-        info_data[card_id][edition_id]["set_name"] = set_name
-        info_data[card_id][edition_id]["set_prefix"] = set_prefix
+        editions[edition_id]["rarity"] = rarity
+        editions[edition_id]["set_name"] = set_name
+        editions[edition_id]["set_prefix"] = set_prefix
+        editions[edition_id]["illustrator"] = illustrator
 
-        if "foils" not in info_data[card_id][edition_id]:
-            info_data[card_id][edition_id]["foils"] = {}
+        if "foils" not in editions[edition_id]:
+            editions[edition_id]["foils"] = {}
 
         edition_count += 1
 
@@ -194,8 +209,10 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         for foil in foil_entries:
             foil_id = foil["uuid"]
 
-            info_data[card_id][edition_id]["foils"][foil_id] = {
+            editions[edition_id]["foils"][foil_id] = {
                 "kind": foil["kind"],
+                "population": foil.get("population"),
+                "printing": foil.get("printing"),
                 "variants": {}
             }
 
@@ -209,8 +226,10 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
                     variant["kind"]
                 )
 
-                info_data[card_id][edition_id]["foils"][foil_id]["variants"][variant_id] = {
-                    "kind": variant_kind
+                editions[edition_id]["foils"][foil_id]["variants"][variant_id] = {
+                    "kind": variant_kind,
+                    "population": variant.get("population"),
+                    "printing": variant.get("printing")
                 }
 
                 variant_count += 1
@@ -220,7 +239,8 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
                 f"Processed edition: "
                 f"{edition_id} "
                 f"(rarity={rarity}, "
-                f"set={set_prefix})"
+                f"set={set_prefix}, "
+                f"illustrator='{illustrator}')"
             )
 
     with info_file.open("w", encoding="utf-8") as f:
@@ -315,6 +335,65 @@ def _update_slug(slug: str, card_data: dict, debug: bool = False) -> None:
             f"slug='{slug}' | "
             f"name='{card_name}' | "
             f"card_id={card_id}"
+        )
+
+
+def _update_thema(card_data: dict, debug: bool = False) -> None:
+    thema_file = new_json(JSON_THEMA)
+
+    with thema_file.open("r", encoding="utf-8") as f:
+        thema_data = json.load(f)
+
+    edition_count = 0
+
+    for edition in card_data["editions"]:
+        edition_id = edition["uuid"]
+        edition_thema = {}
+
+        for foil_type in ["foil", "nonfoil"]:
+            scores = {}
+
+            for key, value in edition.items():
+                if not key.startswith("thema_"):
+                    continue
+
+                if key in {
+                    "thema_foil",
+                    "thema_nonfoil",
+                    "thema_foil_dynamic",
+                    "thema_nonfoil_dynamic"
+                }:
+                    continue
+
+                if not key.endswith(f"_{foil_type}"):
+                    continue
+
+                if value is None:
+                    continue
+
+                category = key.replace("thema_", "").replace(f"_{foil_type}", "")
+
+                scores[category] = value
+
+            if scores:
+                scores["dynamic"] = edition.get(
+                    f"thema_{foil_type}_dynamic",
+                    False
+                )
+
+                edition_thema[foil_type] = scores
+
+        if edition_thema:
+            thema_data[edition_id] = edition_thema
+            edition_count += 1
+
+    with thema_file.open("w", encoding="utf-8") as f:
+        json.dump(thema_data, f, indent=4)
+
+    if debug:
+        print(
+            f"Updated THEMA.json | "
+            f"editions={edition_count}"
         )
 
 
