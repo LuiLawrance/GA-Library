@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from pricing_ga import _sync_info
 from tqdm import tqdm
 from util_file import new_dir, new_json
 
@@ -51,6 +52,8 @@ def _api_search(slug: str, debug: bool = False) -> dict:
         _update_slug(slug, card_data, debug)
         _update_thema(card_data, debug)
         _update_update(card_data, debug)
+
+        _sync_info(card_data, debug)
 
         return card_data
 
@@ -764,6 +767,8 @@ def set_search(
                 _update_slug(slug, card_data, debug)
                 _update_thema(card_data, debug)
                 _update_update(card_data, debug)
+
+                _sync_info(card_data, debug)
 
                 results[card_name] = card_data
 

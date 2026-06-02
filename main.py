@@ -11,8 +11,7 @@ def main() -> None:
     match choice:
         case "1":
             card_names = input(
-                "\nEnter card name(s) "
-                "(comma separated): "
+                "\nEnter card name(s) (comma separated): "
             )
 
             card_names = [
@@ -24,9 +23,7 @@ def main() -> None:
             card_search(card_names, False)
 
         case "2":
-            set_prefix = input(
-                "\nEnter set prefix: "
-            ).strip().upper()
+            set_prefix = input("\nEnter set prefix: ").strip().upper()
 
             set_search(set_prefix, False)
 
