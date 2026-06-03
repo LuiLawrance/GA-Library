@@ -66,22 +66,12 @@ def main() -> None:
                 set_search(set_prefix, False)
 
             case "3":
-                edition_id = input("\nEnter edition ID: ").strip()
-                foil_id = input("Enter foil ID: ").strip()
-                marketplace = input("Enter marketplace: ").strip()
-                price = float(input("Enter price: ").strip())
-                info = input("Enter info: ").strip()
-
-                add_listing(edition_id, foil_id, marketplace, price, info)
+                card_name = input("\nEnter card name: ").strip()
+                add_listing(card_name)
 
             case "4":
-                edition_id = input("\nEnter edition ID: ").strip()
-                foil_id = input("Enter foil ID: ").strip()
-                marketplace = input("Enter marketplace: ").strip()
-                price = float(input("Enter price: ").strip())
-                info = input("Enter info: ").strip()
-
-                add_sale(edition_id, foil_id, marketplace, price, info)
+                card_name = input("\nEnter card name: ").strip()
+                add_sale(card_name)
 
             case "5":
                 username = input("\nEnter username: ").strip()
