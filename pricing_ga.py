@@ -23,7 +23,7 @@ def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, 
         "info": info,
     }
 
-    card_id = _append_entry(JSON_LISTINGS, edition_id, foil_id, entry, debug)
+    card_id = _append_entry(JSON_LISTINGS, edition_id, foil_id, entry)
 
     if debug:
         print(
@@ -45,7 +45,7 @@ def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, inf
         "info": info,
     }
 
-    card_id = _append_entry(JSON_SALES, edition_id, foil_id, entry, debug)
+    card_id = _append_entry(JSON_SALES, edition_id, foil_id, entry)
 
     if debug:
         print(
