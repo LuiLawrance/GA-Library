@@ -695,10 +695,7 @@ def card_search(card_names: list[str], debug: bool = False) -> dict[str, dict]:
     return results
 
 
-def set_search(
-        set_prefix: str,
-        debug: bool = False
-) -> dict:
+def set_search(set_prefix: str, debug: bool = False) -> dict:
     results = {}
 
     page = 1

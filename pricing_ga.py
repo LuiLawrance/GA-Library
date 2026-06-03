@@ -11,74 +11,6 @@ JSON_LISTINGS = "DATA_GA/PRICING_GA/LISTINGS.json"
 JSON_SALES = "DATA_GA/PRICING_GA/SALES.json"
 
 
-def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, debug: bool = False) -> None:
-    editions_file = new_json(JSON_EDITIONS)
-    listings_file = new_json(JSON_LISTINGS)
-
-    with editions_file.open("r", encoding="utf-8") as f:
-        editions_data = json.load(f)
-
-    card_id = editions_data[edition_id]["card_id"]
-
-    with listings_file.open("r", encoding="utf-8") as f:
-        listings_data = json.load(f)
-
-    entry = {
-        "date": date.today().isoformat(),
-        "marketplace": marketplace,
-        "price": price,
-    }
-
-    listings_data[card_id][edition_id][foil_id].append(entry)
-
-    with listings_file.open("w", encoding="utf-8") as f:
-        json.dump(listings_data, f, indent=4, ensure_ascii=False)
-
-    if debug:
-        print(
-            f"Added listing | "
-            f"card_id={card_id} | "
-            f"edition_id={edition_id} | "
-            f"foil_id={foil_id} | "
-            f"marketplace={marketplace} | "
-            f"price={price}"
-        )
-
-
-def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, debug: bool = False) -> None:
-    editions_file = new_json(JSON_EDITIONS)
-    sales_file = new_json(JSON_SALES)
-
-    with editions_file.open("r", encoding="utf-8") as f:
-        editions_data = json.load(f)
-
-    card_id = editions_data[edition_id]["card_id"]
-
-    with sales_file.open("r", encoding="utf-8") as f:
-        sales_data = json.load(f)
-
-    entry = {
-        "date": date.today().isoformat(),
-        "marketplace": marketplace,
-        "price": price,
-    }
-
-    sales_data[card_id][edition_id][foil_id].append(entry)
-
-    with sales_file.open("w", encoding="utf-8") as f:
-        json.dump(sales_data, f, indent=4, ensure_ascii=False)
-
-    if debug:
-        print(
-            f"Added sale | "
-            f"card_id={card_id} | "
-            f"edition_id={edition_id} | "
-            f"foil_id={foil_id} | "
-            f"marketplace={marketplace} | "
-            f"price={price}"
-        )
-
-
 def _sync_info(card_data: dict, debug: bool = False) -> None:
     info_file = new_json(JSON_INFO)
     listings_file = new_json(JSON_LISTINGS)
@@ -133,4 +65,76 @@ def _sync_info(card_data: dict, debug: bool = False) -> None:
             f"card_id={card_id} | "
             f"editions={added_editions} | "
             f"foils={added_foils}"
+        )
+
+
+def add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, info: str, debug: bool = False) -> None:
+    editions_file = new_json(JSON_EDITIONS)
+    listings_file = new_json(JSON_LISTINGS)
+
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with listings_file.open("r", encoding="utf-8") as f:
+        listings_data = json.load(f)
+
+    entry = {
+        "date": date.today().isoformat(),
+        "marketplace": marketplace,
+        "price": price,
+        "info": info,
+    }
+
+    listings_data[card_id][edition_id][foil_id].append(entry)
+
+    with listings_file.open("w", encoding="utf-8") as f:
+        json.dump(listings_data, f, indent=4, ensure_ascii=False)
+
+    if debug:
+        print(
+            f"Added listing | "
+            f"card_id={card_id} | "
+            f"edition_id={edition_id} | "
+            f"foil_id={foil_id} | "
+            f"marketplace={marketplace} | "
+            f"price={price} | "
+            f"info={info}"
+        )
+
+
+def add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, info: str, debug: bool = False) -> None:
+    editions_file = new_json(JSON_EDITIONS)
+    sales_file = new_json(JSON_SALES)
+
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with sales_file.open("r", encoding="utf-8") as f:
+        sales_data = json.load(f)
+
+    entry = {
+        "date": date.today().isoformat(),
+        "marketplace": marketplace,
+        "price": price,
+        "info": info,
+    }
+
+    sales_data[card_id][edition_id][foil_id].append(entry)
+
+    with sales_file.open("w", encoding="utf-8") as f:
+        json.dump(sales_data, f, indent=4, ensure_ascii=False)
+
+    if debug:
+        print(
+            f"Added sale | "
+            f"card_id={card_id} | "
+            f"edition_id={edition_id} | "
+            f"foil_id={foil_id} | "
+            f"marketplace={marketplace} | "
+            f"price={price} | "
+            f"info={info}"
         )
