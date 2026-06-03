@@ -57,7 +57,7 @@ def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, inf
         )
 
 
-def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict, debug: bool = False) -> str:
+def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict) -> str:
     editions_file = new_json(JSON_EDITIONS)
     target_file = new_json(file_path)
 
@@ -124,7 +124,7 @@ def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
         "info": info,
     }
 
-    card_id = _append_entry(file_path, edition_id, foil_id, entry, debug)
+    card_id = _append_entry(file_path, edition_id, foil_id, entry)
 
     if debug:
         print(
@@ -174,9 +174,12 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     rarity_width = max(len(o[3]) for o in options)
     foil_width = max(len(o[4]) for o in options)
 
+    total = len(options)
+    index_width = len(str(total))
+
     for i, (_, _, set_prefix, rarity, foil_kind) in enumerate(options, 1):
         print(
-            f"{i}. "
+            f"{str(i).rjust(index_width)}. "
             f"{set_prefix:<{prefix_width}} | "
             f"{rarity:<{rarity_width}} | "
             f"{foil_kind:<{foil_width}}"
