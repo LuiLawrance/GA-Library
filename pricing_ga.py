@@ -5,6 +5,8 @@ import json
 
 API_TCG = "https://www.tcgplayer.com/search/grand-archive/product?productLineName=grand-archive&q="
 
+DIR_SETS = "DATA_GA/SETS_GA"
+
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"  # Mirrors JSON_EDITIONS from api_ga.py — update both if path changes
 JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"  # Mirrors JSON_INFO path from api_ga.py — update both if path changes
 JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"
@@ -77,7 +79,7 @@ def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict) ->
     return card_id
 
 
-def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, str]]:
+def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, str, str, str, str]]:
     options = []
 
     rarity_map = {
@@ -96,15 +98,26 @@ def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, s
         set_prefix = edition_info["set_prefix"]
         rarity = rarity_map.get(edition_info["rarity"], "?")
 
+        set_file_name = set_prefix.lower().replace(" ", "_")
+        set_file = new_json(f"{DIR_SETS}/{set_file_name}.json")
+
+        with set_file.open("r", encoding="utf-8") as f:
+            set_data = json.load(f)
+
+        collector_number = next(
+            (num for num, eid in set_data.items() if eid == edition_id),
+            "?"
+        )
+
         for foil_id, foil_info in edition_info["foils"].items():
             variant_population = sum(v["population"] for v in foil_info["variants"].values())
             remaining_population = foil_info["population"] - variant_population
 
             if remaining_population > 0:
-                options.append((edition_id, foil_id, set_prefix, rarity, foil_info["kind"].title()))
+                options.append((edition_id, foil_id, set_prefix, rarity, foil_info["kind"].title(), collector_number))
 
             for variant_id, variant_info in foil_info["variants"].items():
-                options.append((edition_id, variant_id, set_prefix, rarity, variant_info["kind"]))
+                options.append((edition_id, variant_id, set_prefix, rarity, variant_info["kind"], collector_number))
 
     return options
 
@@ -119,7 +132,8 @@ def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
 
     marketplace = input("Enter marketplace: ").strip()
     price = float(input("Enter price: ").strip())
-    quantity = int(input("Enter quantity: ").strip())
+    quantity_input = input("Enter quantity: ").strip()
+    quantity = int(quantity_input) if quantity_input else 1
     info = input("Enter info: ").strip()
 
     entry = {
@@ -179,14 +193,16 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     prefix_width = max(len(o[2]) for o in options)
     rarity_width = max(len(o[3]) for o in options)
     foil_width = max(len(o[4]) for o in options)
+    number_width = max(len(o[5]) for o in options)
 
     total = len(options)
     index_width = len(str(total))
 
-    for i, (_, _, set_prefix, rarity, foil_kind) in enumerate(options, 1):
+    for i, (_, _, set_prefix, rarity, foil_kind, collector_number) in enumerate(options, 1):
         print(
             f"{str(i).rjust(index_width)}. "
             f"{set_prefix:<{prefix_width}} | "
+            f"{collector_number:>{number_width}} | "
             f"{rarity:<{rarity_width}} | "
             f"{foil_kind:<{foil_width}}"
         )
@@ -197,7 +213,7 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
         print("\nInvalid option.")
         return None
 
-    edition_id, foil_id, _, _, _ = options[int(choice) - 1]
+    edition_id, foil_id, _, _, _, _ = options[int(choice) - 1]
 
     return edition_id, foil_id
 
