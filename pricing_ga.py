@@ -97,7 +97,11 @@ def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, s
         rarity = rarity_map.get(edition_info["rarity"], "?")
 
         for foil_id, foil_info in edition_info["foils"].items():
-            options.append((edition_id, foil_id, set_prefix, rarity, foil_info["kind"].title()))
+            variant_population = sum(v["population"] for v in foil_info["variants"].values())
+            remaining_population = foil_info["population"] - variant_population
+
+            if remaining_population > 0:
+                options.append((edition_id, foil_id, set_prefix, rarity, foil_info["kind"].title()))
 
             for variant_id, variant_info in foil_info["variants"].items():
                 options.append((edition_id, variant_id, set_prefix, rarity, variant_info["kind"]))
@@ -227,10 +231,14 @@ def _sync_info(card_data: dict, debug: bool = False) -> None:
                 added_editions += 1
 
         for foil_id, foil_info in edition_info.get("foils", {}).items():
-            for data in (listings_data, sales_data):
-                if foil_id not in data[card_id][edition_id]:
-                    data[card_id][edition_id][foil_id] = []
-                    added_foils += 1
+            variant_population = sum(v["population"] for v in foil_info.get("variants", {}).values())
+            remaining_population = foil_info["population"] - variant_population
+
+            if remaining_population > 0:
+                for data in (listings_data, sales_data):
+                    if foil_id not in data[card_id][edition_id]:
+                        data[card_id][edition_id][foil_id] = []
+                        added_foils += 1
 
             for variant_id in foil_info.get("variants", {}):
                 for data in (listings_data, sales_data):
