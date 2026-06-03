@@ -1,55 +1,110 @@
 from api_ga import card_search, set_search
 from pricing_ga import add_listing, add_sale
+from user import user_create, user_delete, user_login, user_reset
 
 
 def main() -> None:
-    print("\nGA Library")
-    print("1. Search Card")
-    print("2. Search Set")
-    print("3. Add Listing")
-    print("4. Add Sale")
+    current_user = None
 
-    choice = input("\nSelect option: ").strip()
+    while True:
+        print("\nGA Library")
 
-    match choice:
-        case "1":
-            card_names = input(
-                "\nEnter card name(s) (comma separated): "
-            )
+        if current_user:
+            print(f"Logged in as: {current_user}")
+            print("0. Log Out")
 
-            card_names = [
-                card_name.strip()
-                for card_name in card_names.split(",")
-                if card_name.strip()
-            ]
+            choice = input("\nSelect option: ").strip()
 
-            card_search(card_names, False)
+            if choice == "0":
+                print(f"\nLogged out: {current_user}")
+                current_user = None
 
-        case "2":
-            set_prefix = input("\nEnter set prefix: ").strip().upper()
+            continue
 
-            set_search(set_prefix, False)
+        print("0. Exit")
+        print("1. Search Card")
+        print("2. Search Set")
+        print("3. Add Listing")
+        print("4. Add Sale")
+        print("5. Create User")
+        print("6. Reset User Password")
+        print("7. Delete User")
 
-        case "3":
-            edition_id = input("\nEnter edition ID: ").strip()
-            foil_id = input("Enter foil ID: ").strip()
-            marketplace = input("Enter marketplace: ").strip()
-            price = float(input("Enter price: ").strip())
-            info = input("Enter info: ").strip()
+        choice = input("\nSelect option: ").strip()
 
-            add_listing(edition_id, foil_id, marketplace, price, info)
+        if choice == "0":
+            print("\nGoodbye.")
+            break
 
-        case "4":
-            edition_id = input("\nEnter edition ID: ").strip()
-            foil_id = input("Enter foil ID: ").strip()
-            marketplace = input("Enter marketplace: ").strip()
-            price = float(input("Enter price: ").strip())
-            info = input("Enter info: ").strip()
+        if choice not in {"1", "2", "3", "4", "5", "6", "7"}:
+            username = choice
+            password = input("Enter password: ").strip()
+            current_user = user_login(username, password)
 
-            add_sale(edition_id, foil_id, marketplace, price, info)
+            if not current_user:
+                print("\nLogin failed.")
 
-        case _:
-            print("\nInvalid option.")
+            continue
+
+        match choice:
+            case "1":
+                card_names = input(
+                    "\nEnter card name(s) (comma separated): "
+                )
+
+                card_names = [
+                    card_name.strip()
+                    for card_name in card_names.split(",")
+                    if card_name.strip()
+                ]
+
+                card_search(card_names, False)
+
+            case "2":
+                set_prefix = input("\nEnter set prefix: ").strip().upper()
+
+                set_search(set_prefix, False)
+
+            case "3":
+                edition_id = input("\nEnter edition ID: ").strip()
+                foil_id = input("Enter foil ID: ").strip()
+                marketplace = input("Enter marketplace: ").strip()
+                price = float(input("Enter price: ").strip())
+                info = input("Enter info: ").strip()
+
+                add_listing(edition_id, foil_id, marketplace, price, info)
+
+            case "4":
+                edition_id = input("\nEnter edition ID: ").strip()
+                foil_id = input("Enter foil ID: ").strip()
+                marketplace = input("Enter marketplace: ").strip()
+                price = float(input("Enter price: ").strip())
+                info = input("Enter info: ").strip()
+
+                add_sale(edition_id, foil_id, marketplace, price, info)
+
+            case "5":
+                username = input("\nEnter username: ").strip()
+                password = input("Enter password: ").strip()
+
+                user_create(username, password)
+
+            case "6":
+                username = input("\nEnter username: ").strip()
+                password = input("Enter new password: ").strip()
+
+                user_reset(username, password)
+
+            case "7":
+                username = input("\nEnter username: ").strip()
+
+                user_delete(username)
+
+            case _:
+                print("\nInvalid option.")
+                continue
+
+        break
 
 
 if __name__ == "__main__":
