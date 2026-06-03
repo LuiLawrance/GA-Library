@@ -119,12 +119,14 @@ def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
 
     marketplace = input("Enter marketplace: ").strip()
     price = float(input("Enter price: ").strip())
+    quantity = int(input("Enter quantity: ").strip())
     info = input("Enter info: ").strip()
 
     entry = {
         "date": date.today().isoformat(),
         "marketplace": marketplace,
         "price": price,
+        "quantity": quantity,
         "info": info,
     }
 
