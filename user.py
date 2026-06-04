@@ -24,6 +24,7 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
     users_data[username] = {
+        "auth_type": "local",
         "password": hashed.decode("utf-8"),
         "notes": []
     }

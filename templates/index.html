@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GA Library</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+
+    <!-- Top bar -->
+    <div class="topbar">
+        <a href="/" class="topbar-brand" data-link>GA Library</a>
+        <div class="topbar-right">
+            <span id="topbar-user" class="topbar-user hidden"></span>
+            <a id="topbar-login-btn" class="btn-login" data-link href="/login">Login</a>
+            <button id="topbar-logout-btn" class="btn-login hidden" onclick="handleLogout()">Logout</button>
+        </div>
+    </div>
+
+    <!-- Navbar -->
+    <nav class="navbar">
+        <a href="/" data-link>Home</a>
+        <a href="/cards" data-link>Cards</a>
+        <a href="/collection" data-link>Collection</a>
+        <a href="/decks" data-link>Decks</a>
+        <a href="/prices" data-link>Prices</a>
+    </nav>
+
+    <!-- Content area -->
+    <main id="content" class="content"></main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        A Lawrance Lui project
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+
+</body>
+</html>
