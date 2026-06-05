@@ -5,6 +5,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
+from rapidfuzz import process, fuzz
 from user import user_create, user_login
 from util_file import new_json
 
@@ -92,24 +93,59 @@ async def api_cards_search(q: str):
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
 
+    query = q.strip().lower()
+    cards = []
+
+    # ── Step 1: Substring match ──
+    substring_matches = {
+        slug: data for slug, data in slug_data.items()
+        if query in data["name"].lower()
+    }
+
+    if substring_matches:
+        for slug, data in substring_matches.items():
+            card_id = data["card_id"]
+            card_info = info_data.get(card_id, {})
+            for edition_id in card_info.get("editions", {}):
+                cards.append({
+                    "edition_id": edition_id,
+                    "name": data["name"],
+                })
+        return JSONResponse({"cards": cards, "message": None})
+
+    # ── Step 2: Fuzzy match ──
+    name_to_slug = {data["name"]: slug for slug, data in slug_data.items()}
+    names = list(name_to_slug.keys())
+
+    fuzzy_matches = process.extract(q, names, scorer=fuzz.WRatio, score_cutoff=80)
+
+    if fuzzy_matches:
+        for name, score, _ in fuzzy_matches:
+            slug = name_to_slug[name]
+            card_id = slug_data[slug]["card_id"]
+            card_info = info_data.get(card_id, {})
+            for edition_id in card_info.get("editions", {}):
+                cards.append({
+                    "edition_id": edition_id,
+                    "name": name,
+                })
+        return JSONResponse({"cards": cards, "message": None})
+
+    # ── Step 3: API call ──
+    card_data = _api_search(_format_search(q))
+
+    if not card_data:
+        return JSONResponse({"cards": [], "message": f"No card found for '{q}'."})
+
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
     slug = _format_search(q)
-
-    if slug not in slug_data:
-        card_data = _api_search(slug)
-
-        if not card_data:
-            return JSONResponse({"cards": [], "message": f"No card found for '{q}'."})
-
-        with slug_file.open("r", encoding="utf-8") as f:
-            slug_data = json.load(f)
-
-        with info_file.open("r", encoding="utf-8") as f:
-            info_data = json.load(f)
-
     card_id = slug_data[slug]["card_id"]
     card_info = info_data.get(card_id, {})
-
-    cards = []
 
     for edition_id in card_info.get("editions", {}):
         cards.append({
