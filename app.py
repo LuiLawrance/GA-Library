@@ -156,6 +156,26 @@ async def api_cards_search(q: str):
     return JSONResponse({"cards": cards, "message": None})
 
 
+@app.get("/api/cards/suggest")
+async def api_cards_suggest(q: str):
+    slug_file = new_json(JSON_SLUGS)
+
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
+    query = q.strip().lower()
+
+    if len(query) < 2:
+        return JSONResponse({"suggestions": []})
+
+    suggestions = sorted(
+        {data["name"] for slug, data in slug_data.items()
+         if query in data["name"].lower()},
+    )
+
+    return JSONResponse({"suggestions": suggestions[:10]})
+
+
 @app.get("/api/me")
 async def api_me(request: Request):
     user = get_current_user(request)
