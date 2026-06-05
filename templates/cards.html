@@ -1,4 +1,8 @@
-<div class="hero">
-    <span class="hero-label">Cards</span>
-    <p class="hero-sub">Coming soon.</p>
+<div class="page-header cards-header">
+    <div class="search-wrap">
+        <input type="text" id="card-search" placeholder="Search cards..." autocomplete="off" onkeydown="if(event.key==='Enter') searchCards()">
+        <button class="btn-search" onclick="searchCards()">Search</button>
+    </div>
 </div>
+
+<div id="card-results" class="card-grid"></div>

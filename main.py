@@ -77,7 +77,10 @@ def main() -> None:
                 username = input("\nEnter username: ").strip()
                 password = input("Enter password: ").strip()
 
-                user_create(username, password)
+                try:
+                    user_create(username, password)
+                except ValueError as e:
+                    print(f"\n{e}")
 
             case "6":
                 username = input("\nEnter username: ").strip()

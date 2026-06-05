@@ -133,188 +133,21 @@ body {
     transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-/* ── Hero (home page) ── */
-.hero {
-    flex: 1;
+/* ── Page header ── */
+.page-header {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 80px 32px;
-    text-align: center;
-    gap: 16px;
+    justify-content: space-between;
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
 }
 
-.hero-label {
+.page-label {
     font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
+    font-size: 0.78rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--accent);
-}
-
-.hero-title {
-    font-size: 3rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
-    color: var(--text);
-}
-
-.hero-sub {
-    font-size: 1rem;
-    font-weight: 300;
-    color: var(--text-muted);
-    max-width: 480px;
-    line-height: 1.6;
-}
-
-.hero-divider {
-    width: 40px;
-    height: 1px;
-    background: var(--accent);
-    margin: 8px auto;
-    opacity: 0.6;
-}
-
-/* ── Login ── */
-.login-wrap {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 32px;
-}
-
-.login-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 40px;
-    width: 100%;
-    max-width: 400px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
-.login-header {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.login-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
-}
-
-.login-title {
-    font-size: 1.5rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-}
-
-.form-fields {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.form-switch {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-size: 0.82rem;
-    color: var(--text-muted);
-}
-
-.btn-switch {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.82rem;
-    color: var(--accent);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-    transition: opacity 0.2s;
-}
-
-.btn-switch:hover {
-    opacity: 0.75;
-}
-
-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
-
-input {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.9rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    outline: none;
-    transition: border-color 0.2s;
-    width: 100%;
-}
-
-input:focus {
-    border-color: var(--border-focus);
-}
-
-input::placeholder {
-    color: var(--text-muted);
-    opacity: 0.5;
-}
-
-.error-msg {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.75rem;
-    color: var(--error);
-    background: rgba(200, 110, 110, 0.08);
-    border: 1px solid rgba(200, 110, 110, 0.2);
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    display: none;
-}
-
-.error-msg.visible {
-    display: block;
-}
-
-.btn-submit {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--bg);
-    background: var(--accent);
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 11px 20px;
-    cursor: pointer;
-    transition: background 0.2s;
-    width: 100%;
-}
-
-.btn-submit:hover {
-    background: var(--accent-dim);
 }
 
 /* ── Utility ── */

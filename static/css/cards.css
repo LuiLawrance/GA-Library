@@ -1,0 +1,89 @@
+.cards-header {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+    padding-top: 16px;
+    padding-right: 32px;
+    border-bottom: none;
+}
+
+.search-wrap {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.search-wrap input {
+    width: 260px;
+}
+
+.btn-search {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--bg);
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+}
+
+.btn-search:hover {
+    background: var(--accent-dim);
+}
+
+.cards-header {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+    padding-top: 16px;
+    padding-right: 32px;
+}
+
+.card-grid {
+    padding: 32px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 24px;
+}
+
+.card-tile {
+    opacity: 0;
+    transform: translateY(10px);
+    animation: cardReveal 0.3s ease forwards;
+}
+
+@keyframes cardReveal {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card-tile img {
+    width: 100%;
+    border-radius: 12px;
+    display: block;
+    transition: transform 0.2s;
+}
+
+.card-tile img:hover {
+    transform: scale(1.03);
+}
+
+.card-tile-missing {
+    width: 100%;
+    aspect-ratio: 3/4;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}

@@ -18,8 +18,7 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
         users_data = json.load(f)
 
     if username in users_data:
-        print(f"User already exists: {username}")
-        return
+        raise ValueError(f"Username already taken: {username}")
 
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 

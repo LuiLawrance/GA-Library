@@ -1,11 +1,14 @@
+from api_ga import _api_search, _format_search, JSON_INFO, JSON_SLUGS
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from user import user_create, user_login
+from util_file import new_json
 
+import json
 import os
 
 load_dotenv()
@@ -53,21 +56,6 @@ async def main_menu():
     return serve_index()
 
 
-@app.post("/api/register")
-async def api_register(response: Response, username: str = Form(...), password: str = Form(...)):
-    try:
-        user_create(username, password)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    return await api_login(response, username=username, password=password)
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return serve_index()
-
-
 @app.get("/cards", response_class=HTMLResponse)
 async def cards_page():
     return serve_index()
@@ -83,45 +71,53 @@ async def decks_page():
     return serve_index()
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    return serve_index()
+
+
 @app.get("/prices", response_class=HTMLResponse)
 async def prices_page():
     return serve_index()
 
 
-@app.get("/fragments/home", response_class=HTMLResponse)
-async def fragment_home():
-    with open("templates/home.html") as f:
-        return HTMLResponse(f.read())
+@app.get("/api/cards/search")
+async def api_cards_search(q: str):
+    slug_file = new_json(JSON_SLUGS)
+    info_file = new_json(JSON_INFO)
 
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
 
-@app.get("/fragments/login", response_class=HTMLResponse)
-async def fragment_login():
-    with open("templates/login.html") as f:
-        return HTMLResponse(f.read())
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
 
+    slug = _format_search(q)
 
-@app.get("/fragments/cards", response_class=HTMLResponse)
-async def fragment_cards():
-    with open("templates/cards.html") as f:
-        return HTMLResponse(f.read())
+    if slug not in slug_data:
+        card_data = _api_search(slug)
 
+        if not card_data:
+            return JSONResponse({"cards": [], "message": f"No card found for '{q}'."})
 
-@app.get("/fragments/collection", response_class=HTMLResponse)
-async def fragment_collection():
-    with open("templates/collection.html") as f:
-        return HTMLResponse(f.read())
+        with slug_file.open("r", encoding="utf-8") as f:
+            slug_data = json.load(f)
 
+        with info_file.open("r", encoding="utf-8") as f:
+            info_data = json.load(f)
 
-@app.get("/fragments/decks", response_class=HTMLResponse)
-async def fragment_decks():
-    with open("templates/decks.html") as f:
-        return HTMLResponse(f.read())
+    card_id = slug_data[slug]["card_id"]
+    card_info = info_data.get(card_id, {})
 
+    cards = []
 
-@app.get("/fragments/prices", response_class=HTMLResponse)
-async def fragment_prices():
-    with open("templates/prices.html") as f:
-        return HTMLResponse(f.read())
+    for edition_id in card_info.get("editions", {}):
+        cards.append({
+            "edition_id": edition_id,
+            "name": slug_data[slug]["name"],
+        })
+
+    return JSONResponse({"cards": cards, "message": None})
 
 
 @app.get("/api/me")
@@ -157,3 +153,59 @@ async def api_login(response: Response, username: str = Form(...), password: str
 async def api_logout(response: Response):
     response.delete_cookie("token")
     return JSONResponse({"message": "Logged out"})
+
+
+@app.post("/api/register")
+async def api_register(response: Response, username: str = Form(...), password: str = Form(...)):
+    try:
+        user_create(username, password)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return await api_login(response, username=username, password=password)
+
+
+@app.get("/images/{edition_id}.jpg")
+async def get_image(edition_id: str):
+    path = f"DATA_GA/IMAGES_GA/{edition_id}.jpg"
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return FileResponse(path)
+
+
+@app.get("/fragments/cards", response_class=HTMLResponse)
+async def fragment_cards():
+    with open("templates/cards.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/collection", response_class=HTMLResponse)
+async def fragment_collection():
+    with open("templates/collection.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/decks", response_class=HTMLResponse)
+async def fragment_decks():
+    with open("templates/decks.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/home", response_class=HTMLResponse)
+async def fragment_home():
+    with open("templates/home.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/login", response_class=HTMLResponse)
+async def fragment_login():
+    with open("templates/login.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/prices", response_class=HTMLResponse)
+async def fragment_prices():
+    with open("templates/prices.html") as f:
+        return HTMLResponse(f.read())
