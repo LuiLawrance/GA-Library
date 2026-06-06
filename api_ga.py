@@ -370,6 +370,7 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
     info_data[card_id]["effect"] = effect
     info_data[card_id]["effect_html"] = effect_html
     info_data[card_id]["effect_raw"] = effect_raw
+    info_data[card_id]["element"] = card_data.get("element")
     info_data[card_id]["legality"] = legality
     info_data[card_id]["stats"] = stats
     info_data[card_id]["types"] = combined_types

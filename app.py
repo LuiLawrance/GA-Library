@@ -20,6 +20,7 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 480))
 
 app = FastAPI()
+app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 

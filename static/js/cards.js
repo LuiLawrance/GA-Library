@@ -201,8 +201,13 @@ async function openCardDrawer(cardId, editionId, cardName) {
                 <img class="drawer-card-image" src="/images/${editionId}.jpg" alt="${cardId}">
                 <div class="drawer-card-info">
                     <div>
-                        <div class="drawer-name">${cardName}</div>
-                        <div class="drawer-set">${selectedEdition?.set_name || ''} (${selectedEdition?.set_prefix || ''}) &mdash; #${selectedEdition?.collector_number || '?'}</div>
+                        <div class="drawer-name-row">
+                            <div>
+                                <div class="drawer-name">${cardName}</div>
+                                <div class="drawer-set">${selectedEdition?.set_name || ''} (${selectedEdition?.set_prefix || ''}) &mdash; #${selectedEdition?.collector_number || '?'}</div>
+                            </div>
+                            ${card.element ? `<img class="drawer-element" src="/elements/${card.element}.png" alt="${card.element}">` : ''}
+                        </div>
                     </div>
 
                     <div>

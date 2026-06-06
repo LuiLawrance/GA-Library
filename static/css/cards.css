@@ -241,6 +241,19 @@
     gap: 16px;
 }
 
+.drawer-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+}
+
+.drawer-name-row > div {
+    flex: 1;
+    min-width: 0;
+}
+
 .drawer-name {
     font-size: 1.2rem;
     font-weight: 600;
@@ -252,6 +265,14 @@
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-top: 4px;
+}
+
+.drawer-element {
+    width: 48px;
+    height: auto;
+    object-fit: contain;
+    flex-shrink: 0;
+    margin-left: auto;
 }
 
 .drawer-section-label {
@@ -315,19 +336,19 @@
     line-height: 1.6;
 }
 
+.effect-tag {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+}
+
 .effect-number {
     font-weight: 600;
     color: var(--bg);
     background: var(--accent);
     border-radius: 4px;
     padding: 1px 5px;
-}
-
-.effect-tag {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.75rem;
-    color: var(--accent);
-    letter-spacing: 0.04em;
 }
 
 .drawer-legality {
