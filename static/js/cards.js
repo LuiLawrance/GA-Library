@@ -1,6 +1,18 @@
 let autocompleteIndex = -1;
 let selectedCardId = null;
 
+function parseEffect(text, cardName) {
+    if (!text) return '';
+
+    return text
+        .replace(/CARDNAME/g, `<strong>${cardName}</strong>`)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/\[(.+?)\]/g, '<span class="effect-tag">$1</span>')
+        .replace(/\((\d+)\)/g, '<span class="effect-number">$1</span>')
+        .replace(/\n/g, '<br>');
+}
+
 async function searchCards() {
     const query = document.getElementById('card-search').value.trim();
     const results = document.getElementById('card-results');
@@ -27,7 +39,7 @@ async function searchCards() {
             tile.style.animationDelay = `${i * 60}ms`;
             tile.dataset.cardId = card.card_id;
             tile.innerHTML = `<img src="/images/${card.edition_id}.jpg" alt="${card.name}" onerror="this.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">`;
-            tile.onclick = () => openCardDrawer(card.card_id, card.edition_id);
+            tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
             tile.addEventListener('animationend', () => {
                 tile.classList.add('animated');
             });
@@ -115,12 +127,17 @@ function handleCardKeydown(e) {
     }
 }
 
-async function openCardDrawer(cardId, editionId) {
+async function openCardDrawer(cardId, editionId, cardName) {
     const drawer = document.getElementById('card-drawer');
     const wrap = document.querySelector('.card-grid-wrap');
 
     if (selectedCardId === cardId) {
-        closeCardDrawer();
+        const currentTile = document.querySelector('.drawer-edition-tile img.edition-selected');
+        if (currentTile && currentTile.id === `edition-tile-${editionId}`) {
+            closeCardDrawer();
+            return;
+        }
+        selectDrawerEdition(editionId);
         return;
     }
 
@@ -132,6 +149,7 @@ async function openCardDrawer(cardId, editionId) {
         const card = data.card;
 
         const editions = Object.entries(card.editions);
+        const selectedEdition = card.editions[editionId];
 
         const statsMap = {
             'Cost (Memory)': card.stats?.cost_memory,
@@ -168,10 +186,21 @@ async function openCardDrawer(cardId, editionId) {
             </div>
         `).join('');
 
-        document.getElementById('drawer-content').innerHTML = `
+        const drawerContent = document.getElementById('drawer-content');
+
+        drawer.dataset.editions = JSON.stringify(Object.fromEntries(editions));
+
+        const inner = document.createElement('div');
+        inner.className = 'drawer-content-animate';
+        inner.innerHTML = `
             <div class="drawer-top">
                 <img class="drawer-card-image" src="/images/${editionId}.jpg" alt="${cardId}">
                 <div class="drawer-card-info">
+                    <div>
+                        <div class="drawer-name">${cardName}</div>
+                        <div class="drawer-set">${selectedEdition?.set_name || ''} (${selectedEdition?.set_prefix || ''}) &mdash; #${selectedEdition?.collector_number || '?'}</div>
+                    </div>
+
                     <div>
                         <div class="drawer-section-label">Types</div>
                         <div class="drawer-types">
@@ -188,7 +217,7 @@ async function openCardDrawer(cardId, editionId) {
                     ${card.effect ? `
                     <div>
                         <div class="drawer-section-label">Effect</div>
-                        <div class="drawer-effect">${card.effect}</div>
+                        <div class="drawer-effect">${parseEffect(card.effect, cardName)}</div>
                     </div>` : ''}
 
                     ${legalityHTML ? `
@@ -205,18 +234,16 @@ async function openCardDrawer(cardId, editionId) {
             </div>
         `;
 
+        drawerContent.innerHTML = '';
+        drawerContent.appendChild(inner);
+
         drawer.classList.remove('hidden');
         setTimeout(() => {
             drawer.classList.add('open');
             wrap.classList.add('drawer-open');
-            wrap.style.pointerEvents = 'none';
 
             const initialTile = document.getElementById(`edition-tile-${editionId}`);
             if (initialTile) initialTile.classList.add('edition-selected');
-
-            setTimeout(() => {
-                wrap.style.pointerEvents = '';
-            }, 260);
         }, 10);
 
     } catch {
@@ -230,12 +257,10 @@ function closeCardDrawer() {
 
     drawer.classList.remove('open');
     wrap.classList.remove('drawer-open');
-    wrap.style.pointerEvents = 'none';
     selectedCardId = null;
 
     setTimeout(() => {
         drawer.classList.add('hidden');
-        wrap.style.pointerEvents = '';
     }, 300);
 }
 
@@ -253,6 +278,24 @@ function selectDrawerEdition(editionId) {
         mainImage.src = `/images/${editionId}.jpg`;
         mainImage.classList.remove('switching');
     }, 200);
+
+    const drawer = document.getElementById('card-drawer');
+    const editions = JSON.parse(drawer.dataset.editions || '{}');
+    const edition = editions[editionId];
+
+    if (edition) {
+        const setEl = document.querySelector('.drawer-set');
+        if (setEl) {
+            setEl.textContent = `${edition.set_name} (${edition.set_prefix}) — #${edition.collector_number || '?'}`;
+        }
+    }
+
+    const cardInfo = document.querySelector('.drawer-card-info');
+    if (cardInfo) {
+        cardInfo.classList.remove('drawer-info-animate');
+        void cardInfo.offsetWidth;
+        cardInfo.classList.add('drawer-info-animate');
+    }
 
     document.querySelectorAll('.drawer-edition-tile img').forEach(img => {
         img.classList.remove('edition-selected');

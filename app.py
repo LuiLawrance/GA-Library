@@ -199,6 +199,24 @@ async def api_card_detail(card_id: str):
     if not card_info:
         raise HTTPException(status_code=404, detail="Card not found")
 
+    # Attach collector numbers to each edition
+    for edition_id, edition_info in card_info.get("editions", {}).items():
+        set_prefix = edition_info.get("set_prefix", "")
+        set_file_name = set_prefix.lower().replace(" ", "_")
+        set_path = f"DATA_GA/SETS_GA/{set_file_name}.json"
+
+        collector_number = "?"
+
+        if os.path.exists(set_path):
+            with open(set_path, "r", encoding="utf-8") as f:
+                set_data = json.load(f)
+            collector_number = next(
+                (num for num, eid in set_data.items() if eid == edition_id),
+                "?"
+            )
+
+        edition_info["collector_number"] = collector_number
+
     return JSONResponse({"card_id": card_id, "card": card_info})
 
 
