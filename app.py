@@ -5,12 +5,13 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from rapidfuzz import process, fuzz
+from rapidfuzz import fuzz, process
 from user import user_create, user_login
 from util_file import new_json
 
 import json
 import os
+import random
 
 load_dotenv()
 
@@ -106,11 +107,15 @@ async def api_cards_search(q: str):
         for slug, data in substring_matches.items():
             card_id = data["card_id"]
             card_info = info_data.get(card_id, {})
-            for edition_id in card_info.get("editions", {}):
+            editions = list(card_info.get("editions", {}).keys())
+
+            if editions:
                 cards.append({
-                    "edition_id": edition_id,
+                    "card_id": card_id,
+                    "edition_id": random.choice(editions),
                     "name": data["name"],
                 })
+
         return JSONResponse({"cards": cards, "message": None})
 
     # ── Step 2: Fuzzy match ──
@@ -124,11 +129,15 @@ async def api_cards_search(q: str):
             slug = name_to_slug[name]
             card_id = slug_data[slug]["card_id"]
             card_info = info_data.get(card_id, {})
-            for edition_id in card_info.get("editions", {}):
+            editions = list(card_info.get("editions", {}).keys())
+
+            if editions:
                 cards.append({
-                    "edition_id": edition_id,
+                    "card_id": card_id,
+                    "edition_id": random.choice(editions),
                     "name": name,
                 })
+
         return JSONResponse({"cards": cards, "message": None})
 
     # ── Step 3: API call ──
@@ -146,10 +155,12 @@ async def api_cards_search(q: str):
     slug = _format_search(q)
     card_id = slug_data[slug]["card_id"]
     card_info = info_data.get(card_id, {})
+    editions = list(card_info.get("editions", {}).keys())
 
-    for edition_id in card_info.get("editions", {}):
+    if editions:
         cards.append({
-            "edition_id": edition_id,
+            "card_id": card_id,
+            "edition_id": random.choice(editions),
             "name": slug_data[slug]["name"],
         })
 
@@ -170,10 +181,25 @@ async def api_cards_suggest(q: str):
 
     suggestions = sorted(
         {data["name"] for slug, data in slug_data.items()
-         if query in data["name"].lower()},
+         if query in data["name"].lower()}
     )
 
     return JSONResponse({"suggestions": suggestions[:10]})
+
+
+@app.get("/api/cards/{card_id}")
+async def api_card_detail(card_id: str):
+    info_file = new_json(JSON_INFO)
+
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    card_info = info_data.get(card_id)
+
+    if not card_info:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    return JSONResponse({"card_id": card_id, "card": card_info})
 
 
 @app.get("/api/me")

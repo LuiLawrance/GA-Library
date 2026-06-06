@@ -1,4 +1,5 @@
 let autocompleteIndex = -1;
+let selectedCardId = null;
 
 async function searchCards() {
     const query = document.getElementById('card-search').value.trim();
@@ -24,7 +25,12 @@ async function searchCards() {
             const tile = document.createElement('div');
             tile.className = 'card-tile';
             tile.style.animationDelay = `${i * 60}ms`;
+            tile.dataset.cardId = card.card_id;
             tile.innerHTML = `<img src="/images/${card.edition_id}.jpg" alt="${card.name}" onerror="this.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">`;
+            tile.onclick = () => openCardDrawer(card.card_id, card.edition_id);
+            tile.addEventListener('animationend', () => {
+                tile.classList.add('animated');
+            });
             results.appendChild(tile);
         }
 
@@ -107,6 +113,152 @@ function handleCardKeydown(e) {
     } else if (e.key === 'Escape') {
         hideAutocomplete();
     }
+}
+
+async function openCardDrawer(cardId, editionId) {
+    const drawer = document.getElementById('card-drawer');
+    const wrap = document.querySelector('.card-grid-wrap');
+
+    if (selectedCardId === cardId) {
+        closeCardDrawer();
+        return;
+    }
+
+    selectedCardId = cardId;
+
+    try {
+        const res = await fetch(`/api/cards/${cardId}`);
+        const data = await res.json();
+        const card = data.card;
+
+        const editions = Object.entries(card.editions);
+
+        const statsMap = {
+            'Cost (Memory)': card.stats?.cost_memory,
+            'Cost (Reserve)': card.stats?.cost_reserve,
+            'Power': card.stats?.power,
+            'Life': card.stats?.life,
+            'Durability': card.stats?.durability,
+            'Speed': card.stats?.speed,
+            'Level': card.stats?.level,
+        };
+
+        const statsHTML = Object.entries(statsMap)
+            .filter(([, v]) => v !== null && v !== undefined)
+            .map(([label, value]) => `
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">${label}</span>
+                    <span class="drawer-stat-value">${value}</span>
+                </div>
+            `).join('');
+
+        const legalityHTML = Object.entries(card.legality || {})
+            .map(([format, legal]) => `
+                <span class="drawer-legal-tag ${legal ? 'legal' : 'illegal'}">
+                    ${format}
+                </span>
+            `).join('');
+
+        const editionsHTML = editions.map(([eid, einfo], i) => `
+            <div class="drawer-edition-tile" style="animation-delay: ${i * 60}ms">
+                <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
+                    title="${einfo.set_name} (${einfo.set_prefix})"
+                    onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
+                    id="edition-tile-${eid}">
+            </div>
+        `).join('');
+
+        document.getElementById('drawer-content').innerHTML = `
+            <div class="drawer-top">
+                <img class="drawer-card-image" src="/images/${editionId}.jpg" alt="${cardId}">
+                <div class="drawer-card-info">
+                    <div>
+                        <div class="drawer-section-label">Types</div>
+                        <div class="drawer-types">
+                            ${(card.types || []).map(t => `<span class="drawer-type-tag">${t}</span>`).join('')}
+                        </div>
+                    </div>
+
+                    ${statsHTML ? `
+                    <div>
+                        <div class="drawer-section-label">Stats</div>
+                        <div class="drawer-stats">${statsHTML}</div>
+                    </div>` : ''}
+
+                    ${card.effect ? `
+                    <div>
+                        <div class="drawer-section-label">Effect</div>
+                        <div class="drawer-effect">${card.effect}</div>
+                    </div>` : ''}
+
+                    ${legalityHTML ? `
+                    <div>
+                        <div class="drawer-section-label">Legality</div>
+                        <div class="drawer-legality">${legalityHTML}</div>
+                    </div>` : ''}
+                </div>
+            </div>
+
+            <div class="drawer-editions-section">
+                <div class="drawer-section-label">Editions</div>
+                <div class="drawer-editions">${editionsHTML}</div>
+            </div>
+        `;
+
+        drawer.classList.remove('hidden');
+        setTimeout(() => {
+            drawer.classList.add('open');
+            wrap.classList.add('drawer-open');
+            wrap.style.pointerEvents = 'none';
+
+            const initialTile = document.getElementById(`edition-tile-${editionId}`);
+            if (initialTile) initialTile.classList.add('edition-selected');
+
+            setTimeout(() => {
+                wrap.style.pointerEvents = '';
+            }, 260);
+        }, 10);
+
+    } catch {
+        console.error('Failed to load card details');
+    }
+}
+
+function closeCardDrawer() {
+    const drawer = document.getElementById('card-drawer');
+    const wrap = document.querySelector('.card-grid-wrap');
+
+    drawer.classList.remove('open');
+    wrap.classList.remove('drawer-open');
+    wrap.style.pointerEvents = 'none';
+    selectedCardId = null;
+
+    setTimeout(() => {
+        drawer.classList.add('hidden');
+        wrap.style.pointerEvents = '';
+    }, 300);
+}
+
+function selectDrawerEdition(editionId) {
+    const mainImage = document.querySelector('.drawer-card-image');
+    const currentTile = document.querySelector('.drawer-edition-tile img.edition-selected');
+
+    if (currentTile && currentTile.id === `edition-tile-${editionId}`) {
+        return;
+    }
+
+    mainImage.classList.add('switching');
+
+    setTimeout(() => {
+        mainImage.src = `/images/${editionId}.jpg`;
+        mainImage.classList.remove('switching');
+    }, 200);
+
+    document.querySelectorAll('.drawer-edition-tile img').forEach(img => {
+        img.classList.remove('edition-selected');
+    });
+
+    document.getElementById(`edition-tile-${editionId}`).classList.add('edition-selected');
 }
 
 document.addEventListener('click', e => {
