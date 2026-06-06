@@ -116,9 +116,35 @@ async def api_cards_search(q: str):
                     "name": data["name"],
                 })
 
-        return JSONResponse({"cards": cards, "message": None})
+        return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
 
-    # ── Step 2: Fuzzy match ──
+    # ── Step 2: API call ──
+    card_data = _api_search(_format_search(q))
+
+    if card_data:
+        with slug_file.open("r", encoding="utf-8") as f:
+            slug_data = json.load(f)
+
+        with info_file.open("r", encoding="utf-8") as f:
+            info_data = json.load(f)
+
+        slug = _format_search(q)
+
+        if slug in slug_data:
+            card_id = slug_data[slug]["card_id"]
+            card_info = info_data.get(card_id, {})
+            editions = list(card_info.get("editions", {}).keys())
+
+            if editions:
+                cards.append({
+                    "card_id": card_id,
+                    "edition_id": random.choice(editions),
+                    "name": slug_data[slug]["name"],
+                })
+
+            return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+
+    # ── Step 3: Fuzzy match ──
     name_to_slug = {data["name"]: slug for slug, data in slug_data.items()}
     names = list(name_to_slug.keys())
 
@@ -138,33 +164,9 @@ async def api_cards_search(q: str):
                     "name": name,
                 })
 
-        return JSONResponse({"cards": cards, "message": None})
+        return JSONResponse({"cards": cards, "message": None, "fuzzy": True})
 
-    # ── Step 3: API call ──
-    card_data = _api_search(_format_search(q))
-
-    if not card_data:
-        return JSONResponse({"cards": [], "message": f"No card found for '{q}'."})
-
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    slug = _format_search(q)
-    card_id = slug_data[slug]["card_id"]
-    card_info = info_data.get(card_id, {})
-    editions = list(card_info.get("editions", {}).keys())
-
-    if editions:
-        cards.append({
-            "card_id": card_id,
-            "edition_id": random.choice(editions),
-            "name": slug_data[slug]["name"],
-        })
-
-    return JSONResponse({"cards": cards, "message": None})
+    return JSONResponse({"cards": [], "message": f"No card found for '{q}'.", "fuzzy": False})
 
 
 @app.get("/api/cards/suggest")

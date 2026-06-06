@@ -32,6 +32,10 @@ async function searchCards() {
 
         results.innerHTML = '';
 
+        if (data.fuzzy) {
+            results.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;padding:0 0 16px 0;">No exact match found. Did you mean one of these?</p>`;
+        }
+
         for (let i = 0; i < data.cards.length; i++) {
             const card = data.cards[i];
             const tile = document.createElement('div');
