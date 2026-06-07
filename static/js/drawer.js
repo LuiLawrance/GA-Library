@@ -5,6 +5,7 @@ function parseEffect(text, cardName) {
         .replace(/CARDNAME/g, `<strong>${cardName}</strong>`)
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/\[REST\]/g, '<span class="effect-tag">↷</span>')
         .replace(/\[(.+?)\]/g, '<span class="effect-tag">$1</span>')
         .replace(/\((\d+)\)/g, '<span class="effect-number">$1</span>')
         .replace(/\n/g, '<br>');
