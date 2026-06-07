@@ -374,6 +374,7 @@ async function openCardDrawer(cardId, editionId, cardName) {
         setTimeout(() => {
             drawer.classList.add('open');
             wrap.classList.add('drawer-open');
+            document.getElementById('drawer-close-btn').classList.remove('hidden');
 
             const initialTile = document.getElementById(`edition-tile-${editionId}`);
             if (initialTile) initialTile.classList.add('edition-selected');
@@ -390,6 +391,7 @@ function closeCardDrawer() {
 
     drawer.classList.remove('open');
     wrap.classList.remove('drawer-open');
+    document.getElementById('drawer-close-btn').classList.add('hidden');
     selectedCardId = null;
 
     setTimeout(() => {

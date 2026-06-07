@@ -174,10 +174,8 @@
 .card-grid-wrap {
     flex: 1;
     overflow-y: auto;
-    transform: translateX(0);
-    transition: transform 0.25s ease;
-    will-change: transform;
     height: 100%;
+    min-width: 0;
 }
 
 .card-grid-wrap::-webkit-scrollbar {
@@ -199,16 +197,13 @@
     background: var(--border-focus);
 }
 
-.card-grid-wrap.drawer-open {
-    transform: translateX(820px);
-}
-
 .card-grid {
     padding: 32px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(auto-fill, 255px);
+    gap: 20px;
     align-content: start;
+    justify-content: center;
 }
 
 .card-tile {
@@ -304,7 +299,6 @@
     z-index: 200;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 24px;
 }
 
 .card-drawer.open {
@@ -331,10 +325,37 @@
     background: var(--border-focus);
 }
 
+.drawer-close-btn {
+    position: absolute;
+    top: 12px;
+    left: 830px;
+    width: 32px;
+    height: 32px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: #c86e6e;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+    z-index: 201;
+}
+
+.drawer-close-btn:hover {
+    color: #ffffff;
+    background: #c86e6e;
+    border-color: #c86e6e;
+}
+
 .drawer-inner {
     display: flex;
     flex-direction: column;
     gap: 28px;
+    padding: 24px;
 }
 
 .drawer-content-animate {

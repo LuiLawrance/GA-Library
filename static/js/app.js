@@ -59,7 +59,7 @@ function setupFooterScroll() {
     if (!gridWrap || !footer) return;
 
     gridWrap.addEventListener('scroll', () => {
-        if (gridWrap.scrollTop > 50) {
+        if (gridWrap.scrollTop > 150) {
             footer.classList.add('footer-hidden');
         } else if (gridWrap.scrollTop === 0) {
             footer.classList.remove('footer-hidden');
