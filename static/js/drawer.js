@@ -1,3 +1,5 @@
+let drawerIsOpen = false;
+
 function parseEffect(text, cardName) {
     if (!text) return '';
 
@@ -76,13 +78,13 @@ async function openCardDrawer(cardId, editionId, cardName) {
                 </span>
             `).join('');
 
-        const editionsHTML = editions.map(([eid, einfo], i) => {
-            const rarityMap = {
-                1: "C", 2: "U", 3: "R", 4: "SR",
-                5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
-            };
-            const rarity = rarityMap[einfo.rarity] || "?";
+        const rarityMap = {
+            1: "C", 2: "U", 3: "R", 4: "SR",
+            5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
+        };
 
+        const editionsHTML = editions.map(([eid, einfo], i) => {
+            const rarity = rarityMap[einfo.rarity] || "?";
             const rarityClass = `rarity-${rarity.toLowerCase()}`;
 
             return `
@@ -157,7 +159,9 @@ async function openCardDrawer(cardId, editionId, cardName) {
         drawer.classList.remove('hidden');
         setTimeout(() => {
             drawer.classList.add('open');
+            drawerIsOpen = true;
             document.getElementById('drawer-close-btn').classList.remove('hidden');
+            document.querySelector('.footer').classList.add('footer-hidden');
 
             const initialTile = document.getElementById(`edition-tile-${editionId}`);
             if (initialTile) initialTile.classList.add('edition-selected');
@@ -172,8 +176,14 @@ function closeCardDrawer() {
     const drawer = document.getElementById('card-drawer');
 
     drawer.classList.remove('open');
+    drawerIsOpen = false;
     document.getElementById('drawer-close-btn').classList.add('hidden');
     selectedCardId = null;
+
+    const gridWrap = document.querySelector('.card-grid-wrap');
+    if (!gridWrap || gridWrap.scrollTop === 0) {
+        document.querySelector('.footer').classList.remove('footer-hidden');
+    }
 
     setTimeout(() => {
         drawer.classList.add('hidden');

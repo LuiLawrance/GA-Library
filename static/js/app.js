@@ -4,13 +4,13 @@ let loginMode = 'login';
 
 // ── Router ──
 const routes = {
-    '/':           '/fragments/home',
-    '/login':      '/fragments/login',
-    '/cards':      '/fragments/cards',
+    '/': '/fragments/home',
+    '/login': '/fragments/login',
+    '/cards': '/fragments/cards',
     '/collection': '/fragments/collection',
-    '/decks':      '/fragments/decks',
-    '/prices':     '/fragments/prices',
-    '/inventory':  '/fragments/inventory',
+    '/decks': '/fragments/decks',
+    '/prices': '/fragments/prices',
+    '/inventory': '/fragments/inventory',
 };
 
 async function navigate(path, pushState = true) {
@@ -60,6 +60,8 @@ function setupFooterScroll() {
     if (!gridWrap || !footer) return;
 
     gridWrap.addEventListener('scroll', () => {
+        if (drawerIsOpen) return;
+
         if (gridWrap.scrollTop > 150) {
             footer.classList.add('footer-hidden');
         } else if (gridWrap.scrollTop === 0) {
@@ -103,7 +105,7 @@ function setLoggedOut() {
 }
 
 async function handleLogout() {
-    await fetch('/api/logout', { method: 'POST' });
+    await fetch('/api/logout', {method: 'POST'});
     currentUser = null;
     setLoggedOut();
     navigate('/');
@@ -152,7 +154,7 @@ async function handleLogin() {
     try {
         const res = await fetch('/api/login', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: params
         });
 
@@ -198,7 +200,7 @@ async function handleRegister() {
     try {
         const res = await fetch('/api/register', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
             body: params
         });
 
