@@ -53,7 +53,8 @@
     position: absolute;
     top: calc(100% + 6px);
     left: 0;
-    width: 220px;
+    min-width: 220px;
+    max-width: 660px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -72,6 +73,30 @@
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+#set-dropdown-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+#set-dropdown-options::-webkit-scrollbar {
+    width: 6px;
+}
+
+#set-dropdown-options::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+#set-dropdown-options::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+#set-dropdown-options::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
 }
 
 .set-dropdown-option {
@@ -143,6 +168,7 @@
     flex: 1;
     overflow: hidden;
     position: relative;
+    height: 100%;
 }
 
 .card-grid-wrap {
@@ -151,6 +177,26 @@
     transform: translateX(0);
     transition: transform 0.25s ease;
     will-change: transform;
+    height: 100%;
+}
+
+.card-grid-wrap::-webkit-scrollbar {
+    width: 10px;
+}
+
+.card-grid-wrap::-webkit-scrollbar-track {
+    background: var(--bg);
+    border-radius: 10px;
+}
+
+.card-grid-wrap::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 10px;
+    border: 2px solid var(--bg);
+}
+
+.card-grid-wrap::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
 }
 
 .card-grid-wrap.drawer-open {

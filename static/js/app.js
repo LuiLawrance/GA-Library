@@ -4,12 +4,12 @@ let loginMode = 'login';
 
 // ── Router ──
 const routes = {
-    '/': '/fragments/home',
-    '/login': '/fragments/login',
-    '/cards': '/fragments/cards',
+    '/':           '/fragments/home',
+    '/login':      '/fragments/login',
+    '/cards':      '/fragments/cards',
     '/collection': '/fragments/collection',
-    '/decks': '/fragments/decks',
-    '/prices': '/fragments/prices',
+    '/decks':      '/fragments/decks',
+    '/prices':     '/fragments/prices',
 };
 
 async function navigate(path, pushState = true) {
@@ -38,11 +38,33 @@ async function navigate(path, pushState = true) {
 
     loginMode = 'login';
 
-    if (path === '/cards') loadSets();
+    // Reset footer visibility when navigating
+    document.querySelector('.footer').classList.remove('footer-hidden');
+
+    if (path === '/cards') {
+        await loadSets();
+        setTimeout(setupFooterScroll, 100);
+    }
 }
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ── Footer hide on scroll ──
+function setupFooterScroll() {
+    const gridWrap = document.querySelector('.card-grid-wrap');
+    const footer = document.querySelector('.footer');
+
+    if (!gridWrap || !footer) return;
+
+    gridWrap.addEventListener('scroll', () => {
+        if (gridWrap.scrollTop > 50) {
+            footer.classList.add('footer-hidden');
+        } else if (gridWrap.scrollTop === 0) {
+            footer.classList.remove('footer-hidden');
+        }
+    });
 }
 
 // ── Auth ──
@@ -78,7 +100,7 @@ function setLoggedOut() {
 }
 
 async function handleLogout() {
-    await fetch('/api/logout', {method: 'POST'});
+    await fetch('/api/logout', { method: 'POST' });
     currentUser = null;
     setLoggedOut();
     navigate('/');
@@ -127,7 +149,7 @@ async function handleLogin() {
     try {
         const res = await fetch('/api/login', {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params
         });
 
@@ -173,7 +195,7 @@ async function handleRegister() {
     try {
         const res = await fetch('/api/register', {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: params
         });
 
