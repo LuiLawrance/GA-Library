@@ -467,6 +467,11 @@ async def get_image(edition_id: str):
     return FileResponse(path)
 
 
+@app.get("/inventory", response_class=HTMLResponse)
+async def inventory_page():
+    return serve_index()
+
+
 @app.get("/fragments/cards", response_class=HTMLResponse)
 async def fragment_cards():
     with open("templates/cards.html") as f:
@@ -488,6 +493,12 @@ async def fragment_decks():
 @app.get("/fragments/home", response_class=HTMLResponse)
 async def fragment_home():
     with open("templates/home.html") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/inventory", response_class=HTMLResponse)
+async def fragment_inventory():
+    with open("templates/inventory.html") as f:
         return HTMLResponse(f.read())
 
 

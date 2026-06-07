@@ -118,6 +118,10 @@ body {
     border-bottom-color: var(--accent);
 }
 
+.nav-inventory {
+    margin-left: auto;
+}
+
 /* ── Content area ── */
 .content {
     flex: 1;

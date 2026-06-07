@@ -10,6 +10,7 @@ const routes = {
     '/collection': '/fragments/collection',
     '/decks':      '/fragments/decks',
     '/prices':     '/fragments/prices',
+    '/inventory':  '/fragments/inventory',
 };
 
 async function navigate(path, pushState = true) {
@@ -91,12 +92,14 @@ function setLoggedIn(username) {
     document.getElementById('topbar-user').classList.remove('hidden');
     document.getElementById('topbar-login-btn').classList.add('hidden');
     document.getElementById('topbar-logout-btn').classList.remove('hidden');
+    document.getElementById('nav-inventory').classList.remove('hidden');
 }
 
 function setLoggedOut() {
     document.getElementById('topbar-user').classList.add('hidden');
     document.getElementById('topbar-login-btn').classList.remove('hidden');
     document.getElementById('topbar-logout-btn').classList.add('hidden');
+    document.getElementById('nav-inventory').classList.add('hidden');
 }
 
 async function handleLogout() {
