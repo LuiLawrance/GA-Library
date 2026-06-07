@@ -56,7 +56,7 @@ async function openCardDrawer(cardId, editionId, cardName) {
             'Power': card.stats?.power,
             'Life': card.stats?.life,
             'Durability': card.stats?.durability,
-            'Speed': card.stats?.speed,
+            'Speed': card.stats?.speed === true ? 'Fast' : card.stats?.speed === false ? 'Slow' : null,
             'Level': card.stats?.level,
         };
 
@@ -76,7 +76,16 @@ async function openCardDrawer(cardId, editionId, cardName) {
                 </span>
             `).join('');
 
-        const editionsHTML = editions.map(([eid, einfo], i) => `
+        const editionsHTML = editions.map(([eid, einfo], i) => {
+            const rarityMap = {
+                1: "C", 2: "U", 3: "R", 4: "SR",
+                5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
+            };
+            const rarity = rarityMap[einfo.rarity] || "?";
+
+            const rarityClass = `rarity-${rarity.toLowerCase()}`;
+
+            return `
             <div class="drawer-edition-tile" style="animation-delay: ${i * 60}ms">
                 <div class="edition-tile-wrap">
                     <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
@@ -84,9 +93,10 @@ async function openCardDrawer(cardId, editionId, cardName) {
                         onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
                         id="edition-tile-${eid}">
                     <span class="edition-prefix-badge">${einfo.set_prefix}</span>
+                    <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
 
         const drawerContent = document.getElementById('drawer-content');
 

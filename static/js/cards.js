@@ -2,6 +2,11 @@ let autocompleteIndex = -1;
 let selectedCardId = null;
 let selectedSets = new Set();
 
+const rarityMap = {
+    1: "C", 2: "U", 3: "R", 4: "SR",
+    5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
+};
+
 function toggleSetDropdown() {
     const menu = document.getElementById('set-dropdown-menu');
     const btn = document.querySelector('.set-dropdown-btn');
@@ -73,6 +78,29 @@ async function loadSets() {
     }
 }
 
+function buildCardTile(card, index) {
+    const rarity = rarityMap[card.rarity] || "";
+    const rarityClass = `rarity-${rarity.toLowerCase()}`;
+
+    const tile = document.createElement('div');
+    tile.className = 'card-tile';
+    tile.style.animationDelay = `${index * 60}ms`;
+    tile.dataset.cardId = card.card_id;
+    tile.innerHTML = `
+        <div class="edition-tile-wrap">
+            <img src="/images/${card.edition_id}.jpg" alt="${card.name}"
+                onerror="this.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">
+            ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}
+        </div>
+    `;
+    tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
+    tile.addEventListener('animationend', () => {
+        tile.classList.add('animated');
+    });
+
+    return tile;
+}
+
 async function searchCards() {
     const query = document.getElementById('card-search').value.trim();
     const results = document.getElementById('card-results');
@@ -104,17 +132,7 @@ async function searchCards() {
             results.innerHTML = '';
 
             for (let i = 0; i < data.cards.length; i++) {
-                const card = data.cards[i];
-                const tile = document.createElement('div');
-                tile.className = 'card-tile';
-                tile.style.animationDelay = `${i * 60}ms`;
-                tile.dataset.cardId = card.card_id;
-                tile.innerHTML = `<img src="/images/${card.edition_id}.jpg" alt="${card.name}" onerror="this.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">`;
-                tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
-                tile.addEventListener('animationend', () => {
-                    tile.classList.add('animated');
-                });
-                results.appendChild(tile);
+                results.appendChild(buildCardTile(data.cards[i], i));
             }
 
         } catch {
@@ -149,17 +167,7 @@ async function searchCards() {
         }
 
         for (let i = 0; i < data.cards.length; i++) {
-            const card = data.cards[i];
-            const tile = document.createElement('div');
-            tile.className = 'card-tile';
-            tile.style.animationDelay = `${i * 60}ms`;
-            tile.dataset.cardId = card.card_id;
-            tile.innerHTML = `<img src="/images/${card.edition_id}.jpg" alt="${card.name}" onerror="this.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">`;
-            tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
-            tile.addEventListener('animationend', () => {
-                tile.classList.add('animated');
-            });
-            results.appendChild(tile);
+            results.appendChild(buildCardTile(data.cards[i], i));
         }
 
     } catch {

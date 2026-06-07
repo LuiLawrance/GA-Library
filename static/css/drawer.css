@@ -2,14 +2,16 @@
 .card-drawer {
     position: absolute;
     top: 0;
-    left: 0;
+    right: 0;
+    left: auto;
     width: 820px;
     height: 100%;
     background: var(--bg-card);
-    border-top-right-radius: var(--radius);
-    border-bottom-right-radius: var(--radius);
-    border-right: 1px solid var(--border);
-    transform: translateX(-820px);
+    border-top-left-radius: var(--radius);
+    border-bottom-left-radius: var(--radius);
+    border-left: 1px solid var(--border);
+    border-right: none;
+    transform: translateX(820px);
     transition: transform 0.25s ease, box-shadow 0.25s ease;
     z-index: 200;
     overflow-y: auto;
@@ -18,7 +20,7 @@
 
 .card-drawer.open {
     transform: translateX(0);
-    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.4);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
 }
 
 .card-drawer::-webkit-scrollbar {
@@ -43,7 +45,8 @@
 .drawer-close-btn {
     position: absolute;
     top: 12px;
-    left: 830px;
+    right: 830px;
+    left: auto;
     width: 32px;
     height: 32px;
     background: var(--bg-card);
@@ -108,6 +111,13 @@
     grid-template-columns: 320px 1fr;
     gap: 24px;
     align-items: start;
+}
+
+.card-tile .edition-rarity-badge {
+    bottom: 10px;
+    left: 10px;
+    font-size: 0.72rem;
+    padding: 3px 8px;
 }
 
 .drawer-card-image {
@@ -187,7 +197,7 @@
 
 .drawer-stats {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 8px;
 }
 
@@ -323,4 +333,60 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
     border-radius: 10px;
+}
+
+.edition-rarity-badge {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.rarity-c {
+    color: #ffffff;
+}
+
+.rarity-u {
+    color: #4caf7d;
+}
+
+.rarity-r {
+    color: #4a90d9;
+}
+
+.rarity-sr {
+    color: #9b59b6;
+}
+
+.rarity-ur {
+    color: #f9e94e;
+}
+
+.rarity-pr {
+    color: #f06292;
+}
+
+.rarity-csr {
+    color: #e0c8ff;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.rarity-cur {
+    color: #ffd700;
+    background: rgba(0, 0, 0, 0.6);
+    text-shadow: 0 0 6px rgba(255, 215, 0, 0.6);
+}
+
+.rarity-cpr {
+    color: #ff9de2;
+    background: rgba(0, 0, 0, 0.6);
+    text-shadow: 0 0 6px rgba(255, 157, 226, 0.6);
 }

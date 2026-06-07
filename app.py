@@ -118,10 +118,13 @@ async def api_cards_search(request: Request, q: str = ""):
                 editions = list(card_info.get("editions", {}).keys())
 
                 if editions:
+                    edition_id = random.choice(editions)
+                    rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                     cards.append({
                         "card_id": card_id,
-                        "edition_id": random.choice(editions),
+                        "edition_id": edition_id,
                         "name": data["name"],
+                        "rarity": rarity,
                     })
 
             return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
@@ -144,10 +147,13 @@ async def api_cards_search(request: Request, q: str = ""):
                 editions = list(card_info.get("editions", {}).keys())
 
                 if editions:
+                    edition_id = random.choice(editions)
+                    rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                     cards.append({
                         "card_id": card_id,
-                        "edition_id": random.choice(editions),
+                        "edition_id": edition_id,
                         "name": slug_data[slug]["name"],
+                        "rarity": rarity,
                     })
 
     # ── Step 2: Substring match ──
@@ -185,10 +191,12 @@ async def api_cards_search(request: Request, q: str = ""):
                 ]
 
                 for edition_id in matching_editions:
+                    rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                     cards.append({
                         "card_id": card_id,
                         "edition_id": edition_id,
                         "name": data["name"],
+                        "rarity": rarity,
                     })
 
                 if matching_editions:
@@ -197,10 +205,13 @@ async def api_cards_search(request: Request, q: str = ""):
                 editions = list(card_info.get("editions", {}).keys())
 
                 if editions:
+                    edition_id = random.choice(editions)
+                    rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                     cards.append({
                         "card_id": card_id,
-                        "edition_id": random.choice(editions),
+                        "edition_id": edition_id,
                         "name": data["name"],
+                        "rarity": rarity,
                     })
                     existing_card_ids.add(card_id)
 
@@ -249,10 +260,13 @@ async def api_cards_search(request: Request, q: str = ""):
             editions = list(card_info.get("editions", {}).keys())
 
             if editions:
+                edition_id = random.choice(editions)
+                rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                 cards.append({
                     "card_id": card_id,
-                    "edition_id": random.choice(editions),
+                    "edition_id": edition_id,
                     "name": name,
+                    "rarity": rarity,
                 })
                 fuzzy_added = True
 
@@ -364,12 +378,16 @@ async def api_sets_search(prefix: str):
 
     slug_file = new_json(JSON_SLUGS)
     edition_file = new_json("DATA_GA/CARDS_GA/EDITIONS.json")
+    info_file = new_json(JSON_INFO)
 
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
 
     with edition_file.open("r", encoding="utf-8") as f:
         edition_data = json.load(f)
+
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
 
     cards = []
 
@@ -391,10 +409,14 @@ async def api_sets_search(prefix: str):
             if not slug_entry:
                 continue
 
+            card_info = info_data.get(card_id, {})
+            rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
+
             cards.append({
                 "card_id": card_id,
                 "edition_id": edition_id,
                 "name": slug_entry["name"],
+                "rarity": rarity,
             })
 
     return JSONResponse({"cards": cards})

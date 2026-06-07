@@ -228,7 +228,7 @@
 
 .card-tile img {
     width: 100%;
-    border-radius: 12px;
+    border-radius: 14px;
     display: block;
     transition: transform 0.2s;
 }
@@ -264,7 +264,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    z-index: 100;
+    z-index: 300;
     overflow: hidden;
 }
 
@@ -281,4 +281,19 @@
 .autocomplete-item.selected {
     background: var(--bg-hover);
     color: var(--accent);
+}
+
+.edition-rarity-badge {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.6);
 }
