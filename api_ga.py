@@ -540,24 +540,21 @@ def _update_sets(card_data: dict, debug: bool = False) -> None:
         with set_file.open("r", encoding="utf-8") as f:
             set_data = json.load(f)
 
-        set_data[collector_number] = edition_id
+        if collector_number not in set_data:
+            set_data[collector_number] = []
+
+        if edition_id not in set_data[collector_number]:
+            set_data[collector_number].append(edition_id)
 
         sorted_set_data = dict(
             sorted(
                 set_data.items(),
-                key=lambda item: _sort_collector_number(
-                    item[0],
-                    debug
-                )
+                key=lambda item: _sort_collector_number(item[0], debug)
             )
         )
 
         with set_file.open("w", encoding="utf-8") as f:
-            json.dump(
-                sorted_set_data,
-                f,
-                indent=4
-            )
+            json.dump(sorted_set_data, f, indent=4)
 
         set_count += 1
 

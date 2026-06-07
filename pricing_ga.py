@@ -105,7 +105,8 @@ def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, s
             set_data = json.load(f)
 
         collector_number = next(
-            (num for num, eid in set_data.items() if eid == edition_id),
+            (num for num, eids in set_data.items()
+             if edition_id in (eids if isinstance(eids, list) else [eids])),
             "?"
         )
 

@@ -1,18 +1,18 @@
+from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, set_search, \
+    UPDATE_THRESHOLD
+from datetime import date, datetime, timedelta
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from rapidfuzz import fuzz, process
-
-from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, set_search
 from user import user_create, user_login
 from util_file import new_json
 
 import json
 import os
 import random
-from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -23,6 +23,8 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 480))
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
+
+_set_search_cache = {}
 
 
 def create_token(username: str) -> str:
@@ -209,8 +211,12 @@ async def api_cards_search(request: Request, q: str = ""):
                 if os.path.exists(set_file_path):
                     with open(set_file_path, "r", encoding="utf-8") as f:
                         set_data = json.load(f)
-                    for num, eid in set_data.items():
-                        collector_order[eid] = (set_filter, num)
+                    for num, eids in set_data.items():
+                        if isinstance(eids, list):
+                            for eid in eids:
+                                collector_order[eid] = (set_filter, num)
+                        else:
+                            collector_order[eids] = (set_filter, num)
 
             cards.sort(key=lambda c: (
                 collector_order.get(c["edition_id"], ("zzz", "ZZZ"))[0],
@@ -298,8 +304,10 @@ async def api_card_detail(card_id: str):
         if os.path.exists(set_path):
             with open(set_path, "r", encoding="utf-8") as f:
                 set_data = json.load(f)
+
             collector_number = next(
-                (num for num, eid in set_data.items() if eid == edition_id),
+                (num for num, eids in set_data.items()
+                 if edition_id in (eids if isinstance(eids, list) else [eids])),
                 "?"
             )
 
@@ -334,14 +342,8 @@ async def api_sets():
     return JSONResponse({"sets": sets})
 
 
-_set_search_cache = {}
-
-
 @app.get("/api/sets/search")
 async def api_sets_search(prefix: str):
-    from datetime import date
-    from api_ga import UPDATE_THRESHOLD
-
     set_filter = prefix.strip().lower().replace(" ", "_")
     set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
 
@@ -371,25 +373,29 @@ async def api_sets_search(prefix: str):
 
     cards = []
 
-    for collector_number, edition_id in set_data.items():
-        card_id = edition_data.get(edition_id, {}).get("card_id")
+    for collector_number, eids in set_data.items():
+        if isinstance(eids, str):
+            eids = [eids]
 
-        if not card_id:
-            continue
+        for edition_id in eids:
+            card_id = edition_data.get(edition_id, {}).get("card_id")
 
-        slug_entry = next(
-            (data for data in slug_data.values() if data["card_id"] == card_id),
-            None
-        )
+            if not card_id:
+                continue
 
-        if not slug_entry:
-            continue
+            slug_entry = next(
+                (data for data in slug_data.values() if data["card_id"] == card_id),
+                None
+            )
 
-        cards.append({
-            "card_id": card_id,
-            "edition_id": edition_id,
-            "name": slug_entry["name"],
-        })
+            if not slug_entry:
+                continue
+
+            cards.append({
+                "card_id": card_id,
+                "edition_id": edition_id,
+                "name": slug_entry["name"],
+            })
 
     return JSONResponse({"cards": cards})
 
