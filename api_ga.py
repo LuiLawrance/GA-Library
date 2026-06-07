@@ -528,10 +528,7 @@ def _update_sets(card_data: dict, debug: bool = False) -> None:
         edition_id = edition["uuid"]
         set_prefix = edition["set"]["prefix"]
 
-        set_file_name = (
-            _format_search(set_prefix)
-            .replace("-", "_")
-        )
+        set_file_name = set_prefix.lower().replace(" ", "_")
 
         set_file = new_json(
             f"{DIR_SETS}/{set_file_name}.json"

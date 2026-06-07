@@ -98,7 +98,8 @@ def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, s
         set_prefix = edition_info["set_prefix"]
         rarity = rarity_map.get(edition_info["rarity"], "?")
 
-        set_file_name = set_prefix.lower().replace(" ", "_")
+        from api_ga import _format_search
+        set_file_name = _format_search(set_prefix).replace("-", "_")
         set_file = new_json(f"{DIR_SETS}/{set_file_name}.json")
 
         with set_file.open("r", encoding="utf-8") as f:
@@ -194,7 +195,6 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     prefix_width = max(len(o[2]) for o in options)
     rarity_width = max(len(o[3]) for o in options)
     foil_width = max(len(o[4]) for o in options)
-    number_width = max(len(o[5]) for o in options)
 
     total = len(options)
     index_width = len(str(total))
@@ -203,7 +203,7 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
         print(
             f"{str(i).rjust(index_width)}. "
             f"{set_prefix:<{prefix_width}} | "
-            f"{collector_number:>{number_width}} | "
+            f"{collector_number:>{len(str(collector_number))}} | "
             f"{rarity:<{rarity_width}} | "
             f"{foil_kind:<{foil_width}}"
         )
