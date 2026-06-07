@@ -102,7 +102,53 @@ async def api_cards_search(request: Request, q: str = ""):
     query = q.strip().lower()
     cards = []
 
-    # ── Step 1: Substring match ──
+    if query:
+        # ── Step 0: Exact match ──
+        exact_matches = {
+            slug: data for slug, data in slug_data.items()
+            if data["name"].lower() == query
+        }
+
+        if exact_matches:
+            for slug, data in exact_matches.items():
+                card_id = data["card_id"]
+                card_info = info_data.get(card_id, {})
+                editions = list(card_info.get("editions", {}).keys())
+
+                if editions:
+                    cards.append({
+                        "card_id": card_id,
+                        "edition_id": random.choice(editions),
+                        "name": data["name"],
+                    })
+
+            return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+
+        # ── Step 1: API call ──
+        card_data = _api_search(_format_search(q))
+
+        if card_data:
+            with slug_file.open("r", encoding="utf-8") as f:
+                slug_data = json.load(f)
+
+            with info_file.open("r", encoding="utf-8") as f:
+                info_data = json.load(f)
+
+            slug = _format_search(q)
+
+            if slug in slug_data:
+                card_id = slug_data[slug]["card_id"]
+                card_info = info_data.get(card_id, {})
+                editions = list(card_info.get("editions", {}).keys())
+
+                if editions:
+                    cards.append({
+                        "card_id": card_id,
+                        "edition_id": random.choice(editions),
+                        "name": slug_data[slug]["name"],
+                    })
+
+    # ── Step 2: Substring match ──
     substring_matches = {
         slug: data for slug, data in slug_data.items()
         if (not query or query in data["name"].lower())
@@ -120,8 +166,14 @@ async def api_cards_search(request: Request, q: str = ""):
         substring_matches = filtered
 
     if substring_matches:
+        existing_card_ids = {c["card_id"] for c in cards}
+
         for slug, data in substring_matches.items():
             card_id = data["card_id"]
+
+            if card_id in existing_card_ids:
+                continue
+
             card_info = info_data.get(card_id, {})
 
             if set_filters:
@@ -140,7 +192,7 @@ async def api_cards_search(request: Request, q: str = ""):
                     "name": data["name"],
                 })
 
-        if set_filters:
+        if set_filters and cards:
             collector_order = {}
             for set_filter in set_filters:
                 set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
@@ -154,47 +206,28 @@ async def api_cards_search(request: Request, q: str = ""):
                 collector_order.get(c["edition_id"], "ZZZ")
             ))
 
-        return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+        if cards:
+            return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
 
     if not query:
         return JSONResponse({"cards": [], "message": "No cards found.", "fuzzy": False})
 
-    # ── Step 2: API call ──
-    card_data = _api_search(_format_search(q))
-
-    if card_data:
-        with slug_file.open("r", encoding="utf-8") as f:
-            slug_data = json.load(f)
-
-        with info_file.open("r", encoding="utf-8") as f:
-            info_data = json.load(f)
-
-        slug = _format_search(q)
-
-        if slug in slug_data:
-            card_id = slug_data[slug]["card_id"]
-            card_info = info_data.get(card_id, {})
-            editions = list(card_info.get("editions", {}).keys())
-
-            if editions:
-                cards.append({
-                    "card_id": card_id,
-                    "edition_id": random.choice(editions),
-                    "name": slug_data[slug]["name"],
-                })
-
-            return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
-
     # ── Step 3: Fuzzy match ──
+    existing_card_ids = {c["card_id"] for c in cards}
     name_to_slug = {data["name"]: slug for slug, data in slug_data.items()}
     names = list(name_to_slug.keys())
 
     fuzzy_matches = process.extract(q, names, scorer=fuzz.WRatio, score_cutoff=80)
+    fuzzy_added = False
 
     if fuzzy_matches:
         for name, score, _ in fuzzy_matches:
             slug = name_to_slug[name]
             card_id = slug_data[slug]["card_id"]
+
+            if card_id in existing_card_ids:
+                continue
+
             card_info = info_data.get(card_id, {})
             editions = list(card_info.get("editions", {}).keys())
 
@@ -204,8 +237,10 @@ async def api_cards_search(request: Request, q: str = ""):
                     "edition_id": random.choice(editions),
                     "name": name,
                 })
+                fuzzy_added = True
 
-        return JSONResponse({"cards": cards, "message": None, "fuzzy": True})
+    if cards:
+        return JSONResponse({"cards": cards, "message": None, "fuzzy": fuzzy_added})
 
     return JSONResponse({"cards": [], "message": f"No card found for '{q}'.", "fuzzy": False})
 
