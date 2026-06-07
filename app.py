@@ -177,20 +177,30 @@ async def api_cards_search(request: Request, q: str = ""):
             card_info = info_data.get(card_id, {})
 
             if set_filters:
-                editions = [
+                matching_editions = [
                     eid for eid, einfo in card_info.get("editions", {}).items()
                     if einfo.get("set_prefix", "").lower().replace(" ", "_") in set_filters
                 ]
+
+                for edition_id in matching_editions:
+                    cards.append({
+                        "card_id": card_id,
+                        "edition_id": edition_id,
+                        "name": data["name"],
+                    })
+
+                if matching_editions:
+                    existing_card_ids.add(card_id)
             else:
                 editions = list(card_info.get("editions", {}).keys())
 
-            if editions:
-                edition_id = random.choice(editions)
-                cards.append({
-                    "card_id": card_id,
-                    "edition_id": edition_id,
-                    "name": data["name"],
-                })
+                if editions:
+                    cards.append({
+                        "card_id": card_id,
+                        "edition_id": random.choice(editions),
+                        "name": data["name"],
+                    })
+                    existing_card_ids.add(card_id)
 
         if set_filters and cards:
             collector_order = {}
@@ -200,10 +210,11 @@ async def api_cards_search(request: Request, q: str = ""):
                     with open(set_file_path, "r", encoding="utf-8") as f:
                         set_data = json.load(f)
                     for num, eid in set_data.items():
-                        collector_order[eid] = num
+                        collector_order[eid] = (set_filter, num)
 
-            cards.sort(key=lambda c: _sort_collector_number(
-                collector_order.get(c["edition_id"], "ZZZ")
+            cards.sort(key=lambda c: (
+                collector_order.get(c["edition_id"], ("zzz", "ZZZ"))[0],
+                _sort_collector_number(collector_order.get(c["edition_id"], ("zzz", "ZZZ"))[1])
             ))
 
         if cards:

@@ -257,7 +257,6 @@ function handleCardKeydown(e) {
 
 async function openCardDrawer(cardId, editionId, cardName) {
     const drawer = document.getElementById('card-drawer');
-    const wrap = document.querySelector('.card-grid-wrap');
 
     if (selectedCardId === cardId) {
         const currentTile = document.querySelector('.drawer-edition-tile img.edition-selected');
@@ -276,7 +275,23 @@ async function openCardDrawer(cardId, editionId, cardName) {
         const data = await res.json();
         const card = data.card;
 
-        const editions = Object.entries(card.editions);
+        const editions = Object.entries(card.editions).sort((a, b) => {
+            const numA = a[1].collector_number || 'ZZZ';
+            const numB = b[1].collector_number || 'ZZZ';
+
+            const parseNum = str => {
+                const match = str.match(/^(\d+)([A-Z]*)$/i);
+                if (match) return [parseInt(match[1]), match[2] || ''];
+                return [Infinity, str];
+            };
+
+            const [nA, sA] = parseNum(numA);
+            const [nB, sB] = parseNum(numB);
+
+            if (nA !== nB) return nA - nB;
+            return sA.localeCompare(sB);
+        });
+
         const selectedEdition = card.editions[editionId];
 
         const statsMap = {
@@ -373,7 +388,6 @@ async function openCardDrawer(cardId, editionId, cardName) {
         drawer.classList.remove('hidden');
         setTimeout(() => {
             drawer.classList.add('open');
-            wrap.classList.add('drawer-open');
             document.getElementById('drawer-close-btn').classList.remove('hidden');
 
             const initialTile = document.getElementById(`edition-tile-${editionId}`);
