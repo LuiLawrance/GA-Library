@@ -8,6 +8,109 @@
     width: 260px;
 }
 
+/* ── Set Dropdown ── */
+.set-dropdown-wrap {
+    position: relative;
+}
+
+.set-dropdown-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.2s;
+    white-space: nowrap;
+}
+
+.set-dropdown-btn:hover {
+    border-color: var(--border-focus);
+}
+
+.set-dropdown-btn.open {
+    border-color: var(--border-focus);
+}
+
+.set-dropdown-arrow {
+    display: inline-block;
+    font-size: 1.1rem;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.25s ease;
+}
+
+.set-dropdown-btn.open .set-dropdown-arrow {
+    transform: rotate(90deg);
+}
+
+.set-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 220px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 300;
+    overflow: hidden;
+    animation: dropdownReveal 0.2s ease forwards;
+}
+
+@keyframes dropdownReveal {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.set-dropdown-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+}
+
+.set-dropdown-option:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+
+.set-dropdown-option.selected {
+    color: var(--accent);
+}
+
+.set-toggle {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.set-dropdown-option.selected .set-toggle {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
 .btn-search {
     font-family: 'Sora', sans-serif;
     font-size: 0.85rem;
@@ -269,7 +372,7 @@
 
 .drawer-element {
     width: 48px;
-    height: auto;
+    height: 48px;
     object-fit: contain;
     flex-shrink: 0;
     margin-left: auto;

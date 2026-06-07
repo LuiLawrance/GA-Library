@@ -1,5 +1,6 @@
 let autocompleteIndex = -1;
 let selectedCardId = null;
+let selectedSets = new Set();
 
 function parseEffect(text, cardName) {
     if (!text) return '';
@@ -13,17 +14,140 @@ function parseEffect(text, cardName) {
         .replace(/\n/g, '<br>');
 }
 
+function toggleSetDropdown() {
+    const menu = document.getElementById('set-dropdown-menu');
+    const btn = document.querySelector('.set-dropdown-btn');
+
+    menu.classList.toggle('hidden');
+    btn.classList.toggle('open');
+}
+
+function toggleSetOption(set) {
+    if (selectedSets.has(set)) {
+        selectedSets.delete(set);
+    } else {
+        selectedSets.add(set);
+    }
+
+    updateSetDropdownLabel();
+    renderSetOptions();
+}
+
+function updateSetDropdownLabel() {
+    const label = document.getElementById('set-dropdown-label');
+
+    if (selectedSets.size === 0) {
+        label.textContent = 'Sets';
+    } else if (selectedSets.size === 1) {
+        label.textContent = [...selectedSets][0];
+    } else {
+        label.textContent = `${selectedSets.size} Sets`;
+    }
+}
+
+function renderSetOptions() {
+    const container = document.getElementById('set-dropdown-options');
+    if (!container) return;
+
+    const allSets = container.dataset.sets ? JSON.parse(container.dataset.sets) : [];
+
+    container.innerHTML = '';
+
+    for (const set of allSets) {
+        const isSelected = selectedSets.has(set);
+        const option = document.createElement('div');
+        option.className = `set-dropdown-option${isSelected ? ' selected' : ''}`;
+        option.innerHTML = `
+            <span>${set}</span>
+            <div class="set-toggle"></div>
+        `;
+        option.onclick = (e) => {
+            e.stopPropagation();
+            toggleSetOption(set);
+        };
+        container.appendChild(option);
+    }
+}
+
+async function loadSets() {
+    const container = document.getElementById('set-dropdown-options');
+    if (!container) return;
+
+    try {
+        const res = await fetch('/api/sets');
+        const data = await res.json();
+
+        container.dataset.sets = JSON.stringify(data.sets);
+        renderSetOptions();
+
+    } catch {
+        console.error('Failed to load sets');
+    }
+}
+
 async function searchCards() {
     const query = document.getElementById('card-search').value.trim();
     const results = document.getElementById('card-results');
 
-    if (!query) return;
+    if (!query && selectedSets.size === 0) return;
 
     results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Searching...</p>';
 
+    // ── Set search ──
+    if (query.startsWith('$')) {
+        const setPrefix = query.slice(1).trim();
+
+        if (!setPrefix) {
+            results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Enter a set prefix after $.</p>';
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/sets/search?prefix=${encodeURIComponent(setPrefix)}`);
+            const data = await res.json();
+
+            await loadSets();
+
+            if (!data.cards.length) {
+                results.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;">No cards found for set '${setPrefix}'.</p>`;
+                return;
+            }
+
+            results.innerHTML = '';
+
+            for (let i = 0; i < data.cards.length; i++) {
+                const card = data.cards[i];
+                const tile = document.createElement('div');
+                tile.className = 'card-tile';
+                tile.style.animationDelay = `${i * 60}ms`;
+                tile.dataset.cardId = card.card_id;
+                tile.innerHTML = `<img src="/images/${card.edition_id}.jpg" alt="${card.name}" onerror="this.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">`;
+                tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
+                tile.addEventListener('animationend', () => {
+                    tile.classList.add('animated');
+                });
+                results.appendChild(tile);
+            }
+
+        } catch {
+            results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Set search failed.</p>';
+        }
+
+        return;
+    }
+
+    // ── Regular search ──
     try {
-        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}`);
+        const params = new URLSearchParams();
+        if (query) params.append('q', query);
+        for (const set of selectedSets) {
+            params.append('set', set);
+        }
+
+        const res = await fetch(`/api/cards/search?${params}`);
         const data = await res.json();
+
+        await loadSets();
 
         if (data.message) {
             results.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;">${data.message}</p>`;
@@ -316,5 +440,12 @@ function selectDrawerEdition(editionId) {
 document.addEventListener('click', e => {
     if (!e.target.closest('.autocomplete-wrap')) {
         hideAutocomplete();
+    }
+
+    if (!e.target.closest('.set-dropdown-wrap')) {
+        const menu = document.getElementById('set-dropdown-menu');
+        const btn = document.querySelector('.set-dropdown-btn');
+        if (menu) menu.classList.add('hidden');
+        if (btn) btn.classList.remove('open');
     }
 });

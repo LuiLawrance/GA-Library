@@ -1,17 +1,18 @@
-from api_ga import _api_search, _format_search, JSON_INFO, JSON_SLUGS
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from rapidfuzz import fuzz, process
+
+from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, set_search
 from user import user_create, user_login
 from util_file import new_json
 
 import json
 import os
 import random
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -20,8 +21,8 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 480))
 
 app = FastAPI()
-app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
 
 
 def create_token(username: str) -> str:
@@ -85,7 +86,10 @@ async def prices_page():
 
 
 @app.get("/api/cards/search")
-async def api_cards_search(q: str):
+async def api_cards_search(request: Request, q: str = ""):
+    set_params = request.query_params.getlist("set")
+    set_filters = [s.strip().lower().replace(" ", "_") for s in set_params]
+
     slug_file = new_json(JSON_SLUGS)
     info_file = new_json(JSON_INFO)
 
@@ -101,23 +105,59 @@ async def api_cards_search(q: str):
     # ── Step 1: Substring match ──
     substring_matches = {
         slug: data for slug, data in slug_data.items()
-        if query in data["name"].lower()
+        if (not query or query in data["name"].lower())
     }
+
+    if set_filters:
+        filtered = {}
+        for slug, data in substring_matches.items():
+            card_id = data["card_id"]
+            card_info = info_data.get(card_id, {})
+            for edition_info in card_info.get("editions", {}).values():
+                if edition_info.get("set_prefix", "").lower().replace(" ", "_") in set_filters:
+                    filtered[slug] = data
+                    break
+        substring_matches = filtered
 
     if substring_matches:
         for slug, data in substring_matches.items():
             card_id = data["card_id"]
             card_info = info_data.get(card_id, {})
-            editions = list(card_info.get("editions", {}).keys())
+
+            if set_filters:
+                editions = [
+                    eid for eid, einfo in card_info.get("editions", {}).items()
+                    if einfo.get("set_prefix", "").lower().replace(" ", "_") in set_filters
+                ]
+            else:
+                editions = list(card_info.get("editions", {}).keys())
 
             if editions:
+                edition_id = random.choice(editions)
                 cards.append({
                     "card_id": card_id,
-                    "edition_id": random.choice(editions),
+                    "edition_id": edition_id,
                     "name": data["name"],
                 })
 
+        if set_filters:
+            collector_order = {}
+            for set_filter in set_filters:
+                set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
+                if os.path.exists(set_file_path):
+                    with open(set_file_path, "r", encoding="utf-8") as f:
+                        set_data = json.load(f)
+                    for num, eid in set_data.items():
+                        collector_order[eid] = num
+
+            cards.sort(key=lambda c: _sort_collector_number(
+                collector_order.get(c["edition_id"], "ZZZ")
+            ))
+
         return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+
+    if not query:
+        return JSONResponse({"cards": [], "message": "No cards found.", "fuzzy": False})
 
     # ── Step 2: API call ──
     card_data = _api_search(_format_search(q))
@@ -202,7 +242,6 @@ async def api_card_detail(card_id: str):
     if not card_info:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    # Attach collector numbers to each edition
     for edition_id, edition_info in card_info.get("editions", {}).items():
         set_prefix = edition_info.get("set_prefix", "")
         set_file_name = set_prefix.lower().replace(" ", "_")
@@ -231,6 +270,82 @@ async def api_me(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     return JSONResponse({"username": user})
+
+
+@app.get("/api/sets")
+async def api_sets():
+    sets_dir = "DATA_GA/SETS_GA"
+
+    if not os.path.exists(sets_dir):
+        return JSONResponse({"sets": []})
+
+    sets = sorted([
+        os.path.splitext(f.name)[0].upper().replace("_", " ")
+        for f in os.scandir(sets_dir)
+        if f.name.endswith(".json")
+    ])
+
+    return JSONResponse({"sets": sets})
+
+
+_set_search_cache = {}
+
+
+@app.get("/api/sets/search")
+async def api_sets_search(prefix: str):
+    from datetime import date
+    from api_ga import UPDATE_THRESHOLD
+
+    set_filter = prefix.strip().lower().replace(" ", "_")
+    set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
+
+    if set_filter not in _set_search_cache:
+        _set_search_cache[set_filter] = date.today().isoformat()
+        set_search(prefix.strip().upper(), False)
+    else:
+        last_sync = date.fromisoformat(_set_search_cache[set_filter])
+        if (date.today() - last_sync).days > UPDATE_THRESHOLD:
+            _set_search_cache[set_filter] = date.today().isoformat()
+            set_search(prefix.strip().upper(), False)
+
+    if not os.path.exists(set_file_path):
+        return JSONResponse({"cards": []})
+
+    with open(set_file_path, "r", encoding="utf-8") as f:
+        set_data = json.load(f)
+
+    slug_file = new_json(JSON_SLUGS)
+    edition_file = new_json("DATA_GA/CARDS_GA/EDITIONS.json")
+
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
+    with edition_file.open("r", encoding="utf-8") as f:
+        edition_data = json.load(f)
+
+    cards = []
+
+    for collector_number, edition_id in set_data.items():
+        card_id = edition_data.get(edition_id, {}).get("card_id")
+
+        if not card_id:
+            continue
+
+        slug_entry = next(
+            (data for data in slug_data.values() if data["card_id"] == card_id),
+            None
+        )
+
+        if not slug_entry:
+            continue
+
+        cards.append({
+            "card_id": card_id,
+            "edition_id": edition_id,
+            "name": slug_entry["name"],
+        })
+
+    return JSONResponse({"cards": cards})
 
 
 @app.post("/api/login")

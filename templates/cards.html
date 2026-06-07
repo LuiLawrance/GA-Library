@@ -1,5 +1,14 @@
 <div class="page-header cards-header">
     <div class="search-wrap">
+        <div class="set-dropdown-wrap">
+            <button class="set-dropdown-btn" onclick="toggleSetDropdown()">
+                <span id="set-dropdown-label">Sets</span>
+                <span class="set-dropdown-arrow">&#8249;</span>
+            </button>
+            <div id="set-dropdown-menu" class="set-dropdown-menu hidden">
+                <div id="set-dropdown-options"></div>
+            </div>
+        </div>
         <div class="autocomplete-wrap">
             <input type="text" id="card-search" placeholder="Search cards..." autocomplete="off"
                 onkeydown="handleCardKeydown(event)"
