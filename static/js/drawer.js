@@ -77,10 +77,13 @@ async function openCardDrawer(cardId, editionId, cardName) {
 
         const editionsHTML = editions.map(([eid, einfo], i) => `
             <div class="drawer-edition-tile" style="animation-delay: ${i * 60}ms">
-                <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
-                    title="${einfo.set_name} (${einfo.set_prefix})"
-                    onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
-                    id="edition-tile-${eid}">
+                <div class="edition-tile-wrap">
+                    <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
+                        title="${einfo.set_name} (${einfo.set_prefix})"
+                        onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
+                        id="edition-tile-${eid}">
+                    <span class="edition-prefix-badge">${einfo.set_prefix}</span>
+                </div>
             </div>
         `).join('');
 

@@ -281,6 +281,25 @@
     animation: cardReveal 0.3s ease forwards;
 }
 
+.edition-tile-wrap {
+    position: relative;
+}
+
+.edition-prefix-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+}
+
 .drawer-edition-tile img {
     width: 100%;
     border-radius: 10px;
