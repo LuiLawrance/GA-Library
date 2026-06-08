@@ -46,6 +46,12 @@ async function navigate(path, pushState = true) {
         await loadSets();
         setTimeout(setupFooterScroll, 100);
     }
+
+    if (path === '/inventory') {
+        if (typeof window.initInventory === 'function') {
+            await window.initInventory();
+        }
+    }
 }
 
 function sleep(ms) {

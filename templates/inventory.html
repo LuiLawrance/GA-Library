@@ -1,4 +1,188 @@
-<div class="hero">
-    <span class="hero-label">Inventory</span>
-    <p class="hero-sub">Coming soon.</p>
+<div class="inv-page" id="inv-page">
+
+    <!-- ── Bin grid view ── -->
+    <div class="inv-bins-view" id="inv-bins-view">
+        <div class="inv-bins-header">
+            <div>
+                <span class="inv-label">Inventory</span>
+                <span class="inv-subtitle" id="inv-bin-subtitle">Loading...</span>
+            </div>
+        </div>
+        <div class="inv-bins-grid" id="inv-bins-grid"></div>
+    </div>
+
+    <!-- ── Bin detail view ── -->
+    <div class="inv-detail-view hidden" id="inv-detail-view">
+        <div class="inv-detail-header">
+            <div class="inv-detail-back" onclick="closeBinDetail()">
+                <span class="inv-back-arrow">←</span>
+                <span>Inventory</span>
+            </div>
+            <div class="inv-detail-title-row">
+                <div>
+                    <div class="inv-detail-name" id="detail-bin-name"></div>
+                    <div class="inv-detail-meta" id="detail-bin-meta"></div>
+                </div>
+                <div class="inv-detail-header-right">
+                    <div class="inv-detail-counts" id="detail-bin-counts"></div>
+                    <div class="inv-detail-controls">
+                        <input type="text" id="inv-card-filter" placeholder="Filter..." autocomplete="off"
+                               oninput="filterBinCards(this.value)">
+                        <select class="inv-sort-select" id="inv-card-sort" onchange="renderBinCards()">
+                            <option value="name">Name</option>
+                            <option value="set">Set</option>
+                            <option value="rarity">Rarity</option>
+                            <option value="quantity">Qty</option>
+                        </select>
+                        <button class="inv-settings-btn" onclick="openBinSettings()" title="Bin settings">⚙</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="inv-card-grid-wrap">
+            <div class="inv-card-grid" id="inv-card-grid"></div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Create bin modal ── -->
+<div id="inv-create-modal" class="inv-modal-overlay hidden" onclick="closeCreateModal()">
+    <div class="inv-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title">New Bin</span>
+            <button class="inv-modal-close" onclick="closeCreateModal()">✕</button>
+        </div>
+        <div class="inv-modal-fields">
+            <div class="inv-field-group">
+                <label class="inv-field-label">Name</label>
+                <input type="text" id="create-bin-name" class="inv-text-input"
+                       placeholder="e.g. Trade Box, Binder 1..."
+                       onkeydown="if(event.key==='Enter') submitCreateBin()">
+            </div>
+            <div class="inv-field-group">
+                <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+                <input type="text" id="create-bin-desc" class="inv-text-input" placeholder="...">
+            </div>
+        </div>
+        <div id="create-bin-error" class="inv-modal-error hidden"></div>
+        <button class="inv-modal-submit" onclick="submitCreateBin()">Create Bin</button>
+    </div>
+</div>
+
+<!-- ── Bin settings modal ── -->
+<div id="inv-settings-modal" class="inv-modal-overlay hidden" onclick="closeBinSettings()">
+    <div class="inv-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title">Bin Settings</span>
+            <button class="inv-modal-close" onclick="closeBinSettings()">✕</button>
+        </div>
+        <div class="inv-modal-fields">
+            <div class="inv-field-group">
+                <label class="inv-field-label">Name</label>
+                <input type="text" id="settings-bin-name" class="inv-text-input">
+            </div>
+            <div class="inv-field-group">
+                <label class="inv-field-label">Description</label>
+                <input type="text" id="settings-bin-desc" class="inv-text-input" placeholder="...">
+            </div>
+        </div>
+        <div id="settings-bin-error" class="inv-modal-error hidden"></div>
+        <div class="inv-modal-actions">
+            <button class="inv-modal-submit" onclick="submitBinSettings()">Save</button>
+            <button class="inv-modal-danger" id="settings-delete-btn" onclick="deleteBin()">Delete Bin</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Add card modal ── -->
+<div id="inv-add-modal" class="inv-modal-overlay hidden" onclick="closeAddModal()">
+    <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title">Add Card</span>
+            <button class="inv-modal-close" onclick="closeAddModal()">✕</button>
+        </div>
+
+        <!-- Search step -->
+        <div id="add-step-search">
+            <div class="inv-add-search-wrap">
+                <div class="autocomplete-wrap" style="flex:1">
+                    <input type="text" id="add-card-search" class="inv-text-input"
+                           placeholder="Search cards..."
+                           onkeydown="handleAddCardKeydown(event)"
+                           oninput="fetchAddCardSuggestions(this.value)"
+                           autocomplete="off">
+                    <div id="add-card-autocomplete" class="autocomplete-list hidden"></div>
+                </div>
+                <button class="btn-search" onclick="searchAddCards()">Search</button>
+            </div>
+            <div class="inv-add-results" id="add-card-results">
+                <div class="inv-search-placeholder" style="padding:30px 0">
+                    <span class="inv-empty-icon">⬡</span>
+                    <p>Search for a card to add it.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Foil + qty step (hidden until card selected) -->
+        <div id="add-step-foil" class="hidden">
+            <div class="inv-add-card-preview">
+                <img class="inv-modal-img" id="add-modal-img" src="" alt="">
+                <div class="inv-add-card-detail">
+                    <div class="inv-modal-title" id="add-modal-name"></div>
+                    <div class="inv-modal-set" id="add-modal-set"></div>
+                </div>
+            </div>
+            <div class="inv-modal-foils" id="add-modal-foils"></div>
+            <div class="inv-modal-qty-row">
+                <label class="inv-field-label">Quantity</label>
+                <div class="inv-qty-wrap">
+                    <button class="inv-qty-btn" onclick="changeAddQty(-1)">−</button>
+                    <input type="number" class="inv-qty-input" id="add-modal-qty" value="1" min="1" max="999">
+                    <button class="inv-qty-btn" onclick="changeAddQty(1)">+</button>
+                </div>
+            </div>
+            <div class="inv-add-step-actions">
+                <button class="inv-btn-back" onclick="backToSearch()">← Back</button>
+                <button class="inv-modal-submit" id="add-modal-submit" onclick="submitAddCard()" disabled>
+                    Add to Bin
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Card detail modal (click on existing card) ── -->
+<div id="inv-card-modal" class="inv-modal-overlay hidden" onclick="closeCardModal()">
+    <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <div>
+                <div class="inv-modal-title" id="card-modal-name"></div>
+                <div class="inv-modal-set" id="card-modal-set"></div>
+            </div>
+            <button class="inv-modal-close" onclick="closeCardModal()">✕</button>
+        </div>
+        <div class="inv-add-card-preview">
+            <img class="inv-modal-img" id="card-modal-img" src="" alt="">
+            <div class="inv-add-card-detail">
+                <div class="inv-field-group">
+                    <label class="inv-field-label">Foil Type</label>
+                    <div class="inv-card-modal-foil" id="card-modal-foil"></div>
+                </div>
+                <div class="inv-field-group">
+                    <label class="inv-field-label">Quantity</label>
+                    <div class="inv-qty-wrap">
+                        <button class="inv-qty-btn" onclick="changeCardModalQty(-1)">−</button>
+                        <input type="number" class="inv-qty-input" id="card-modal-qty" value="1" min="0" max="999">
+                        <button class="inv-qty-btn" onclick="changeCardModalQty(1)">+</button>
+                    </div>
+                </div>
+                <div class="inv-card-modal-hint">Set quantity to 0 to remove.</div>
+            </div>
+        </div>
+        <div class="inv-modal-actions">
+            <button class="inv-modal-submit" onclick="saveCardModal()">Save</button>
+            <button class="inv-modal-danger" onclick="removeCardModal()">Remove</button>
+        </div>
+    </div>
 </div>

@@ -53,7 +53,7 @@ def get_current_user(request: Request) -> str | None:
 
 
 def serve_index():
-    with open("templates/index.html") as f:
+    with open("templates/index.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
@@ -423,7 +423,7 @@ async def api_sets_search(prefix: str):
 
 
 @app.post("/api/login")
-async def api_login(response: Response, username: str = Form(...), password: str = Form(...)):
+async def api_login(username: str = Form(...), password: str = Form(...)):
     user = user_login(username, password)
 
     if not user:
@@ -431,30 +431,32 @@ async def api_login(response: Response, username: str = Form(...), password: str
 
     token = create_token(username)
 
-    response.set_cookie(
+    resp = JSONResponse({"username": username})
+    resp.set_cookie(
         key="token",
         value=token,
         httponly=True,
+        samesite="lax",
         max_age=JWT_EXPIRE_MINUTES * 60
     )
-
-    return JSONResponse({"username": username})
+    return resp
 
 
 @app.post("/api/logout")
-async def api_logout(response: Response):
-    response.delete_cookie("token")
-    return JSONResponse({"message": "Logged out"})
+async def api_logout():
+    resp = JSONResponse({"message": "Logged out"})
+    resp.delete_cookie("token")
+    return resp
 
 
 @app.post("/api/register")
-async def api_register(response: Response, username: str = Form(...), password: str = Form(...)):
+async def api_register(username: str = Form(...), password: str = Form(...)):
     try:
         user_create(username, password)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    return await api_login(response, username=username, password=password)
+    return await api_login(username=username, password=password)
 
 
 @app.get("/images/{edition_id}.jpg")
@@ -474,41 +476,248 @@ async def inventory_page():
 
 @app.get("/fragments/cards", response_class=HTMLResponse)
 async def fragment_cards():
-    with open("templates/cards.html") as f:
+    with open("templates/cards.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @app.get("/fragments/collection", response_class=HTMLResponse)
 async def fragment_collection():
-    with open("templates/collection.html") as f:
+    with open("templates/collection.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @app.get("/fragments/decks", response_class=HTMLResponse)
 async def fragment_decks():
-    with open("templates/decks.html") as f:
+    with open("templates/decks.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @app.get("/fragments/home", response_class=HTMLResponse)
 async def fragment_home():
-    with open("templates/home.html") as f:
+    with open("templates/home.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @app.get("/fragments/inventory", response_class=HTMLResponse)
 async def fragment_inventory():
-    with open("templates/inventory.html") as f:
+    with open("templates/inventory.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @app.get("/fragments/login", response_class=HTMLResponse)
 async def fragment_login():
-    with open("templates/login.html") as f:
+    with open("templates/login.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
 @app.get("/fragments/prices", response_class=HTMLResponse)
 async def fragment_prices():
-    with open("templates/prices.html") as f:
+    with open("templates/prices.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+# ════════════════════════════════════════
+# ── Inventory API ──
+# ════════════════════════════════════════
+
+DEFAULT_BIN = "Inventory"
+
+
+def _inv_load(username: str) -> dict:
+    inv_file = new_json(f"DATA_GA/INV_GA/{username}.json")
+    with inv_file.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    # Empty file → init default structure
+    if not raw:
+        data = {DEFAULT_BIN: {"default": True, "desc": "", "public": False, "cards": {}}}
+        _inv_save(username, data)
+        return data
+
+    # Old flat UUID-keyed structure → migrate to default bin
+    first_val = next(iter(raw.values()), {})
+    if isinstance(first_val, dict) and "card_id" in first_val:
+        data = {DEFAULT_BIN: {"default": True, "desc": "", "public": False, "cards": {}}}
+        _inv_save(username, data)
+        return data
+
+    return raw
+
+
+def _inv_save(username: str, data: dict) -> None:
+    inv_file = new_json(f"DATA_GA/INV_GA/{username}.json")
+    with inv_file.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+@app.get("/api/inventory")
+async def api_inventory_get(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return JSONResponse({"bins": _inv_load(user)})
+
+
+@app.get("/api/inv/info")
+async def api_inv_info():
+    info_file = new_json(JSON_INFO)
+    with info_file.open("r", encoding="utf-8") as f:
+        return JSONResponse(json.load(f))
+
+
+@app.get("/api/inv/slugs")
+async def api_inv_slugs():
+    slug_file = new_json(JSON_SLUGS)
+    with slug_file.open("r", encoding="utf-8") as f:
+        return JSONResponse(json.load(f))
+
+
+# ── Bin CRUD ──
+
+@app.post("/api/inventory/bins")
+async def api_bin_create(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    name = body.get("name", "").strip()
+    desc = body.get("desc", "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    inv = _inv_load(user)
+    if name in inv:
+        raise HTTPException(status_code=400, detail="Bin already exists")
+
+    inv[name] = {"default": False, "desc": desc, "public": False, "cards": {}}
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.patch("/api/inventory/bins/{bin_name}")
+async def api_bin_patch(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    new_name = body.get("name", "").strip()
+    desc = body.get("desc", "").strip()
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    if new_name and new_name != bin_name:
+        if new_name in inv:
+            raise HTTPException(status_code=400, detail="Bin name already taken")
+        inv[new_name] = inv.pop(bin_name)
+        bin_name = new_name
+
+    inv[bin_name]["desc"] = desc
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/inventory/bins/{bin_name}")
+async def api_bin_delete(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    if inv[bin_name].get("default"):
+        raise HTTPException(status_code=400, detail="Cannot delete the default bin")
+
+    del inv[bin_name]
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+# ── Card CRUD ──
+
+@app.post("/api/inventory/card")
+async def api_card_add(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    bin_name = body.get("bin")
+    card_id = body.get("card_id")
+    edition_id = body.get("edition_id")
+    foil_id = body.get("foil_id")
+    quantity = int(body.get("quantity", 1))
+
+    if not all([bin_name, card_id, edition_id, foil_id]):
+        raise HTTPException(status_code=400, detail="Missing required fields")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    cards = inv[bin_name]["cards"]
+    cards.setdefault(card_id, {}).setdefault(edition_id, {})
+    existing = cards[card_id][edition_id].get(foil_id, 0)
+    cards[card_id][edition_id][foil_id] = existing + quantity
+
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.patch("/api/inventory/card")
+async def api_card_patch(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    bin_name = body.get("bin")
+    card_id = body.get("card_id")
+    edition_id = body.get("edition_id")
+    foil_id = body.get("foil_id")
+    quantity = int(body.get("quantity", 1))
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    try:
+        inv[bin_name]["cards"][card_id][edition_id][foil_id] = quantity
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Card entry not found")
+
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/inventory/card")
+async def api_card_delete(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    bin_name = body.get("bin")
+    card_id = body.get("card_id")
+    edition_id = body.get("edition_id")
+    foil_id = body.get("foil_id")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    cards = inv[bin_name]["cards"]
+    try:
+        del cards[card_id][edition_id][foil_id]
+        if not cards[card_id][edition_id]: del cards[card_id][edition_id]
+        if not cards[card_id]: del cards[card_id]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Card entry not found")
+
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
