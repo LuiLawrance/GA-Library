@@ -1,3 +1,4 @@
+from inv_ga import inv_init
 from pathlib import Path
 from util_file import new_json
 
@@ -31,7 +32,7 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
     with users_file.open("w", encoding="utf-8") as f:
         json.dump(users_data, f, indent=4, ensure_ascii=False)
 
-    new_json(f"{DIR_INV}/{username}.json", debug)
+    inv_init(username, debug)
     new_json(f"{DIR_WISH}/{username}.json", debug)
     new_json(f"{DIR_DECK}/{username}.json", debug)
 

@@ -1,5 +1,5 @@
 from api_ga import card_search, set_search
-from inv_ga import inv_edit, inv_list
+from inv_ga import bin_create, bin_delete, bin_edit, bin_list, inv_edit
 from pricing_ga import add_listing, add_sale
 from user import user_create, user_delete, user_login, user_reset
 
@@ -8,8 +8,11 @@ def menu_inventory(username: str) -> None:
     while True:
         print(f"\nInventory — [ {username} ]")
         print("0. Log Out")
-        print("1. View Inventory")
+        print("1. View Bins")
         print("2. Edit Card")
+        print("3. Edit Bin")
+        print("4. Create Bin")
+        print("5. Delete Bin")
 
         choice = input("\nSelect option: ").strip()
 
@@ -19,11 +22,20 @@ def menu_inventory(username: str) -> None:
                 return
 
             case "1":
-                inv_list(username)
+                bin_list(username)
 
             case "2":
                 card_name = input("\nEnter card name: ").strip()
                 inv_edit(username, card_name)
+
+            case "3":
+                bin_edit(username)
+
+            case "4":
+                bin_create(username)
+
+            case "5":
+                bin_delete(username)
 
             case _:
                 print("\nInvalid option.")
