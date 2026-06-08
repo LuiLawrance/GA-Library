@@ -138,12 +138,15 @@ async function enrichAndRenderBinCards(bin) {
 
                 for (const [foil_id, quantity] of Object.entries(foils)) {
                     let foilKind = 'Standard';
+                    let foilKindRaw = '';
                     if (foilsData[foil_id]) {
-                        foilKind = foilsData[foil_id].kind?.charAt(0).toUpperCase() + foilsData[foil_id].kind?.slice(1) || 'Standard';
+                        foilKindRaw = foilsData[foil_id].kind || '';
+                        foilKind = foilKindRaw.charAt(0).toUpperCase() + foilKindRaw.slice(1) || 'Standard';
                     } else {
                         for (const finfo of Object.values(foilsData)) {
                             if (finfo.variants?.[foil_id]) {
-                                foilKind = finfo.variants[foil_id].kind || 'Variant';
+                                foilKindRaw = finfo.variants[foil_id].kind || '';
+                                foilKind = foilKindRaw || 'Variant';
                                 break;
                             }
                         }
@@ -153,7 +156,8 @@ async function enrichAndRenderBinCards(bin) {
                         cardName,
                         setPrefix: editionInfo.set_prefix || '',
                         rarity: editionInfo.rarity,
-                        foilKind
+                        foilKind,
+                        foilKindRaw: foilKindRaw.toLowerCase()
                     });
                 }
             }
@@ -223,6 +227,17 @@ function filterBinCards(value) {
     renderBinCards();
 }
 
+// CSR=7, CUR=8, CPR=9 are always foil — skip foil indicator for these
+const ALWAYS_FOIL_RARITIES = new Set([7, 8, 9]);
+
+function getFoilSuffix(row) {
+    if (ALWAYS_FOIL_RARITIES.has(row.rarity)) return '';
+    const kind = row.foilKindRaw || '';
+    if (kind === 'nonfoil' || kind === '') return '';
+    if (kind === 'foil') return '⭐';
+    return '💎';
+}
+
 function buildInvCardTile(row, index) {
     const rarity = rarityMapInv[row.rarity] || '';
     const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
@@ -238,7 +253,7 @@ function buildInvCardTile(row, index) {
         <div class="edition-tile-wrap">
             <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
                 onerror="this.style.opacity='0.1'">
-            ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}
+            ${rarity ? `<span class="edition-rarity-badge ${rarityClass}${getFoilSuffix(row) ? ' has-foil-suffix' : ''}">${rarity}${getFoilSuffix(row)}</span>` : ''}
         </div>
         <span class="inv-qty-badge">x${row.quantity}</span>
         <div class="inv-card-tile-overlay">
