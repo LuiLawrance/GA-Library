@@ -46,6 +46,57 @@
 
 </div>
 
+<!-- ── Bin context menu ── -->
+<div id="inv-bin-context-menu" class="inv-context-menu hidden">
+    <button class="inv-context-item" id="ctx-set-default" onclick="ctxSetDefault()">
+        <span class="inv-context-icon">★</span> Set as Default
+    </button>
+    <button class="inv-context-item" onclick="ctxRename()">
+        <span class="inv-context-icon">✎</span> Rename
+    </button>
+    <button class="inv-context-item" onclick="ctxEditDesc()">
+        <span class="inv-context-icon">≡</span> Edit Description
+    </button>
+    <div class="inv-context-divider"></div>
+    <button class="inv-context-item inv-context-item-danger" id="ctx-delete" onclick="ctxDelete()">
+        <span class="inv-context-icon">✕</span> Delete Bin
+    </button>
+</div>
+
+<!-- ── Rename bin modal ── -->
+<div id="inv-rename-modal" class="inv-modal-overlay hidden" onclick="closeRenameModal()">
+    <div class="inv-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title">Rename Bin</span>
+            <button class="inv-modal-close" onclick="closeRenameModal()">✕</button>
+        </div>
+        <div class="inv-field-group">
+            <label class="inv-field-label">Name</label>
+            <input type="text" id="rename-bin-input" class="inv-text-input"
+                   onkeydown="if(event.key==='Enter') submitRenameBin()">
+        </div>
+        <div id="rename-bin-error" class="inv-modal-error hidden"></div>
+        <button class="inv-modal-submit" onclick="submitRenameBin()">Rename</button>
+    </div>
+</div>
+
+<!-- ── Edit description modal ── -->
+<div id="inv-desc-modal" class="inv-modal-overlay hidden" onclick="closeDescModal()">
+    <div class="inv-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title">Edit Description</span>
+            <button class="inv-modal-close" onclick="closeDescModal()">✕</button>
+        </div>
+        <div class="inv-field-group">
+            <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+            <input type="text" id="desc-bin-input" class="inv-text-input" placeholder="..."
+                   onkeydown="if(event.key==='Enter') submitDescBin()">
+        </div>
+        <div id="desc-bin-error" class="inv-modal-error hidden"></div>
+        <button class="inv-modal-submit" onclick="submitDescBin()">Save</button>
+    </div>
+</div>
+
 <!-- ── Create bin modal ── -->
 <div id="inv-create-modal" class="inv-modal-overlay hidden" onclick="closeCreateModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">
@@ -90,6 +141,8 @@
         <div id="settings-bin-error" class="inv-modal-error hidden"></div>
         <div class="inv-modal-actions">
             <button class="inv-modal-submit" onclick="submitBinSettings()">Save</button>
+            <button class="inv-btn-make-default" id="settings-default-btn" onclick="settingsSetDefault()">Make Default
+            </button>
             <button class="inv-modal-danger" id="settings-delete-btn" onclick="deleteBin()">Delete Bin</button>
         </div>
     </div>

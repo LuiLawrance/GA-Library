@@ -621,6 +621,23 @@ async def api_bin_patch(bin_name: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/inventory/bins/{bin_name}/default")
+async def api_bin_set_default(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    for name in inv:
+        inv[name]["default"] = (name == bin_name)
+
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
 @app.delete("/api/inventory/bins/{bin_name}")
 async def api_bin_delete(bin_name: str, request: Request):
     user = get_current_user(request)

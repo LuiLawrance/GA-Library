@@ -59,6 +59,10 @@ function buildBinTile(name, bin, index) {
         <div class="inv-bin-name">${name}</div>
         <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}${bin.desc ? ' · ' + bin.desc : ''}</div>`;
     tile.onclick = () => openBinDetail(name);
+    tile.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        openBinContextMenu(e, name);
+    });
     return tile;
 }
 
@@ -654,6 +658,197 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#add-card-search') && !e.target.closest('#add-card-autocomplete')) hideAddAc();
 }, true);
 
+
+// ═══════════════════════════════════════
+// BIN CONTEXT MENU
+// ═══════════════════════════════════════
+
+let ctxTargetBin = null;
+
+function openBinContextMenu(e, binName) {
+    ctxTargetBin = binName;
+    const menu = document.getElementById('inv-bin-context-menu');
+    const setDefaultBtn = document.getElementById('ctx-set-default');
+
+    // Hide "set as default" if already default, hide "delete" for default bin
+    setDefaultBtn.style.display = invBins[binName]?.default ? 'none' : '';
+    const isDefault = invBins[binName]?.default;
+    const deleteBtn = document.getElementById('ctx-delete');
+    if (deleteBtn) deleteBtn.style.display = isDefault ? 'none' : '';
+    const divider = document.querySelector('#inv-bin-context-menu .inv-context-divider');
+    if (divider) divider.style.display = isDefault ? 'none' : '';
+
+    menu.classList.remove('hidden');
+
+    // Position near cursor, keep within viewport
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 60);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+}
+
+function closeBinContextMenu() {
+    document.getElementById('inv-bin-context-menu').classList.add('hidden');
+    ctxTargetBin = null;
+}
+
+function ctxRename() {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+
+    const input = document.getElementById('rename-bin-input');
+    const errEl = document.getElementById('rename-bin-error');
+    input.value = name;
+    input.dataset.originalName = name;
+    errEl.classList.add('hidden');
+    document.getElementById('inv-rename-modal').classList.remove('hidden');
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 50);
+}
+
+function closeRenameModal() {
+    document.getElementById('inv-rename-modal').classList.add('hidden');
+}
+
+async function submitRenameBin() {
+    const newName = document.getElementById('rename-bin-input').value.trim();
+    const errEl = document.getElementById('rename-bin-error');
+    errEl.classList.add('hidden');
+
+    if (!newName) {
+        errEl.textContent = 'Name is required.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    // Find the bin being renamed (stored before modal opened)
+    const oldName = document.getElementById('rename-bin-input').dataset.originalName || newName;
+
+    if (newName !== oldName && invBins[newName]) {
+        errEl.textContent = 'A bin with that name already exists.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    if (newName === oldName) {
+        closeRenameModal();
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(oldName)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: newName, desc: invBins[oldName]?.desc || ''})
+        });
+
+        if (res.ok) {
+            invBins[newName] = invBins[oldName];
+            delete invBins[oldName];
+            closeRenameModal();
+            renderBinGrid();
+        } else {
+            const err = await res.json();
+            errEl.textContent = err.detail || 'Failed to rename.';
+            errEl.classList.remove('hidden');
+        }
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+function ctxEditDesc() {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+
+    const input = document.getElementById('desc-bin-input');
+    input.value = invBins[name]?.desc || '';
+    input.dataset.targetBin = name;
+    document.getElementById('desc-bin-error').classList.add('hidden');
+    document.getElementById('inv-desc-modal').classList.remove('hidden');
+    setTimeout(() => {
+        input.focus();
+    }, 50);
+}
+
+function closeDescModal() {
+    document.getElementById('inv-desc-modal').classList.add('hidden');
+}
+
+async function submitDescBin() {
+    const input = document.getElementById('desc-bin-input');
+    const binName = input.dataset.targetBin;
+    const desc = input.value.trim();
+    const errEl = document.getElementById('desc-bin-error');
+    errEl.classList.add('hidden');
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(binName)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: binName, desc})
+        });
+
+        if (res.ok) {
+            invBins[binName].desc = desc;
+            closeDescModal();
+            renderBinGrid();
+        } else {
+            const err = await res.json();
+            errEl.textContent = err.detail || 'Failed to save.';
+            errEl.classList.remove('hidden');
+        }
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function ctxDelete() {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+
+    if (invBins[name]?.default) return;
+    if (!confirm(`Delete bin "${name}"? All cards inside will be removed.`)) return;
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(name)}`, {method: 'DELETE'});
+        if (res.ok) {
+            delete invBins[name];
+            renderBinGrid();
+        }
+    } catch {
+        console.error('Failed to delete bin');
+    }
+}
+
+async function ctxSetDefault() {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(name)}/default`, {method: 'POST'});
+        if (res.ok) {
+            // Update local state — clear all defaults then set the new one
+            for (const b of Object.keys(invBins)) invBins[b].default = (b === name);
+            renderBinGrid();
+        }
+    } catch {
+        console.error('Failed to set default bin');
+    }
+}
+
+// Close context menu on any click or scroll
+document.addEventListener('click', () => closeBinContextMenu());
+document.addEventListener('scroll', () => closeBinContextMenu(), true);
+
 // ═══════════════════════════════════════
 // CREATE BIN MODAL
 // ═══════════════════════════════════════
@@ -719,11 +914,30 @@ function openBinSettings() {
     document.getElementById('settings-bin-error').classList.add('hidden');
     const deleteBtn = document.getElementById('settings-delete-btn');
     if (deleteBtn) deleteBtn.style.display = bin?.default ? 'none' : '';
+    const defaultBtn = document.getElementById('settings-default-btn');
+    if (defaultBtn) defaultBtn.style.display = bin?.default ? 'none' : '';
     document.getElementById('inv-settings-modal').classList.remove('hidden');
 }
 
 function closeBinSettings() {
     document.getElementById('inv-settings-modal').classList.add('hidden');
+}
+
+async function settingsSetDefault() {
+    if (!activeBin) return;
+    const name = activeBin;
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(name)}/default`, {method: 'POST'});
+        if (res.ok) {
+            for (const b of Object.keys(invBins)) invBins[b].default = (b === name);
+            closeBinSettings();
+            // Update header badge visibility
+            document.getElementById('detail-bin-name').textContent = name;
+        }
+    } catch {
+        console.error('Failed to set default bin');
+    }
 }
 
 async function submitBinSettings() {
