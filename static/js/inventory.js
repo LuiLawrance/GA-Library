@@ -357,6 +357,8 @@ function openAddModal() {
     document.getElementById('add-card-results').innerHTML = `<div class="inv-search-placeholder" style="padding:30px 0"><span class="inv-empty-icon">⬡</span><p>Search for a card to add it.</p></div>`;
     document.getElementById('add-step-search').classList.remove('hidden');
     document.getElementById('add-step-foil').classList.add('hidden');
+    document.getElementById('add-back-btn').classList.add('hidden');
+    document.querySelector('#inv-add-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
     document.getElementById('inv-add-modal').classList.remove('hidden');
     setTimeout(() => document.getElementById('add-card-search').focus(), 60);
 }
@@ -374,6 +376,8 @@ function closeAddModal() {
 function backToSearch() {
     document.getElementById('add-step-foil').classList.add('hidden');
     document.getElementById('add-step-search').classList.remove('hidden');
+    document.getElementById('add-back-btn').classList.add('hidden');
+    document.querySelector('#inv-add-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
     addModalCardId = null;
     addModalCardData = null;
     addModalEditionId = null;
@@ -451,6 +455,8 @@ async function goToFoilStep(cardId, editionId, cardName) {
 
     document.getElementById('add-step-search').classList.add('hidden');
     document.getElementById('add-step-foil').classList.remove('hidden');
+    document.getElementById('add-back-btn').classList.remove('hidden');
+    document.querySelector('#inv-add-modal .inv-modal-wide').classList.add('inv-modal-foil-step');
 
     try {
         const res = await fetch(`/api/cards/${cardId}`);

@@ -98,7 +98,8 @@
 <!-- ── Add card modal ── -->
 <div id="inv-add-modal" class="inv-modal-overlay hidden" onclick="closeAddModal()">
     <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
-        <div class="inv-modal-header">
+        <div class="inv-modal-header inv-add-modal-header">
+            <button class="inv-btn-back-arrow hidden" id="add-back-btn" onclick="backToSearch()">‹</button>
             <span class="inv-modal-title">Add Card</span>
             <button class="inv-modal-close" onclick="closeAddModal()">✕</button>
         </div>
@@ -126,27 +127,31 @@
 
         <!-- Foil + qty step (hidden until card selected) -->
         <div id="add-step-foil" class="hidden">
-            <div class="inv-add-card-preview">
-                <img class="inv-modal-img" id="add-modal-img" src="" alt="">
-                <div class="inv-add-card-detail">
-                    <div class="inv-modal-title" id="add-modal-name"></div>
-                    <div class="inv-modal-set" id="add-modal-set"></div>
+            <div class="inv-foil-step-body">
+                <img class="inv-modal-img-large" id="add-modal-img" src="" alt="">
+                <div class="inv-foil-step-right">
+                    <div class="inv-foil-step-top">
+                        <div>
+                            <div class="inv-modal-title" id="add-modal-name"></div>
+                            <div class="inv-modal-set" id="add-modal-set"></div>
+                        </div>
+                        <div class="inv-modal-foils" id="add-modal-foils"></div>
+                    </div>
+                    <div class="inv-foil-step-bottom">
+                        <div class="inv-modal-qty-row">
+                            <label class="inv-field-label">Quantity</label>
+                            <div class="inv-qty-wrap">
+                                <button class="inv-qty-btn" onclick="changeAddQty(-1)">−</button>
+                                <input type="number" class="inv-qty-input" id="add-modal-qty" value="1" min="1"
+                                       max="999">
+                                <button class="inv-qty-btn" onclick="changeAddQty(1)">+</button>
+                            </div>
+                        </div>
+                        <button class="inv-modal-submit" id="add-modal-submit" onclick="submitAddCard()" disabled>
+                            Add to Bin
+                        </button>
+                    </div>
                 </div>
-            </div>
-            <div class="inv-modal-foils" id="add-modal-foils"></div>
-            <div class="inv-modal-qty-row">
-                <label class="inv-field-label">Quantity</label>
-                <div class="inv-qty-wrap">
-                    <button class="inv-qty-btn" onclick="changeAddQty(-1)">−</button>
-                    <input type="number" class="inv-qty-input" id="add-modal-qty" value="1" min="1" max="999">
-                    <button class="inv-qty-btn" onclick="changeAddQty(1)">+</button>
-                </div>
-            </div>
-            <div class="inv-add-step-actions">
-                <button class="inv-btn-back" onclick="backToSearch()">← Back</button>
-                <button class="inv-modal-submit" id="add-modal-submit" onclick="submitAddCard()" disabled>
-                    Add to Bin
-                </button>
             </div>
         </div>
     </div>
