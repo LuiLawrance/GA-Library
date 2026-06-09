@@ -1442,3 +1442,90 @@
     opacity: 1;
     transform: scale(1.03);
 }
+
+/* ── Move card modal ── */
+.inv-move-card-info {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 2px 0 4px;
+}
+
+.inv-move-bin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.inv-move-bin-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.inv-move-bin-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+.inv-move-bin-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: left;
+    width: 100%;
+}
+
+.inv-move-bin-option:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(200, 169, 110, 0.06);
+}
+
+.inv-move-bin-option-meta {
+    font-size: 0.66rem;
+    opacity: 0.5;
+}
+
+.inv-move-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+}
+
+.inv-move-new-bin-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    background: none;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+    text-align: left;
+}
+
+.inv-move-new-bin-btn:hover {
+    border-color: var(--border-focus);
+    color: var(--text);
+}
+
+.inv-move-qty-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}

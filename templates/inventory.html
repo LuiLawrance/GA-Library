@@ -97,6 +97,38 @@
     </button>
 </div>
 
+<!-- ── Card context menu ── -->
+<div id="inv-card-context-menu" class="inv-context-menu hidden">
+    <button class="inv-context-item" onclick="ctxCardMove()">
+        <span class="inv-context-icon">⇄</span> Move to Bin
+    </button>
+</div>
+
+<!-- ── Move card modal ── -->
+<div id="inv-move-modal" class="inv-modal-overlay hidden" onclick="closeMoveModal()">
+    <div class="inv-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title">Move to Bin</span>
+            <button class="inv-modal-close" onclick="closeMoveModal()">✕</button>
+        </div>
+        <div class="inv-move-card-info" id="move-card-info"></div>
+        <div class="inv-move-qty-row">
+            <label class="inv-field-label">Quantity to move</label>
+            <div class="inv-qty-wrap">
+                <button class="inv-qty-btn" onclick="changeMoveQty(-1)">−</button>
+                <input type="number" class="inv-qty-input" id="move-qty" placeholder="All" min="1">
+                <button class="inv-qty-btn" onclick="changeMoveQty(1)">+</button>
+            </div>
+        </div>
+        <div class="inv-move-bin-list" id="move-bin-list"></div>
+        <div class="inv-move-divider"></div>
+        <button class="inv-move-new-bin-btn" onclick="ctxMoveToNewBin()">
+            <span>+</span> Create new bin &amp; move
+        </button>
+        <div id="move-modal-error" class="inv-modal-error hidden"></div>
+    </div>
+</div>
+
 <!-- ── Rename bin modal ── -->
 <div id="inv-rename-modal" class="inv-modal-overlay hidden" onclick="closeRenameModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">

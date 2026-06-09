@@ -472,6 +472,10 @@ function buildInvCardTile(row, index) {
         </div>`;
 
     tile.addEventListener('click', () => openInvDrawer(row.card_id, row.edition_id, row.cardName));
+    tile.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        openCardContextMenu(e, row);
+    });
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
     return tile;
 }
@@ -881,6 +885,7 @@ document.addEventListener('click', e => {
     if (!document.getElementById('inv-add-modal')) return;
     if (!e.target.closest('#add-card-search') && !e.target.closest('#add-card-autocomplete')) hideAddAc();
     if (!e.target.closest('.inv-filter-dropdown-wrap')) closeFilterDropdown();
+    if (!e.target.closest('#inv-card-context-menu')) closeCardContextMenu();
 }, true);
 
 
@@ -1395,6 +1400,188 @@ function selectInvDrawerEdition(editionId) {
 
     drawer.querySelectorAll('.drawer-edition-tile img').forEach(img => img.classList.remove('edition-selected'));
     document.getElementById(`edition-tile-inv-${editionId}`)?.classList.add('edition-selected');
+}
+
+
+// ═══════════════════════════════════════
+// CARD CONTEXT MENU
+// ═══════════════════════════════════════
+
+let ctxCardRow = null;
+
+function openCardContextMenu(e, row) {
+    ctxCardRow = row;
+    const menu = document.getElementById('inv-card-context-menu');
+    menu.classList.remove('hidden');
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 60);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+}
+
+function closeCardContextMenu() {
+    document.getElementById('inv-card-context-menu')?.classList.add('hidden');
+    ctxCardRow = null;
+}
+
+function ctxCardMove() {
+    if (!ctxCardRow) return;
+    const row = ctxCardRow;
+    closeCardContextMenu();
+    openMoveModal(row);
+}
+
+// ═══════════════════════════════════════
+// MOVE CARD MODAL
+// ═══════════════════════════════════════
+
+let moveRow = null;
+
+function changeMoveQty(delta) {
+    const input = document.getElementById('move-qty');
+    const max = moveRow?.quantity || 999;
+    const current = parseInt(input.value) || 0;
+    const next = Math.max(1, Math.min(max, current + delta));
+    input.value = next;
+}
+
+function openMoveModal(row) {
+    moveRow = row;
+
+    // Card info line
+    document.getElementById('move-card-info').textContent =
+        `${row.cardName} · ${row.setPrefix} · ${row.foilKind}`;
+
+    document.getElementById('move-modal-error').classList.add('hidden');
+
+    const qtyInput = document.getElementById('move-qty');
+    if (qtyInput) {
+        qtyInput.value = '';
+        qtyInput.placeholder = `All (${row.quantity})`;
+    }
+
+    // Build bin list — exclude current bin
+    const list = document.getElementById('move-bin-list');
+    list.innerHTML = '';
+
+    const otherBins = Object.entries(invBins).filter(([name]) => name !== activeBin);
+
+    if (otherBins.length === 0) {
+        list.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);opacity:0.6;padding:8px 2px;">No other bins. Create one below.</div>';
+    } else {
+        otherBins.forEach(([name, bin]) => {
+            const count = countBinEntries(bin.cards || {});
+            const btn = document.createElement('button');
+            btn.className = 'inv-move-bin-option';
+            btn.innerHTML = `
+                <span>${name}${bin.default ? ' <span style="color:var(--accent);font-size:0.65rem">(default)</span>' : ''}</span>
+                <span class="inv-move-bin-option-meta">${count} card${count !== 1 ? 's' : ''}</span>`;
+            btn.onclick = () => executeMoveCard(name);
+            list.appendChild(btn);
+        });
+    }
+
+    document.getElementById('inv-move-modal').classList.remove('hidden');
+}
+
+function closeMoveModal() {
+    document.getElementById('inv-move-modal').classList.add('hidden');
+    moveRow = null;
+}
+
+async function executeMoveCard(targetBin) {
+    if (!moveRow || !activeBin) return;
+    const {card_id, edition_id, foil_id} = moveRow;
+    const maxQty = moveRow.quantity;
+    const inputVal = parseInt(document.getElementById('move-qty')?.value);
+    const quantity = (!inputVal || inputVal >= maxQty) ? maxQty : Math.max(1, inputVal);
+    const partial = quantity < maxQty;
+    const errEl = document.getElementById('move-modal-error');
+    errEl.classList.add('hidden');
+
+    try {
+        // Add to target bin
+        const addRes = await fetch('/api/inventory/card', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({bin: targetBin, card_id, edition_id, foil_id, quantity})
+        });
+
+        if (!addRes.ok) throw new Error('Failed to add to target bin');
+
+        // Remove or reduce from current bin
+        const remaining = maxQty - quantity;
+        let srcRes;
+        if (partial) {
+            srcRes = await fetch('/api/inventory/card', {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({bin: activeBin, card_id, edition_id, foil_id, quantity: remaining})
+            });
+        } else {
+            srcRes = await fetch('/api/inventory/card', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({bin: activeBin, card_id, edition_id, foil_id})
+            });
+        }
+
+        if (!srcRes.ok) throw new Error('Failed to update source bin');
+
+        // Update local state
+        const srcBin = invBins[activeBin];
+        if (partial) {
+            srcBin.cards[card_id][edition_id][foil_id] = remaining;
+            const srcRow = binCardRows.find(r => r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id);
+            if (srcRow) srcRow.quantity = remaining;
+        } else {
+            delete srcBin.cards[card_id]?.[edition_id]?.[foil_id];
+            if (srcBin.cards[card_id]?.[edition_id] && !Object.keys(srcBin.cards[card_id][edition_id]).length)
+                delete srcBin.cards[card_id][edition_id];
+            if (srcBin.cards[card_id] && !Object.keys(srcBin.cards[card_id]).length)
+                delete srcBin.cards[card_id];
+        }
+
+        const tgt = invBins[targetBin];
+        if (!tgt.cards[card_id]) tgt.cards[card_id] = {};
+        if (!tgt.cards[card_id][edition_id]) tgt.cards[card_id][edition_id] = {};
+        const existing = tgt.cards[card_id][edition_id][foil_id] || 0;
+        tgt.cards[card_id][edition_id][foil_id] = existing + quantity;
+
+        if (!partial) binCardRows = binCardRows.filter(r => !(r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id));
+
+        closeMoveModal();
+        renderBinCards();
+        populateFilterMenus();
+
+    } catch (err) {
+        errEl.textContent = err.message || 'Move failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function ctxMoveToNewBin() {
+    const name = prompt('New bin name:')?.trim();
+    if (!name) return;
+    if (invBins[name]) {
+        document.getElementById('move-modal-error').textContent = 'A bin with that name already exists.';
+        document.getElementById('move-modal-error').classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/inventory/bins', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, desc: ''})
+        });
+        if (!res.ok) throw new Error('Failed to create bin');
+        invBins[name] = {default: false, desc: '', public: false, cards: {}};
+        await executeMoveCard(name);
+    } catch (err) {
+        document.getElementById('move-modal-error').textContent = err.message || 'Failed.';
+        document.getElementById('move-modal-error').classList.remove('hidden');
+    }
 }
 
 // ═══════════════════════════════════════
