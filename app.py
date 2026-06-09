@@ -115,11 +115,19 @@ async def api_cards_search(request: Request, q: str = ""):
             for slug, data in exact_matches.items():
                 card_id = data["card_id"]
                 card_info = info_data.get(card_id, {})
-                editions = list(card_info.get("editions", {}).keys())
+                all_editions = card_info.get("editions", {})
 
-                if editions:
-                    edition_id = random.choice(editions)
-                    rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
+                if set_filters:
+                    candidate_editions = [
+                        eid for eid, einfo in all_editions.items()
+                        if einfo.get("set_prefix", "").lower().replace(" ", "_") in set_filters
+                    ]
+                else:
+                    candidate_editions = list(all_editions.keys())
+
+                for edition_id in (candidate_editions if set_filters else [
+                    random.choice(candidate_editions)] if candidate_editions else []):
+                    rarity = all_editions.get(edition_id, {}).get("rarity")
                     cards.append({
                         "card_id": card_id,
                         "edition_id": edition_id,
@@ -127,9 +135,11 @@ async def api_cards_search(request: Request, q: str = ""):
                         "rarity": rarity,
                     })
 
-            return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+            if not set_filters:
+                return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
 
         # ── Step 1: API call ──
+        already_found = {c["card_id"] for c in cards}
         card_data = _api_search(_format_search(q))
 
         if card_data:
@@ -143,18 +153,28 @@ async def api_cards_search(request: Request, q: str = ""):
 
             if slug in slug_data:
                 card_id = slug_data[slug]["card_id"]
-                card_info = info_data.get(card_id, {})
-                editions = list(card_info.get("editions", {}).keys())
 
-                if editions:
-                    edition_id = random.choice(editions)
-                    rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
-                    cards.append({
-                        "card_id": card_id,
-                        "edition_id": edition_id,
-                        "name": slug_data[slug]["name"],
-                        "rarity": rarity,
-                    })
+                if card_id not in already_found:
+                    card_info = info_data.get(card_id, {})
+                    all_editions = card_info.get("editions", {})
+
+                    if set_filters:
+                        candidate_editions = [
+                            eid for eid, einfo in all_editions.items()
+                            if einfo.get("set_prefix", "").lower().replace(" ", "_") in set_filters
+                        ]
+                    else:
+                        candidate_editions = list(all_editions.keys())
+
+                    for edition_id in (candidate_editions if set_filters else [
+                        random.choice(candidate_editions)] if candidate_editions else []):
+                        rarity = all_editions.get(edition_id, {}).get("rarity")
+                        cards.append({
+                            "card_id": card_id,
+                            "edition_id": edition_id,
+                            "name": slug_data[slug]["name"],
+                            "rarity": rarity,
+                        })
 
     # ── Step 2: Substring match ──
     substring_matches = {
