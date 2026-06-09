@@ -147,14 +147,15 @@ async function enrichAndRenderBinCards(bin) {
                 for (const [foil_id, quantity] of Object.entries(foils)) {
                     let foilKind = 'Standard';
                     let foilKindRaw = '';
+                    const toFoilLabel = s => s ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '';
                     if (foilsData[foil_id]) {
                         foilKindRaw = foilsData[foil_id].kind || '';
-                        foilKind = foilKindRaw.charAt(0).toUpperCase() + foilKindRaw.slice(1) || 'Standard';
+                        foilKind = toFoilLabel(foilKindRaw) || 'Standard';
                     } else {
                         for (const finfo of Object.values(foilsData)) {
                             if (finfo.variants?.[foil_id]) {
                                 foilKindRaw = finfo.variants[foil_id].kind || '';
-                                foilKind = foilKindRaw || 'Variant';
+                                foilKind = toFoilLabel(foilKindRaw) || 'Variant';
                                 break;
                             }
                         }
@@ -222,10 +223,7 @@ function renderBinCards() {
         }
     });
 
-    // Update counts
-    const totalQty = binCardRows.reduce((s, r) => s + r.quantity, 0);
-    const countEl = document.getElementById('detail-bin-counts');
-    if (countEl) countEl.textContent = `${binCardRows.length} card${binCardRows.length !== 1 ? 's' : ''} · ${totalQty} cop${totalQty !== 1 ? 'ies' : 'y'}`;
+    updateInvCounts();
 
     grid.innerHTML = '';
 
@@ -361,6 +359,79 @@ function getFoilSuffix(row) {
     return '💎';
 }
 
+
+// ── Inline tile quantity controls ──
+
+function tileQtyChange(btn, delta) {
+    const input = btn.closest('.inv-card-tile-overlay').querySelector('.inv-tile-qty-input');
+    const newVal = Math.max(0, (parseInt(input.value) || 0) + delta);
+    input.value = newVal;
+    tileQtyCommit(input);
+}
+
+async function tileQtySet(input) {
+    const val = parseInt(input.value);
+    if (isNaN(val) || val < 0) {
+        input.value = 0;
+    }
+    tileQtyCommit(input);
+}
+
+async function tileQtyCommit(input) {
+    const quantity = Math.max(0, parseInt(input.value) || 0);
+    const cardId = input.dataset.cardId;
+    const editionId = input.dataset.editionId;
+    const foilId = input.dataset.foilId;
+
+    // Update qty badge immediately
+    const tile = input.closest('.inv-card-tile');
+    const badge = tile?.querySelector('.inv-qty-badge');
+    if (badge) badge.textContent = `x${quantity}`;
+
+    if (quantity === 0) {
+        // Remove card
+        try {
+            await fetch('/api/inventory/card', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({bin: activeBin, card_id: cardId, edition_id: editionId, foil_id: foilId})
+            });
+            const bin = invBins[activeBin];
+            delete bin.cards[cardId]?.[editionId]?.[foilId];
+            if (bin.cards[cardId]?.[editionId] && !Object.keys(bin.cards[cardId][editionId]).length) delete bin.cards[cardId][editionId];
+            if (bin.cards[cardId] && !Object.keys(bin.cards[cardId]).length) delete bin.cards[cardId];
+            binCardRows = binCardRows.filter(r => !(r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId));
+            tile?.remove();
+            renderBinCards();
+        } catch {
+            console.error('Failed to remove card');
+        }
+        return;
+    }
+
+    try {
+        await fetch('/api/inventory/card', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({bin: activeBin, card_id: cardId, edition_id: editionId, foil_id: foilId, quantity})
+        });
+        if (invBins[activeBin]?.cards?.[cardId]?.[editionId]) {
+            invBins[activeBin].cards[cardId][editionId][foilId] = quantity;
+        }
+        const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId);
+        if (row) row.quantity = quantity;
+        updateInvCounts();
+    } catch {
+        console.error('Failed to update quantity');
+    }
+}
+
+function updateInvCounts() {
+    const totalQty = binCardRows.reduce((s, r) => s + r.quantity, 0);
+    const countEl = document.getElementById('detail-bin-counts');
+    if (countEl) countEl.textContent = `${binCardRows.length} card${binCardRows.length !== 1 ? 's' : ''} · ${totalQty} cop${totalQty !== 1 ? 'ies' : 'y'}`;
+}
+
 function buildInvCardTile(row, index) {
     const rarity = rarityMapInv[row.rarity] || '';
     const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
@@ -372,6 +443,8 @@ function buildInvCardTile(row, index) {
     tile.dataset.editionId = row.edition_id;
     tile.dataset.foilId = row.foil_id;
 
+    const uid = `${row.card_id}-${row.edition_id}-${row.foil_id}`;
+
     tile.innerHTML = `
         <div class="edition-tile-wrap">
             <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
@@ -380,12 +453,23 @@ function buildInvCardTile(row, index) {
         </div>
         <span class="inv-qty-badge">x${row.quantity}</span>
         <div class="inv-card-tile-overlay">
-            <div class="inv-card-tile-name">${row.cardName}</div>
-            <div class="inv-card-tile-foil">${row.foilKind}</div>
-            <div class="inv-card-tile-qty">x${row.quantity}</div>
+            <div class="inv-card-tile-info">
+                <div class="inv-card-tile-name">${row.cardName}</div>
+                <div class="inv-card-tile-foil">${row.foilKind}</div>
+            </div>
+            <div class="inv-card-tile-qty-ctrl">
+                <button class="inv-tile-qty-btn inv-tile-qty-add" onclick="tileQtyChange(this, 1)">+</button>
+                <input class="inv-tile-qty-input" type="number" value="${row.quantity}" min="0" max="999"
+                    data-card-id="${row.card_id}"
+                    data-edition-id="${row.edition_id}"
+                    data-foil-id="${row.foil_id}"
+                    onchange="tileQtySet(this)"
+                    onclick="event.stopPropagation()"
+                    onfocus="this.select()">
+                <button class="inv-tile-qty-btn inv-tile-qty-sub" onclick="tileQtyChange(this, -1)">−</button>
+            </div>
         </div>`;
 
-    tile.onclick = () => openCardModal(row);
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
     return tile;
 }
@@ -639,7 +723,7 @@ async function goToFoilStep(cardId, editionId, cardName) {
 }
 
 function buildFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant) {
-    const label = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : 'Standard';
+    const label = kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
     const opt = document.createElement('div');
     opt.className = 'inv-foil-option';
     opt.dataset.editionId = editionId;

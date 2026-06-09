@@ -386,42 +386,132 @@
 .inv-card-tile-overlay {
     position: absolute;
     inset: 0;
-    border-radius: 12px;
-    background: rgba(0, 0, 0, 0.55);
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.62);
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 6px;
+    justify-content: flex-start;
     opacity: 0;
     transition: opacity 0.2s;
-    padding: 12px;
+    padding: 14px 10px;
+    pointer-events: none;
+    gap: 0;
 }
 
-.inv-card-tile:hover .inv-card-tile-overlay {
+.inv-card-tile:hover .inv-card-tile-overlay,
+.inv-card-tile-overlay:hover {
     opacity: 1;
+    pointer-events: all;
+}
+
+/* Hide badges on hover */
+.inv-card-tile:hover .inv-qty-badge,
+.inv-card-tile:hover .edition-rarity-badge {
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.inv-card-tile-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
 }
 
 .inv-card-tile-name {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 500;
     color: #fff;
     text-align: center;
     line-height: 1.3;
-}
-
-.inv-card-tile-qty {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    color: var(--accent);
-    font-weight: 600;
+    width: 100%;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
 }
 
 .inv-card-tile-foil {
     font-family: 'DM Mono', monospace;
-    font-size: 0.62rem;
-    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.55);
     text-align: center;
+}
+
+.inv-card-tile-qty-ctrl {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.inv-tile-qty-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s, filter 0.15s;
+    border: 1px solid transparent;
+}
+
+.inv-tile-qty-btn.inv-tile-qty-add {
+    background: rgba(80, 180, 100, 0.3);
+    border-color: rgba(80, 180, 100, 0.5);
+}
+
+.inv-tile-qty-btn.inv-tile-qty-sub {
+    background: rgba(200, 80, 80, 0.3);
+    border-color: rgba(200, 80, 80, 0.5);
+}
+
+.inv-tile-qty-btn.inv-tile-qty-add:hover {
+    background: rgba(80, 180, 100, 0.55);
+    border-color: rgba(80, 180, 100, 0.85);
+    filter: brightness(1.15);
+}
+
+.inv-tile-qty-btn.inv-tile-qty-sub:hover {
+    background: rgba(200, 80, 80, 0.55);
+    border-color: rgba(200, 80, 80, 0.85);
+    filter: brightness(1.15);
+}
+
+.inv-tile-qty-input {
+    font-family: 'DM Mono', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 6px;
+    padding: 0;
+    width: 54px;
+    height: 54px;
+    text-align: center;
+    outline: none;
+    line-height: 54px;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.inv-tile-qty-input:focus {
+    background: rgba(255, 255, 255, 0.18);
+    border-color: var(--accent);
+}
+
+.inv-tile-qty-input::-webkit-inner-spin-button,
+.inv-tile-qty-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
 }
 
 .inv-qty-badge {
