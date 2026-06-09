@@ -43,6 +43,8 @@ async function navigate(path, pushState = true) {
     document.querySelector('.footer').classList.remove('footer-hidden');
 
     if (path === '/cards') {
+        selectedSets.clear();
+        updateSetDropdownLabel();
         await loadSets();
         setTimeout(setupFooterScroll, 100);
     }
