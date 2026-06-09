@@ -572,6 +572,24 @@ async def api_inv_slugs():
         return JSONResponse(json.load(f))
 
 
+@app.get("/api/inv/collector")
+async def api_inv_collector():
+    sets_dir = "DATA_GA/SETS_GA"
+    result = {}
+    if os.path.exists(sets_dir):
+        for f in os.scandir(sets_dir):
+            if not f.name.endswith(".json"):
+                continue
+            with open(f.path, "r", encoding="utf-8") as fh:
+                set_data = json.load(fh)
+            for num, eids in set_data.items():
+                if isinstance(eids, str):
+                    eids = [eids]
+                for eid in eids:
+                    result[eid] = num
+    return JSONResponse(result)
+
+
 # ── Bin CRUD ──
 
 @app.post("/api/inventory/bins")

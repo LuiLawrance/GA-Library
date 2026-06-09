@@ -1119,3 +1119,194 @@
     background: rgba(200, 169, 110, 0.08);
     border-color: var(--accent);
 }
+
+
+/* ── Bin filter dropdown ── */
+.inv-filter-dropdown-wrap {
+    position: relative;
+}
+
+.inv-filter-dropdown-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.2s;
+    white-space: nowrap;
+}
+
+.inv-filter-dropdown-btn:hover,
+.inv-filter-dropdown-btn.open {
+    border-color: var(--border-focus);
+}
+
+.inv-filter-dropdown-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.inv-filter-arrow {
+    display: inline-block;
+    font-size: 1.1rem;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.25s ease;
+}
+
+.inv-filter-dropdown-btn.open .inv-filter-arrow {
+    transform: rotate(90deg);
+}
+
+.inv-filter-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: auto;
+    width: 280px;
+    max-height: 70vh;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 300;
+    overflow-y: auto;
+    overflow-x: hidden;
+    animation: dropdownReveal 0.2s ease forwards;
+}
+
+.inv-filter-menu::-webkit-scrollbar {
+    width: 6px;
+}
+
+.inv-filter-menu::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+.inv-filter-menu::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+.inv-filter-section {
+    padding: 10px 14px 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.inv-filter-section:last-of-type {
+    border-bottom: none;
+}
+
+.inv-filter-section-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.inv-filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-bottom: 6px;
+}
+
+.inv-filter-chip {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    white-space: nowrap;
+}
+
+.inv-filter-chip:hover {
+    border-color: var(--border-focus);
+    color: var(--text);
+}
+
+.inv-filter-chip.selected {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(200, 169, 110, 0.08);
+}
+
+.inv-filter-clear-btn {
+    display: block;
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border);
+    padding: 8px 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: color 0.15s;
+    letter-spacing: 0.04em;
+}
+
+.inv-filter-clear-btn:hover {
+    color: var(--error);
+}
+
+.inv-filter-search-wrap {
+    padding-bottom: 6px;
+}
+
+.inv-filter-search-input {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.82rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+}
+
+.inv-filter-search-input:focus {
+    border-color: var(--border-focus);
+}
+
+.inv-filter-search-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+}
+
+.inv-detail-search {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.82rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 200px;
+}
+
+.inv-detail-search:focus {
+    border-color: var(--border-focus);
+}
+
+.inv-detail-search::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+}

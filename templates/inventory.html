@@ -26,14 +26,39 @@
                 <div class="inv-detail-header-right">
                     <div class="inv-detail-counts" id="detail-bin-counts"></div>
                     <div class="inv-detail-controls">
-                        <input type="text" id="inv-card-filter" placeholder="Filter..." autocomplete="off"
+                        <input type="text" id="inv-card-filter" class="inv-detail-search"
+                               placeholder="Search cards..." autocomplete="off"
                                oninput="filterBinCards(this.value)">
-                        <select class="inv-sort-select" id="inv-card-sort" onchange="renderBinCards()">
-                            <option value="name">Name</option>
-                            <option value="set">Set</option>
-                            <option value="rarity">Rarity</option>
-                            <option value="quantity">Qty</option>
-                        </select>
+                        <div class="inv-filter-dropdown-wrap">
+                            <button class="inv-filter-dropdown-btn" id="inv-filter-btn"
+                                    onclick="toggleFilterDropdown()">
+                                <span id="inv-filter-label">Filter &amp; Sort</span>
+                                <span class="inv-filter-arrow">&#8249;</span>
+                            </button>
+                            <div id="inv-filter-menu" class="inv-filter-menu hidden">
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label">Sort</div>
+                                    <div id="inv-filter-sort-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label">Set</div>
+                                    <div id="inv-filter-set-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label">Element</div>
+                                    <div id="inv-filter-element-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label">Rarity</div>
+                                    <div id="inv-filter-rarity-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label">Foil</div>
+                                    <div id="inv-filter-foil-options" class="inv-filter-options"></div>
+                                </div>
+                                <button class="inv-filter-clear-btn" onclick="clearBinFilters()">Clear all</button>
+                            </div>
+                        </div>
                         <button class="inv-settings-btn" onclick="openBinSettings()" title="Bin settings">⚙</button>
                     </div>
                 </div>

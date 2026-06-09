@@ -91,7 +91,13 @@ async function openBinDetail(binName) {
     document.getElementById('detail-bin-meta').textContent = bin.desc || '';
     document.getElementById('inv-card-filter').value = '';
 
-    // Clear grid immediately so previous bin's cards don't flash
+    // Clear grid and reset filters when opening a new bin
+    binFilters.set = '';
+    binFilters.element = '';
+    binFilters.rarity = '';
+    binFilters.foil = '';
+    updateFilterButtonState();
+    closeFilterDropdown();
     const grid = document.getElementById('inv-card-grid');
     if (grid) grid.innerHTML = '';
 
@@ -120,12 +126,14 @@ async function enrichAndRenderBinCards(bin) {
     }
 
     try {
-        const [infoRes, slugRes] = await Promise.all([
+        const [infoRes, slugRes, collectorRes] = await Promise.all([
             fetch('/api/inv/info'),
-            fetch('/api/inv/slugs')
+            fetch('/api/inv/slugs'),
+            fetch('/api/inv/collector')
         ]);
         const infoData = infoRes.ok ? await infoRes.json() : {};
         const slugData = slugRes.ok ? await slugRes.json() : {};
+        const collectorData = collectorRes.ok ? await collectorRes.json() : {};
 
         for (const [card_id, editions] of Object.entries(cards)) {
             const cardInfo = infoData[card_id] || {};
@@ -157,7 +165,9 @@ async function enrichAndRenderBinCards(bin) {
                         setPrefix: editionInfo.set_prefix || '',
                         rarity: editionInfo.rarity,
                         foilKind,
-                        foilKindRaw: foilKindRaw.toLowerCase()
+                        foilKindRaw: foilKindRaw.toLowerCase(),
+                        element: cardInfo.element || '',
+                        collectorNumber: collectorData[edition_id] || ''
                     });
                 }
             }
@@ -167,6 +177,7 @@ async function enrichAndRenderBinCards(bin) {
     }
 
     binCardRows = rows;
+    populateFilterMenus();
     renderBinCards();
 }
 
@@ -175,14 +186,18 @@ function renderBinCards() {
     if (!grid) return;
 
     const filter = document.getElementById('inv-card-filter')?.value?.toLowerCase() || '';
-    const sort = document.getElementById('inv-card-sort')?.value || 'name';
+    const sort = binFilters.sort || 'name';
 
     let rows = [...binCardRows];
-    if (filter) rows = rows.filter(r =>
-        r.cardName.toLowerCase().includes(filter) ||
-        r.setPrefix.toLowerCase().includes(filter) ||
-        r.foilKind.toLowerCase().includes(filter)
-    );
+
+    // Name text filter
+    if (filter) rows = rows.filter(r => r.cardName.toLowerCase().includes(filter));
+
+    // Dropdown filters
+    if (binFilters.set) rows = rows.filter(r => r.setPrefix === binFilters.set);
+    if (binFilters.element) rows = rows.filter(r => r.element === binFilters.element);
+    if (binFilters.rarity) rows = rows.filter(r => (rarityMapInv[r.rarity] || '') === binFilters.rarity);
+    if (binFilters.foil) rows = rows.filter(r => r.foilKindRaw === binFilters.foil);
 
     rows.sort((a, b) => {
         switch (sort) {
@@ -194,6 +209,16 @@ function renderBinCards() {
                 return (b.rarity || 0) - (a.rarity || 0);
             case 'quantity':
                 return b.quantity - a.quantity;
+            case 'collector': {
+                const parseCol = s => {
+                    const m = (s || '').match(/^(\d+)([A-Z]*)$/i);
+                    return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, s || ''];
+                };
+                const [nA, sA] = parseCol(a.collectorNumber);
+                const [nB, sB] = parseCol(b.collectorNumber);
+                if (a.setPrefix !== b.setPrefix) return a.setPrefix.localeCompare(b.setPrefix);
+                return nA !== nB ? nA - nB : sA.localeCompare(sB);
+            }
         }
     });
 
@@ -221,6 +246,104 @@ function renderBinCards() {
     addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
     addTile.onclick = openAddModal;
     grid.appendChild(addTile);
+}
+
+// ── Bin filter state ──
+const binFilters = {sort: 'name', set: '', element: '', rarity: '', foil: ''};
+
+function toggleFilterDropdown() {
+    const menu = document.getElementById('inv-filter-menu');
+    const btn = document.getElementById('inv-filter-btn');
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) {
+        menu.classList.add('hidden');
+        btn.classList.remove('open');
+    } else {
+        populateFilterMenus();
+        menu.classList.remove('hidden');
+        btn.classList.add('open');
+
+    }
+}
+
+function closeFilterDropdown() {
+    const menu = document.getElementById('inv-filter-menu');
+    const btn = document.getElementById('inv-filter-btn');
+    if (menu) menu.classList.add('hidden');
+    if (btn) btn.classList.remove('open');
+}
+
+function populateFilterMenus() {
+    const sets = [...new Set(binCardRows.map(r => r.setPrefix).filter(Boolean))].sort();
+    const elements = [...new Set(binCardRows.map(r => r.element).filter(Boolean))].sort();
+    const rarityNums = [...new Set(binCardRows.map(r => r.rarity).filter(r => r != null))].sort((a, b) => a - b);
+    const rarities = rarityNums.map(r => rarityMapInv[r] || String(r));
+    const foils = [...new Set(binCardRows.map(r => r.foilKindRaw).filter(Boolean))].sort();
+    const sortOptions = ['name', 'set', 'rarity', 'quantity', 'collector'];
+
+    renderFilterChips('inv-filter-sort-options', sortOptions, 'sort');
+    renderFilterChips('inv-filter-set-options', sets, 'set');
+    renderFilterChips('inv-filter-element-options', elements, 'element');
+    renderFilterChips('inv-filter-rarity-options', rarities, 'rarity');
+    renderFilterChips('inv-filter-foil-options', foils, 'foil');
+}
+
+function renderFilterChips(containerId, values, filterKey) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    if (!values.length) {
+        container.innerHTML = '<span style="font-size:0.7rem;color:var(--text-muted);opacity:0.5;">None</span>';
+        return;
+    }
+    values.forEach(val => {
+        const chip = document.createElement('button');
+        chip.className = 'inv-filter-chip' + (binFilters[filterKey] === val ? ' selected' : '');
+        chip.textContent = val;
+        chip.onclick = (e) => {
+            e.stopPropagation();
+            toggleFilterChip(filterKey, val, chip);
+        };
+        container.appendChild(chip);
+    });
+}
+
+function toggleFilterChip(filterKey, val, chip) {
+    if (filterKey === 'sort') {
+        // Sort always has a value — just switch
+        chip.parentElement.querySelectorAll('.inv-filter-chip').forEach(c => c.classList.remove('selected'));
+        binFilters.sort = val;
+        chip.classList.add('selected');
+    } else if (binFilters[filterKey] === val) {
+        binFilters[filterKey] = '';
+        chip.classList.remove('selected');
+    } else {
+        chip.parentElement.querySelectorAll('.inv-filter-chip').forEach(c => c.classList.remove('selected'));
+        binFilters[filterKey] = val;
+        chip.classList.add('selected');
+    }
+    updateFilterButtonState();
+    renderBinCards();
+}
+
+function updateFilterButtonState() {
+    const btn = document.getElementById('inv-filter-btn');
+    const label = document.getElementById('inv-filter-label');
+    if (!btn || !label) return;
+    const activeCount = Object.entries(binFilters).filter(([k, v]) => k !== 'sort' && v).length;
+    btn.classList.toggle('active', activeCount > 0);
+    label.textContent = activeCount > 0 ? `Filter (${activeCount})` : 'Filter';
+}
+
+function clearBinFilters() {
+    binFilters.sort = 'name';
+    binFilters.set = '';
+    binFilters.element = '';
+    binFilters.rarity = '';
+    binFilters.foil = '';
+    updateFilterButtonState();
+    populateFilterMenus();
+    renderBinCards();
 }
 
 function filterBinCards(value) {
@@ -671,6 +794,7 @@ function handleAddCardKeydown(e) {
 document.addEventListener('click', e => {
     if (!document.getElementById('inv-add-modal')) return;
     if (!e.target.closest('#add-card-search') && !e.target.closest('#add-card-autocomplete')) hideAddAc();
+    if (!e.target.closest('.inv-filter-dropdown-wrap')) closeFilterDropdown();
 }, true);
 
 
