@@ -332,10 +332,19 @@
 }
 
 /* ── Card grid inside bin ── */
+.inv-cards-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+    height: 100%;
+}
+
 .inv-card-grid-wrap {
     flex: 1;
     overflow-y: auto;
     padding: 32px;
+    min-width: 0;
 }
 
 .inv-card-grid-wrap::-webkit-scrollbar {
@@ -349,6 +358,11 @@
 .inv-card-grid-wrap::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 8px;
+}
+
+/* Inventory drawer close button — mirror drawer.css but scoped */
+#inv-drawer-close-btn {
+    right: 830px;
 }
 
 .inv-card-grid {
@@ -387,7 +401,7 @@
     position: absolute;
     inset: 0;
     border-radius: 14px;
-    background: rgba(0, 0, 0, 0.62);
+    background: transparent;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -397,12 +411,11 @@
     padding: 14px 10px;
     pointer-events: none;
     gap: 0;
+    z-index: 1;
 }
 
-.inv-card-tile:hover .inv-card-tile-overlay,
-.inv-card-tile-overlay:hover {
+.inv-card-tile:hover .inv-card-tile-overlay {
     opacity: 1;
-    pointer-events: all;
 }
 
 /* Hide badges on hover */
@@ -441,12 +454,22 @@
 }
 
 .inv-card-tile-qty-ctrl {
-    flex: 1;
+    position: absolute;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 10px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.inv-card-tile:hover .inv-card-tile-qty-ctrl {
+    opacity: 1;
+    pointer-events: all;
 }
 
 .inv-tile-qty-btn {
@@ -1399,4 +1422,23 @@
 .inv-detail-search::placeholder {
     color: var(--text-muted);
     opacity: 0.5;
+}
+
+/* Scalable overlay background — grows with image on hover */
+.inv-card-tile::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    background: rgba(0, 0, 0, 0.62);
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    transform: scale(1);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.inv-card-tile:hover::before {
+    opacity: 1;
+    transform: scale(1.03);
 }

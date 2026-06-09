@@ -51,11 +51,27 @@ async function navigate(path, pushState = true) {
         if (typeof window.initInventory === 'function') {
             await window.initInventory();
         }
+        setTimeout(setupInvFooterScroll, 100);
     }
 }
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function setupInvFooterScroll() {
+    const gridWrap = document.querySelector('.inv-card-grid-wrap');
+    const footer = document.querySelector('.footer');
+
+    if (!gridWrap || !footer) return;
+
+    gridWrap.addEventListener('scroll', () => {
+        if (gridWrap.scrollTop > 150) {
+            footer.classList.add('footer-hidden');
+        } else if (gridWrap.scrollTop === 0) {
+            footer.classList.remove('footer-hidden');
+        }
+    });
 }
 
 // ── Footer hide on scroll ──

@@ -108,6 +108,7 @@ async function openBinDetail(binName) {
 }
 
 function closeBinDetail() {
+    closeInvDrawer();
     activeBin = null;
     binCardRows = [];
     document.getElementById('inv-detail-view').classList.add('hidden');
@@ -363,7 +364,7 @@ function getFoilSuffix(row) {
 // ── Inline tile quantity controls ──
 
 function tileQtyChange(btn, delta) {
-    const input = btn.closest('.inv-card-tile-overlay').querySelector('.inv-tile-qty-input');
+    const input = btn.closest('.inv-card-tile-qty-ctrl').querySelector('.inv-tile-qty-input');
     const newVal = Math.max(0, (parseInt(input.value) || 0) + delta);
     input.value = newVal;
     tileQtyCommit(input);
@@ -457,19 +458,20 @@ function buildInvCardTile(row, index) {
                 <div class="inv-card-tile-name">${row.cardName}</div>
                 <div class="inv-card-tile-foil">${row.foilKind}</div>
             </div>
-            <div class="inv-card-tile-qty-ctrl">
-                <button class="inv-tile-qty-btn inv-tile-qty-add" onclick="tileQtyChange(this, 1)">+</button>
-                <input class="inv-tile-qty-input" type="number" value="${row.quantity}" min="0" max="999"
-                    data-card-id="${row.card_id}"
-                    data-edition-id="${row.edition_id}"
-                    data-foil-id="${row.foil_id}"
-                    onchange="tileQtySet(this)"
-                    onclick="event.stopPropagation()"
-                    onfocus="this.select()">
-                <button class="inv-tile-qty-btn inv-tile-qty-sub" onclick="tileQtyChange(this, -1)">−</button>
-            </div>
+        </div>
+        <div class="inv-card-tile-qty-ctrl">
+            <button class="inv-tile-qty-btn inv-tile-qty-add" onclick="event.stopPropagation(); tileQtyChange(this, 1)">+</button>
+            <input class="inv-tile-qty-input" type="number" value="${row.quantity}" min="0" max="999"
+                data-card-id="${row.card_id}"
+                data-edition-id="${row.edition_id}"
+                data-foil-id="${row.foil_id}"
+                onchange="tileQtySet(this)"
+                onclick="event.stopPropagation()"
+                onfocus="this.select()">
+            <button class="inv-tile-qty-btn inv-tile-qty-sub" onclick="event.stopPropagation(); tileQtyChange(this, -1)">−</button>
         </div>`;
 
+    tile.addEventListener('click', () => openInvDrawer(row.card_id, row.edition_id, row.cardName));
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
     return tile;
 }
@@ -1221,6 +1223,178 @@ async function deleteBin() {
     } catch {
         console.error('Failed to delete bin');
     }
+}
+
+
+// ═══════════════════════════════════════
+// INVENTORY DRAWER
+// ═══════════════════════════════════════
+
+let selectedInvCardId = null;
+
+async function openInvDrawer(cardId, editionId, cardName) {
+    const drawer = document.getElementById('inv-card-drawer');
+    if (!drawer) return;
+
+    if (selectedInvCardId === cardId) {
+        const currentTile = document.querySelector('#inv-card-drawer .drawer-edition-tile img.edition-selected');
+        if (currentTile && currentTile.id === `edition-tile-inv-${editionId}`) {
+            closeInvDrawer();
+            return;
+        }
+        selectInvDrawerEdition(editionId);
+        return;
+    }
+
+    selectedInvCardId = cardId;
+
+    try {
+        const res = await fetch(`/api/cards/${cardId}`);
+        const data = await res.json();
+        const card = data.card;
+
+        const editions = Object.entries(card.editions).sort((a, b) => {
+            const parseNum = str => {
+                const m = (str || 'ZZZ').match(/^(\d+)([A-Z]*)$/i);
+                return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, str];
+            };
+            const [nA, sA] = parseNum(a[1].collector_number);
+            const [nB, sB] = parseNum(b[1].collector_number);
+            return nA !== nB ? nA - nB : sA.localeCompare(sB);
+        });
+
+        const selectedEdition = card.editions[editionId];
+
+        const statsMap = {
+            'Cost (Memory)': card.stats?.cost_memory,
+            'Cost (Reserve)': card.stats?.cost_reserve,
+            'Power': card.stats?.power,
+            'Life': card.stats?.life,
+            'Durability': card.stats?.durability,
+            'Speed': card.stats?.speed === true ? 'Fast' : card.stats?.speed === false ? 'Slow' : null,
+            'Level': card.stats?.level,
+        };
+
+        const statsHTML = Object.entries(statsMap)
+            .filter(([, v]) => v !== null && v !== undefined)
+            .map(([label, value]) => `
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">${label}</span>
+                    <span class="drawer-stat-value">${value}</span>
+                </div>`).join('');
+
+        const legalityHTML = Object.entries(card.legality || {})
+            .map(([format, legal]) => `
+                <span class="drawer-legal-tag ${legal ? 'legal' : 'illegal'}">${format}</span>`)
+            .join('');
+
+        const rarityMapD = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
+
+        const editionsHTML = editions.map(([eid, einfo], i) => {
+            const rarity = rarityMapD[einfo.rarity] || "?";
+            const rarityClass = `rarity-${rarity.toLowerCase()}`;
+            return `
+            <div class="drawer-edition-tile" style="animation-delay: ${i * 60}ms">
+                <div class="edition-tile-wrap">
+                    <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
+                        title="${einfo.set_name} (${einfo.set_prefix})"
+                        onclick="event.stopPropagation(); selectInvDrawerEdition('${eid}')"
+                        id="edition-tile-inv-${eid}">
+                    <span class="edition-prefix-badge">${einfo.set_prefix}</span>
+                    <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>
+                </div>
+            </div>`;
+        }).join('');
+
+        const drawerContent = document.getElementById('inv-drawer-content');
+        drawer.dataset.editions = JSON.stringify(Object.fromEntries(editions));
+
+        const inner = document.createElement('div');
+        inner.className = 'drawer-content-animate';
+        inner.innerHTML = `
+            <div class="drawer-top">
+                <img class="drawer-card-image" src="/images/${editionId}.jpg" alt="${cardId}">
+                <div class="drawer-card-info">
+                    <div class="drawer-name-row">
+                        <div>
+                            <div class="drawer-name">${cardName}</div>
+                            <div class="drawer-set">${selectedEdition?.set_name || ''} (${selectedEdition?.set_prefix || ''}) &mdash; #${selectedEdition?.collector_number || '?'}</div>
+                        </div>
+                        ${card.element ? `<img class="drawer-element" src="/elements/${card.element}.png" alt="${card.element}">` : ''}
+                    </div>
+                    <div>
+                        <div class="drawer-section-label">Types</div>
+                        <div class="drawer-types">
+                            ${(card.types || []).map(t => `<span class="drawer-type-tag">${t}</span>`).join('')}
+                        </div>
+                    </div>
+                    ${statsHTML ? `<div><div class="drawer-section-label">Stats</div><div class="drawer-stats">${statsHTML}</div></div>` : ''}
+                    ${card.effect ? `<div><div class="drawer-section-label">Effect</div><div class="drawer-effect">${parseEffect(card.effect, cardName)}</div></div>` : ''}
+                    ${legalityHTML ? `<div><div class="drawer-section-label">Legality</div><div class="drawer-legality">${legalityHTML}</div></div>` : ''}
+                </div>
+            </div>
+            <div class="drawer-editions-section">
+                <div class="drawer-section-label">Editions</div>
+                <div class="drawer-editions">${editionsHTML}</div>
+            </div>`;
+
+        drawerContent.innerHTML = '';
+        drawerContent.appendChild(inner);
+
+        drawer.classList.remove('hidden');
+        setTimeout(() => {
+            drawer.classList.add('open');
+            document.getElementById('inv-drawer-close-btn').classList.remove('hidden');
+            document.querySelector('.footer')?.classList.add('footer-hidden');
+            const initialTile = document.getElementById(`edition-tile-inv-${editionId}`);
+            if (initialTile) initialTile.classList.add('edition-selected');
+        }, 10);
+
+    } catch {
+        console.error('Failed to load card details for inv drawer');
+    }
+}
+
+function closeInvDrawer() {
+    const drawer = document.getElementById('inv-card-drawer');
+    if (!drawer) return;
+    drawer.classList.remove('open');
+    document.getElementById('inv-drawer-close-btn').classList.add('hidden');
+    selectedInvCardId = null;
+    const gridWrap = document.querySelector('.inv-card-grid-wrap');
+    if (!gridWrap || gridWrap.scrollTop === 0) {
+        document.querySelector('.footer')?.classList.remove('footer-hidden');
+    }
+    setTimeout(() => drawer.classList.add('hidden'), 300);
+}
+
+function selectInvDrawerEdition(editionId) {
+    const mainImage = document.querySelector('#inv-card-drawer .drawer-card-image');
+    if (!mainImage) return;
+
+    mainImage.classList.add('switching');
+    setTimeout(() => {
+        mainImage.src = `/images/${editionId}.jpg`;
+        mainImage.classList.remove('switching');
+    }, 200);
+
+    const drawer = document.getElementById('inv-card-drawer');
+    const editions = JSON.parse(drawer.dataset.editions || '{}');
+    const edition = editions[editionId];
+    if (edition) {
+        const setEl = drawer.querySelector('.drawer-set');
+        if (setEl) setEl.textContent = `${edition.set_name} (${edition.set_prefix}) — #${edition.collector_number || '?'}`;
+    }
+
+    const cardInfo = drawer.querySelector('.drawer-card-info');
+    if (cardInfo) {
+        cardInfo.classList.remove('drawer-info-animate');
+        void cardInfo.offsetWidth;
+        cardInfo.classList.add('drawer-info-animate');
+    }
+
+    drawer.querySelectorAll('.drawer-edition-tile img').forEach(img => img.classList.remove('edition-selected'));
+    document.getElementById(`edition-tile-inv-${editionId}`)?.classList.add('edition-selected');
 }
 
 // ═══════════════════════════════════════

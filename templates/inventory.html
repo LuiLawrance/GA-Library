@@ -64,8 +64,17 @@
                 </div>
             </div>
         </div>
-        <div class="inv-card-grid-wrap">
-            <div class="inv-card-grid" id="inv-card-grid"></div>
+        <div class="inv-cards-body">
+            <div id="inv-card-drawer" class="card-drawer hidden">
+                <div class="drawer-inner">
+                    <div id="inv-drawer-content"></div>
+                </div>
+            </div>
+            <button id="inv-drawer-close-btn" class="drawer-close-btn hidden" onclick="closeInvDrawer()">&#x2715;
+            </button>
+            <div class="inv-card-grid-wrap">
+                <div class="inv-card-grid" id="inv-card-grid"></div>
+            </div>
         </div>
     </div>
 
