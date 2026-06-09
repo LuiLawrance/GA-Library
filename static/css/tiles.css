@@ -1,0 +1,56 @@
+/* ═══════════════════════════════════════
+   tiles.css — shared card tile additions
+   inventory.css remains the source of truth for overlay/qty/badge styles.
+═══════════════════════════════════════ */
+
+/* ── Dim layer ──
+   Must live inside .edition-tile-wrap (overflow:hidden, same border-radius as img).
+   The wrap clips it to exactly the image shape. */
+.card-tile-dim {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.62);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* The wrap must clip its children to the card's rounded corners */
+.inv-card-tile .edition-tile-wrap,
+.card-tile--authed .edition-tile-wrap {
+    overflow: hidden;
+    border-radius: 14px;
+}
+
+/* The img inside the wrap should not have its own border-radius
+   since the wrap handles clipping — but we keep it for safety */
+
+/* Trigger dim on hover */
+.inv-card-tile:hover .card-tile-dim,
+.card-tile--authed:hover .card-tile-dim {
+    opacity: 1;
+}
+
+/* ── card-tile--authed hover triggers ── */
+.card-tile--authed:hover .inv-card-tile-overlay {
+    opacity: 1;
+}
+
+.card-tile--authed:hover .inv-card-tile-qty-ctrl {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.card-tile--authed:hover .inv-qty-badge,
+.card-tile--authed:hover .edition-rarity-badge {
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.inv-card-tile-foil {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: rgba(255, 255, 255, 0.75);
+    text-align: center;
+}

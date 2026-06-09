@@ -148,7 +148,6 @@ async function enrichAndRenderBinCards(bin) {
                 for (const [foil_id, quantity] of Object.entries(foils)) {
                     let foilKind = 'Standard';
                     let foilKindRaw = '';
-                    const toFoilLabel = s => s ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '';
                     if (foilsData[foil_id]) {
                         foilKindRaw = foilsData[foil_id].kind || '';
                         foilKind = toFoilLabel(foilKindRaw) || 'Standard';
@@ -450,6 +449,7 @@ function buildInvCardTile(row, index) {
         <div class="edition-tile-wrap">
             <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
                 onerror="this.style.opacity='0.1'">
+            <div class="card-tile-dim"></div>
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}${getFoilSuffix(row) ? ' has-foil-suffix' : ''}">${rarity}${getFoilSuffix(row)}</span>` : ''}
         </div>
         <span class="inv-qty-badge">x${row.quantity}</span>

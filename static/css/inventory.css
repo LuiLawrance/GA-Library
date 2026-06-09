@@ -388,14 +388,23 @@
 
 .inv-card-tile img {
     width: 100%;
-    border-radius: 14px;
     display: block;
+}
+
+/* Scale the wrap — overflow:hidden on the wrap clips both image and dim together */
+.inv-card-tile .edition-tile-wrap {
     transition: transform 0.2s;
 }
 
-.inv-card-tile:hover img {
+.inv-card-tile:hover .edition-tile-wrap {
     transform: scale(1.03);
 }
+
+/* ── Dim layer trigger (element defined in tiles.css) ── */
+.inv-card-tile:hover .card-tile-dim {
+    opacity: 1;
+}
+
 
 .inv-card-tile-overlay {
     position: absolute;
@@ -446,12 +455,7 @@
     -webkit-box-orient: vertical;
 }
 
-.inv-card-tile-foil {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.6rem;
-    color: rgba(255, 255, 255, 0.55);
-    text-align: center;
-}
+/* .inv-card-tile-foil → moved to tiles.css */
 
 .inv-card-tile-qty-ctrl {
     position: absolute;
@@ -1424,24 +1428,7 @@
     opacity: 0.5;
 }
 
-/* Scalable overlay background — grows with image on hover */
-.inv-card-tile::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 14px;
-    background: rgba(0, 0, 0, 0.62);
-    opacity: 0;
-    transition: opacity 0.2s, transform 0.2s;
-    transform: scale(1);
-    z-index: 1;
-    pointer-events: none;
-}
-
-.inv-card-tile:hover::before {
-    opacity: 1;
-    transform: scale(1.03);
-}
+/* Dim handled by .card-tile-dim inside .edition-tile-wrap — see tiles.css */
 
 /* ── Move card modal ── */
 .inv-move-card-info {
