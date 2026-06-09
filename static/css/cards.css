@@ -233,9 +233,7 @@
     transition: transform 0.2s;
 }
 
-.card-tile img:hover {
-    transform: scale(1.03);
-}
+/* img scale driven per-state below */
 
 .card-tile-missing {
     width: 100%;
@@ -296,4 +294,69 @@
     pointer-events: none;
     backdrop-filter: blur(4px);
     background: rgba(0, 0, 0, 0.6);
+}
+
+/* ═══════════════════════════════════════
+   CARD TILE HOVER — GUEST vs AUTHED
+═══════════════════════════════════════ */
+
+.card-tile {
+    position: relative;
+}
+
+/* edition-tile-wrap clips the scaling image + dim layer together */
+.card-tile .edition-tile-wrap {
+    overflow: hidden;
+    border-radius: 14px;
+}
+
+.card-tile img {
+    transition: transform 0.2s ease;
+}
+
+/* ── Guest: scale, badges stay ── */
+.card-tile--guest:hover img {
+    transform: scale(1.03);
+}
+
+/* ── Authed: same scale + dim layer fades in, badges hide ── */
+.card-tile--authed:hover img {
+    transform: scale(1.03);
+}
+
+/* Dim layer — inside edition-tile-wrap so it scales with the image */
+.card-tile-dim {
+    position: absolute;
+    inset: 0;
+    background: rgba(30, 30, 30, 0.55);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.card-tile--authed:hover .card-tile-dim {
+    opacity: 1;
+}
+
+/* Overlay and controls sit on the tile root — above the wrap — so they don't scale */
+.card-tile--authed .inv-card-tile-overlay,
+.card-tile--authed .inv-card-tile-qty-ctrl {
+    z-index: 2;
+}
+
+.card-tile--authed:hover .inv-card-tile-overlay {
+    opacity: 1;
+}
+
+.card-tile--authed:hover .inv-card-tile-qty-ctrl {
+    opacity: 1;
+    pointer-events: all;
+}
+
+/* Badges hide on hover when authed */
+.card-tile--authed:hover .inv-qty-badge,
+.card-tile--authed:hover .edition-rarity-badge {
+    opacity: 0;
+    transition: opacity 0.15s;
 }
