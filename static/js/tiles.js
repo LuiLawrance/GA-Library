@@ -221,7 +221,8 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
 }
 
 // ── Scroll wheel on quantity inputs ──
-// Delegated listener covers both bin tiles and card search tiles.
+// Bin tiles: stage the change (show confirmation banner).
+// Card search tiles: commit immediately via change event.
 document.addEventListener('wheel', e => {
     if (!e.target.matches('.inv-tile-qty-input')) return;
     e.preventDefault();
@@ -233,6 +234,17 @@ document.addEventListener('wheel', e => {
 
     if (newVal === current) return;
 
+    const originalValue = current;
     input.value = newVal;
-    input.dispatchEvent(new Event('change', {bubbles: true}));
+
+    const isInvTile = !!input.closest('.inv-card-tile');
+
+    if (isInvTile && typeof tileQtyStage === 'function') {
+        // Update badge preview immediately
+        const badge = input.closest('.inv-card-tile')?.querySelector('.inv-qty-badge');
+        if (badge) badge.textContent = `x${newVal}`;
+        tileQtyStage(input, originalValue);
+    } else {
+        input.dispatchEvent(new Event('change', {bubbles: true}));
+    }
 }, {passive: false});

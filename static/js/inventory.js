@@ -80,6 +80,7 @@ function countBinEntries(cards) {
 // ═══════════════════════════════════════
 
 async function openBinDetail(binName) {
+    safeDiscardEditMode();
     activeBin = binName;
     binCardRows = [];
     const bin = invBins[binName];
@@ -109,6 +110,7 @@ async function openBinDetail(binName) {
 
 function closeBinDetail() {
     closeInvDrawer();
+    safeDiscardEditMode();
     activeBin = null;
     binCardRows = [];
     document.getElementById('inv-detail-view').classList.add('hidden');
@@ -364,20 +366,182 @@ function getFoilSuffix(row) {
 
 function tileQtyChange(btn, delta) {
     const input = btn.closest('.inv-card-tile-qty-ctrl').querySelector('.inv-tile-qty-input');
-    const newVal = Math.max(0, (parseInt(input.value) || 0) + delta);
+    const before = parseInt(input.value) || 0;
+    const newVal = Math.max(0, before + delta);
     input.value = newVal;
-    tileQtyCommit(input);
+
+    // Update badge preview
+    const badge = input.closest('.inv-card-tile')?.querySelector('.inv-qty-badge');
+    if (badge) badge.textContent = `x${newVal}`;
+
+    if (isEditMode()) {
+        // Already in edit mode — absorb this change into the session
+        enterEditMode(input, before);
+    } else {
+        tileQtyCommit(input);
+    }
 }
 
 async function tileQtySet(input) {
     const val = parseInt(input.value);
-    if (isNaN(val) || val < 0) {
-        input.value = 0;
+    if (isNaN(val) || val < 0) input.value = 0;
+
+    if (isEditMode()) {
+        // Stage the text-box change — enterEditMode records originalValue if first touch
+        const before = pendingQtyChanges.has(input)
+            ? pendingQtyChanges.get(input)   // keep the true original
+            : val;                            // first touch via text box (original = current typed val is wrong — use row data)
+        // Better: read from binCardRows for the true original
+        const cardId = input.dataset.cardId;
+        const editionId = input.dataset.editionId;
+        const foilId = input.dataset.foilId;
+        const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId);
+        const trueOriginal = pendingQtyChanges.has(input)
+            ? pendingQtyChanges.get(input)
+            : (row?.quantity ?? val);
+        enterEditMode(input, trueOriginal);
+
+        // Update badge preview
+        const badge = input.closest('.inv-card-tile')?.querySelector('.inv-qty-badge');
+        if (badge) badge.textContent = `x${Math.max(0, parseInt(input.value) || 0)}`;
+    } else {
+        tileQtyCommit(input);
     }
-    tileQtyCommit(input);
 }
 
-async function tileQtyCommit(input) {
+// Called by the wheel listener in tiles.js — stages instead of immediately committing
+function tileQtyStage(input, originalValue) {
+    enterEditMode(input, originalValue);
+}
+
+// Silently discard any active edit session — call before navigating away
+function safeDiscardEditMode() {
+    if (!isEditMode()) return;
+    discardQtyChange(true);  // immediate — no animation when leaving bin
+}
+
+// ── Pending quantity changes (wheel-scroll edit mode) ──
+// Map of input element -> originalValue for all staged changes in the current edit session
+let pendingQtyChanges = new Map();
+
+function isEditMode() {
+    return pendingQtyChanges.size > 0;
+}
+
+function enterEditMode(input, originalValue) {
+    // Only record originalValue the first time this input is touched in this session
+    if (!pendingQtyChanges.has(input)) {
+        pendingQtyChanges.set(input, originalValue);
+    }
+    showQtyConfirmBar();
+}
+
+function showQtyConfirmBar() {
+    const bar = document.getElementById('inv-qty-confirm-bar');
+    if (!bar) return;
+    bar.classList.remove('hidden', 'confirmed');
+    const msg = bar.querySelector('.inv-qty-confirm-msg');
+    if (msg) msg.textContent = 'Confirm changes?';
+    void bar.offsetWidth;
+    bar.classList.add('visible');
+}
+
+function hideQtyConfirmBar(immediate = false) {
+    const bar = document.getElementById('inv-qty-confirm-bar');
+    if (!bar) return;
+    bar.classList.remove('visible', 'confirmed');
+    if (immediate) {
+        bar.classList.add('hidden');
+    } else {
+        setTimeout(() => bar.classList.add('hidden'), 230);
+    }
+    pendingQtyChanges.clear();
+}
+
+async function applyQtyChange() {
+    if (!pendingQtyChanges.size) return;
+
+    // Snapshot all data before any DOM manipulation — renderBinCards() on deletion
+    // destroys and recreates tiles, detaching inputs still in the queue.
+    const changes = [...pendingQtyChanges.entries()].map(([input, originalValue]) => ({
+        quantity: Math.max(0, parseInt(input.value) || 0),
+        cardId: input.dataset.cardId,
+        editionId: input.dataset.editionId,
+        foilId: input.dataset.foilId,
+    }));
+
+    pendingQtyChanges.clear();
+
+    // Process deletions first so renderBinCards() is only called once at the end
+    const toDelete = changes.filter(c => c.quantity === 0);
+    const toUpdate = changes.filter(c => c.quantity > 0);
+
+    for (const c of toUpdate) {
+        try {
+            await fetch('/api/inventory/card', {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    bin: activeBin,
+                    card_id: c.cardId,
+                    edition_id: c.editionId,
+                    foil_id: c.foilId,
+                    quantity: c.quantity
+                })
+            });
+            if (invBins[activeBin]?.cards?.[c.cardId]?.[c.editionId]) {
+                invBins[activeBin].cards[c.cardId][c.editionId][c.foilId] = c.quantity;
+            }
+            const row = binCardRows.find(r => r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId);
+            if (row) row.quantity = c.quantity;
+        } catch {
+            console.error('Failed to update quantity');
+        }
+    }
+
+    for (const c of toDelete) {
+        try {
+            await fetch('/api/inventory/card', {
+                method: 'DELETE',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({bin: activeBin, card_id: c.cardId, edition_id: c.editionId, foil_id: c.foilId})
+            });
+            const bin = invBins[activeBin];
+            delete bin.cards[c.cardId]?.[c.editionId]?.[c.foilId];
+            if (bin.cards[c.cardId]?.[c.editionId] && !Object.keys(bin.cards[c.cardId][c.editionId]).length) delete bin.cards[c.cardId][c.editionId];
+            if (bin.cards[c.cardId] && !Object.keys(bin.cards[c.cardId]).length) delete bin.cards[c.cardId];
+            binCardRows = binCardRows.filter(r => !(r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId));
+        } catch {
+            console.error('Failed to remove card');
+        }
+    }
+
+    updateInvCounts();
+    if (toDelete.length) renderBinCards();
+
+    // Flash green then dismiss
+    const bar = document.getElementById('inv-qty-confirm-bar');
+    if (bar) {
+        bar.classList.add('confirmed');
+        const msg = bar.querySelector('.inv-qty-confirm-msg');
+        if (msg) msg.textContent = 'Changes applied';
+        setTimeout(() => hideQtyConfirmBar(), 1500);
+    }
+}
+
+async function discardQtyChange(immediate = false) {
+    if (!pendingQtyChanges.size) return;
+    for (const [input, originalValue] of pendingQtyChanges) {
+        input.value = originalValue;
+        const badge = input.closest('.inv-card-tile')?.querySelector('.inv-qty-badge');
+        if (badge) badge.textContent = `x${originalValue}`;
+    }
+    hideQtyConfirmBar(immediate);
+}
+
+// Immediate commit — the actual API call, extracted from tileQtyCommit
+async function _commitQtyImmediate(input, staged = false) {
+
     const quantity = Math.max(0, parseInt(input.value) || 0);
     const cardId = input.dataset.cardId;
     const editionId = input.dataset.editionId;
@@ -389,6 +553,8 @@ async function tileQtyCommit(input) {
     if (badge) badge.textContent = `x${quantity}`;
 
     if (quantity === 0) {
+        // When staged (scroll preview), don't remove the tile yet — wait for confirm
+        if (staged) return;
         // Remove card
         try {
             await fetch('/api/inventory/card', {
@@ -424,6 +590,10 @@ async function tileQtyCommit(input) {
     } catch {
         console.error('Failed to update quantity');
     }
+}
+
+async function tileQtyCommit(input) {
+    await _commitQtyImmediate(input);
 }
 
 function updateInvCounts() {

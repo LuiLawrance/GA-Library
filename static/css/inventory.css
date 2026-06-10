@@ -1541,3 +1541,91 @@
     align-items: center;
     justify-content: space-between;
 }
+
+/* ── Quantity confirmation banner ── */
+.inv-card-grid-wrap {
+    position: relative;
+}
+
+.inv-qty-confirm-bar {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-10px);
+    width: fit-content;
+    min-width: 380px;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 14px;
+    background: rgba(180, 40, 40, 0.92);
+    border: 1px solid rgba(220, 80, 80, 0.6);
+    border-radius: var(--radius-sm);
+    opacity: 0;
+    transition: transform 0.22s ease, opacity 0.22s ease, background 0.4s ease, border-color 0.4s ease;
+    pointer-events: none;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(6px);
+    white-space: nowrap;
+}
+
+.inv-qty-confirm-bar.visible {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: all;
+}
+
+.inv-qty-confirm-bar.confirmed {
+    background: rgba(40, 140, 70, 0.92);
+    border-color: rgba(80, 200, 100, 0.6);
+    pointer-events: none;
+}
+
+.inv-qty-confirm-bar.hidden {
+    display: none;
+}
+
+.inv-qty-confirm-msg {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.inv-qty-confirm-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.inv-qty-confirm-btn {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: filter 0.15s;
+}
+
+.inv-qty-confirm-apply {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    color: #fff;
+}
+
+.inv-qty-confirm-apply:hover {
+    filter: brightness(1.2);
+}
+
+.inv-qty-confirm-discard {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.inv-qty-confirm-discard:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    color: #fff;
+}
