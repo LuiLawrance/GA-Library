@@ -26,6 +26,7 @@
                 <div class="inv-detail-header-right">
                     <div class="inv-detail-counts" id="detail-bin-counts"></div>
                     <div class="inv-detail-controls">
+                        <button class="inv-detail-add-btn" onclick="openAddModal()" title="Add card">+</button>
                         <input type="text" id="inv-card-filter" class="inv-detail-search"
                                placeholder="Search cards..." autocomplete="off"
                                oninput="filterBinCards(this.value)">
@@ -65,13 +66,6 @@
             </div>
         </div>
         <div class="inv-cards-body">
-            <div id="inv-card-drawer" class="card-drawer hidden">
-                <div class="drawer-inner">
-                    <div id="inv-drawer-content"></div>
-                </div>
-            </div>
-            <button id="inv-drawer-close-btn" class="drawer-close-btn hidden" onclick="closeInvDrawer()">&#x2715;
-            </button>
             <div class="inv-qty-confirm-bar hidden" id="inv-qty-confirm-bar">
                 <span class="inv-qty-confirm-msg" id="inv-qty-confirm-msg">Update quantity?</span>
                 <div class="inv-qty-confirm-actions">
@@ -80,6 +74,13 @@
                     </button>
                 </div>
             </div>
+            <div id="inv-card-drawer" class="card-drawer hidden">
+                <div class="drawer-inner">
+                    <div id="inv-drawer-content"></div>
+                </div>
+            </div>
+            <button id="inv-drawer-close-btn" class="drawer-close-btn hidden" onclick="closeInvDrawer()">&#x2715;
+            </button>
             <div class="inv-card-grid-wrap">
                 <div class="inv-card-grid" id="inv-card-grid"></div>
             </div>
