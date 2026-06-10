@@ -1629,3 +1629,63 @@
     border-color: rgba(255, 255, 255, 0.5);
     color: #fff;
 }
+
+/* ── Edit mode quantity indicator ── */
+/* Shown when tile has a pending change and is NOT being hovered */
+.inv-tile-qty-indicator {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 3;
+    transition: opacity 0.15s;
+    background: rgba(0, 0, 0, 0.62);
+    border-radius: 14px;
+}
+
+.inv-card-tile.has-pending .inv-tile-qty-indicator {
+    opacity: 1;
+}
+
+/* Hide indicator while hovering — qty-ctrl takes over */
+.inv-card-tile.has-pending:hover .inv-tile-qty-indicator {
+    opacity: 0;
+}
+
+.inv-tile-qty-indicator-box {
+    width: 54px;
+    height: 54px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 1rem;
+    font-weight: 900;
+    line-height: 1;
+    border: 2px solid;
+    pointer-events: none;
+    user-select: none;
+}
+
+.inv-tile-qty-indicator-box.indicator-add {
+    color: rgba(80, 210, 110, 1);
+    border-color: rgba(80, 210, 110, 0.7);
+    background: rgba(80, 210, 110, 0.15);
+}
+
+.inv-tile-qty-indicator-box.indicator-sub {
+    color: rgba(220, 80, 80, 1);
+    border-color: rgba(220, 80, 80, 0.7);
+    background: rgba(220, 80, 80, 0.15);
+}
+
+.inv-tile-qty-indicator-box.indicator-del {
+    color: rgba(220, 80, 80, 1);
+    border-color: rgba(220, 80, 80, 0.7);
+    background: rgba(220, 80, 80, 0.15);
+    font-size: 1.3rem;
+}

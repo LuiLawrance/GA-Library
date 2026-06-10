@@ -240,9 +240,6 @@ document.addEventListener('wheel', e => {
     const isInvTile = !!input.closest('.inv-card-tile');
 
     if (isInvTile && typeof tileQtyStage === 'function') {
-        // Update badge preview immediately
-        const badge = input.closest('.inv-card-tile')?.querySelector('.inv-qty-badge');
-        if (badge) badge.textContent = `x${newVal}`;
         tileQtyStage(input, originalValue);
     } else {
         input.dispatchEvent(new Event('change', {bubbles: true}));
