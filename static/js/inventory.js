@@ -528,6 +528,12 @@ async function applyQtyChange() {
             }
             const row = binCardRows.find(r => r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId);
             if (row) row.quantity = c.quantity;
+            // Update badge on the existing tile
+            const tile = document.querySelector(
+                `.inv-card-tile[data-card-id="${c.cardId}"][data-edition-id="${c.editionId}"][data-foil-id="${c.foilId}"]`
+            );
+            const badge = tile?.querySelector('.inv-qty-badge');
+            if (badge) badge.textContent = `x${c.quantity}`;
         } catch {
             console.error('Failed to update quantity');
         }
