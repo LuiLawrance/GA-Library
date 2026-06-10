@@ -274,6 +274,31 @@
     align-items: center;
 }
 
+.inv-detail-add-btn {
+    font-family: 'Sora', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.inv-detail-add-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .inv-detail-controls input {
     font-family: 'Sora', sans-serif;
     font-size: 0.82rem;

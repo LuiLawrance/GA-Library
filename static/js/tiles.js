@@ -5,7 +5,7 @@
 
 // ── Shared foil label formatter ──
 function toFoilLabel(s) {
-    return s ? s.toLowerCase().replace(/\w/g, c => c.toUpperCase()) : '';
+    return s ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '';
 }
 
 // ── Foil priority: normal/nonfoil > foil > anything else ──
@@ -219,3 +219,20 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
         updateBadge(val);
     });
 }
+
+// ── Scroll wheel on quantity inputs ──
+// Delegated listener covers both bin tiles and card search tiles.
+document.addEventListener('wheel', e => {
+    if (!e.target.matches('.inv-tile-qty-input')) return;
+    e.preventDefault();
+
+    const input = e.target;
+    const current = parseInt(input.value) || 0;
+    const delta = e.deltaY < 0 ? 1 : -1;
+    const newVal = Math.max(0, Math.min(999, current + delta));
+
+    if (newVal === current) return;
+
+    input.value = newVal;
+    input.dispatchEvent(new Event('change', {bubbles: true}));
+}, {passive: false});
