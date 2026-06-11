@@ -426,11 +426,27 @@ function isEditMode() {
 // updateTileIndicator, clearTileIndicator, clearAllIndicators defined in tiles.js
 
 function enterEditMode(input, originalValue) {
-    // Only record originalValue the first time this input is touched in this session
     if (!pendingQtyChanges.has(input)) {
         pendingQtyChanges.set(input, originalValue);
     }
-    updateTileIndicator(input, pendingQtyChanges);
+
+    const currentValue = parseInt(input.value) || 0;
+    const storedOriginal = pendingQtyChanges.get(input);
+
+    if (currentValue === storedOriginal) {
+        // Returned to original — remove and clear indicator
+        pendingQtyChanges.delete(input);
+        const tile = input.closest('.inv-card-tile');
+        if (tile) clearTileIndicator(tile);
+
+        if (!pendingQtyChanges.size) {
+            hideQtyConfirmBar();
+            return;
+        }
+    } else {
+        updateTileIndicator(input, pendingQtyChanges);
+    }
+
     showQtyConfirmBar();
 }
 

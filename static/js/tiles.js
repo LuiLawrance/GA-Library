@@ -138,7 +138,25 @@ class TileEditMode {
         if (!this.pending.has(input)) {
             this.pending.set(input, originalValue);
         }
-        this._updateIndicator(input);
+
+        const currentValue = parseInt(input.value) || 0;
+        const storedOriginal = this.pending.get(input);
+
+        if (currentValue === storedOriginal) {
+            // Returned to original — remove from pending and clear indicator
+            this.pending.delete(input);
+            const tile = input.closest('.inv-card-tile') ?? input.closest('.card-tile');
+            if (tile) this._clearIndicator(tile);
+
+            // If nothing else is pending, exit edit mode entirely
+            if (!this.pending.size) {
+                this._hideBar();
+                return;
+            }
+        } else {
+            this._updateIndicator(input);
+        }
+
         this._showBar();
     }
 
