@@ -676,6 +676,49 @@ def _update_update(card_data: dict, debug: bool = False) -> None:
         )
 
 
+def card_reset(card_name: str, debug: bool = False) -> dict:
+    """Force re-fetch a card from the API, overriding all local data and images."""
+    slug = _format_search(card_name, debug)
+
+    # Look up existing edition IDs so we can delete their images before re-downloading
+    slug_file = new_json(JSON_SLUGS)
+    info_file = new_json(JSON_INFO)
+    image_dir = new_dir(DIR_IMAGES)
+
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    if slug in slug_data:
+        card_id = slug_data[slug]["card_id"]
+        existing_editions = info_data.get(card_id, {}).get("editions", {}).keys()
+
+        deleted = 0
+        for edition_id in existing_editions:
+            image_file = image_dir / f"{edition_id}.jpg"
+            if image_file.exists():
+                image_file.unlink()
+                deleted += 1
+
+        if debug or deleted:
+            print(f"Deleted {deleted} existing image(s) for '{card_name}'")
+    else:
+        if debug:
+            print(f"No local data found for '{card_name}' — fetching fresh")
+
+    # Bypass _check_local and force a full API fetch
+    result = _api_search(slug, debug)
+
+    if result:
+        print(f"Reset complete: {result.get('name', card_name)}")
+    else:
+        print(f"Reset failed: card not found on API ({slug})")
+
+    return result
+
+
 def card_search(card_names: list[str], debug: bool = False) -> dict[str, dict]:
     results = {}
 

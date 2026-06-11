@@ -1,7 +1,19 @@
-from api_ga import card_search, set_search
+from api_ga import card_reset, card_search, set_search
 from inv_ga import bin_create, bin_delete, bin_edit, bin_list, inv_edit
 from pricing_ga import add_listing, add_sale
-from user import user_create, user_delete, user_login, user_reset
+from user import user_create, user_delete, user_reset
+from util_file import new_json
+
+import json
+
+JSON_USERS = "DATA_GENERAL/USERS.json"
+
+
+def user_exists(username: str) -> bool:
+    users_file = new_json(JSON_USERS)
+    with users_file.open("r", encoding="utf-8") as f:
+        users_data = json.load(f)
+    return username in users_data
 
 
 def menu_inventory(username: str) -> None:
@@ -111,7 +123,8 @@ def main() -> None:
         print("2. Search Set")
         print("3. Listings & Sales")
         print("4. Users")
-        print("\nOr enter a username to log in as a user.")
+        print("9. Reset Card")
+        print("\nOr enter a username to log in.")
 
         choice = input("\nSelect option: ").strip()
 
@@ -122,13 +135,11 @@ def main() -> None:
 
             case "1":
                 card_names = input("\nEnter card name(s) (comma separated): ")
-
                 card_names = [
                     name.strip()
                     for name in card_names.split(",")
                     if name.strip()
                 ]
-
                 card_search(card_names, False)
 
             case "2":
@@ -141,15 +152,16 @@ def main() -> None:
             case "4":
                 menu_users()
 
+            case "9":
+                card_name = input("\nEnter card name to reset: ").strip()
+                card_reset(card_name, False)
+
             case _:
                 username = choice
-                password = input("Enter password: ").strip()
-                user = user_login(username, password)
-
-                if not user:
-                    print("\nLogin failed.")
+                if user_exists(username):
+                    menu_inventory(username)
                 else:
-                    menu_inventory(user)
+                    print(f"\nUser not found: {username}")
 
 
 if __name__ == "__main__":
