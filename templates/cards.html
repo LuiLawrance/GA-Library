@@ -1,4 +1,13 @@
 <div class="page-header cards-header">
+    <div class="cards-header-left">
+        <div class="default-bin-wrap hidden" id="default-bin-wrap">
+            <button class="default-bin-btn" id="default-bin-btn" onclick="openDefaultBinPicker()">
+                <span class="default-bin-icon">📦</span>
+                <span id="default-bin-label">Default Bin</span>
+            </button>
+            <div class="default-bin-menu hidden" id="default-bin-menu"></div>
+        </div>
+    </div>
     <div class="search-wrap">
         <div class="set-dropdown-wrap">
             <button class="set-dropdown-btn" onclick="toggleSetDropdown()">
@@ -11,8 +20,8 @@
         </div>
         <div class="autocomplete-wrap">
             <input type="text" id="card-search" placeholder="Search cards..." autocomplete="off"
-                onkeydown="handleCardKeydown(event)"
-                oninput="fetchSuggestions(this.value)">
+                   onkeydown="handleCardKeydown(event)"
+                   oninput="fetchSuggestions(this.value)">
             <div id="autocomplete-list" class="autocomplete-list hidden"></div>
         </div>
         <button class="btn-search" onclick="searchCards()">Search</button>

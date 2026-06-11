@@ -1,3 +1,91 @@
+// ── Default bin picker ──
+let cardSearchDefaultBin = null;   // name of the currently selected default bin
+let allBinsCache = null;           // { binName: { default, ... } }
+
+async function initDefaultBinPicker() {
+    if (!currentUser) return;
+    try {
+        const res = await fetch('/api/inventory');
+        if (!res.ok) return;
+        const data = await res.json();
+        allBinsCache = data.bins || {};
+        // Find the bin marked default
+        cardSearchDefaultBin = Object.entries(allBinsCache).find(([, b]) => b.default)?.[0] ?? null;
+        updateDefaultBinLabel();
+    } catch { /* silent */
+    }
+}
+
+function updateDefaultBinLabel() {
+    const label = document.getElementById('default-bin-label');
+    if (label) label.textContent = cardSearchDefaultBin ?? 'Default Bin';
+}
+
+function openDefaultBinPicker() {
+    const menu = document.getElementById('default-bin-menu');
+    if (!menu) return;
+
+    if (!menu.classList.contains('hidden')) {
+        menu.classList.add('hidden');
+        return;
+    }
+
+    if (!allBinsCache) {
+        initDefaultBinPicker();
+        return;
+    }
+
+    menu.innerHTML = '';
+    Object.keys(allBinsCache).forEach(name => {
+        const item = document.createElement('div');
+        item.className = 'default-bin-menu-item' + (name === cardSearchDefaultBin ? ' active' : '');
+        item.innerHTML = `<span>${name}</span><span class="default-bin-check">✓</span>`;
+        item.onclick = () => selectDefaultBin(name);
+        menu.appendChild(item);
+    });
+
+    menu.classList.remove('hidden');
+}
+
+async function selectDefaultBin(name) {
+    const menu = document.getElementById('default-bin-menu');
+    if (menu) menu.classList.add('hidden');
+
+    if (name === cardSearchDefaultBin) return;
+
+    try {
+        await fetch(`/api/inventory/bins/${encodeURIComponent(name)}/default`, {method: 'POST'});
+        cardSearchDefaultBin = name;
+        _defaultBinName = null;
+        // Reload snapshot for the new default bin
+        await loadInvSnapshot();
+        updateDefaultBinLabel();
+        // Refresh all badges and input values currently in the results grid
+        refreshResultsBadges();
+    } catch { /* silent */
+    }
+}
+
+function refreshResultsBadges() {
+    const grid = document.getElementById('card-results');
+    if (!grid) return;
+    grid.querySelectorAll('.card-tile').forEach(tile => {
+        const cardId = tile.dataset.cardId;
+        const input = tile.querySelector('.inv-tile-qty-input');
+        if (!input) return;
+        const editionId = input.dataset.editionId;
+        const qty = snapQty(cardId, editionId);
+        // Update input value
+        input.value = qty;
+        // Update badge
+        const badge = tile.querySelector('.inv-qty-badge');
+        if (badge) {
+            badge.textContent = `x${qty}`;
+            badge.style.display = qty > 0 ? '' : 'none';
+        }
+    });
+}
+
 let autocompleteIndex = -1;
 let selectedCardId = null;
 let selectedSets = new Set();
@@ -232,5 +320,8 @@ document.addEventListener('click', e => {
         const btn = document.querySelector('.set-dropdown-btn');
         if (menu) menu.classList.add('hidden');
         if (btn) btn.classList.remove('open');
+    }
+    if (!e.target.closest('.default-bin-wrap')) {
+        document.getElementById('default-bin-menu')?.classList.add('hidden');
     }
 });

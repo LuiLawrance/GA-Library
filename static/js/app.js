@@ -46,6 +46,15 @@ async function navigate(path, pushState = true) {
         selectedSets.clear();
         updateSetDropdownLabel();
         await loadSets();
+        const binWrap = document.getElementById('default-bin-wrap');
+        if (binWrap) {
+            if (currentUser) {
+                binWrap.classList.remove('hidden');
+                if (typeof initDefaultBinPicker === 'function') initDefaultBinPicker();
+            } else {
+                binWrap.classList.add('hidden');
+            }
+        }
         setTimeout(setupFooterScroll, 100);
     }
 
@@ -119,6 +128,9 @@ function setLoggedIn(username) {
     document.getElementById('topbar-login-btn').classList.add('hidden');
     document.getElementById('topbar-logout-btn').classList.remove('hidden');
     document.getElementById('nav-inventory').classList.remove('hidden');
+    const binWrap = document.getElementById('default-bin-wrap');
+    if (binWrap) binWrap.classList.remove('hidden');
+    if (typeof initDefaultBinPicker === 'function') initDefaultBinPicker();
 }
 
 function setLoggedOut() {
@@ -126,6 +138,8 @@ function setLoggedOut() {
     document.getElementById('topbar-login-btn').classList.remove('hidden');
     document.getElementById('topbar-logout-btn').classList.add('hidden');
     document.getElementById('nav-inventory').classList.add('hidden');
+    const binWrap = document.getElementById('default-bin-wrap');
+    if (binWrap) binWrap.classList.add('hidden');
 }
 
 async function handleLogout() {
