@@ -21,7 +21,6 @@ function pickDefaultFoil(foils) {
 }
 
 // ── Inventory snapshot (default bin) ──
-// { card_id: { edition_id: { foil_id: qty } } }
 let invSnapshot = {};
 
 async function loadInvSnapshot() {
@@ -109,26 +108,214 @@ async function commitQtyToDefault(cardId, editionId, foilId, newQty) {
         });
     }
 
-    // Update snapshot
     if (!invSnapshot[cardId]) invSnapshot[cardId] = {};
     if (!invSnapshot[cardId][editionId]) invSnapshot[cardId][editionId] = {};
     invSnapshot[cardId][editionId][foilId] = newQty;
 }
 
+// ══════════════════════════════════════════════════════════
+// TileEditMode — reusable edit mode for any tile grid
+// ══════════════════════════════════════════════════════════
+// Usage:
+//   const myEditMode = new TileEditMode('bar-element-id', async (changes) => { ... });
+//   myEditMode.stage(input, originalValue);  // call on scroll/change
+//   myEditMode.apply();                      // confirm button
+//   myEditMode.discard();                    // discard button
+//   myEditMode.isActive();                   // whether edit mode is on
+// ──────────────────────────────────────────────────────────
+class TileEditMode {
+    constructor(barId, commitFn) {
+        this.barId = barId;
+        this.commitFn = commitFn;         // async fn(changes: [{input, cardId, editionId, foilId, quantity}])
+        this.pending = new Map();         // input → originalValue
+    }
+
+    isActive() {
+        return this.pending.size > 0;
+    }
+
+    stage(input, originalValue) {
+        if (!this.pending.has(input)) {
+            this.pending.set(input, originalValue);
+        }
+        this._updateIndicator(input);
+        this._showBar();
+    }
+
+    async apply() {
+        if (!this.pending.size) return;
+
+        // Snapshot before any DOM changes
+        const changes = [...this.pending.entries()].map(([input, origVal]) => ({
+            input,
+            origVal,
+            quantity: Math.max(0, parseInt(input.value) || 0),
+            cardId: input.dataset.cardId,
+            editionId: input.dataset.editionId,
+            foilId: input.dataset.foilId,
+        }));
+
+        this.pending.clear();
+        this._clearAllIndicators();
+
+        await this.commitFn(changes);
+
+        // Flash green
+        const bar = document.getElementById(this.barId);
+        if (bar) {
+            bar.classList.add('confirmed');
+            const msg = bar.querySelector('.inv-qty-confirm-msg');
+            if (msg) msg.textContent = 'Changes applied';
+            setTimeout(() => this._hideBar(), 1500);
+        }
+    }
+
+    discard(immediate = false) {
+        for (const [input, originalValue] of this.pending) {
+            input.value = originalValue;
+            const badge = input.closest('[data-card-id]')?.querySelector('.inv-qty-badge')
+                ?? input.closest('.inv-card-tile')?.querySelector('.inv-qty-badge')
+                ?? input.closest('.card-tile')?.querySelector('.inv-qty-badge');
+            if (badge) {
+                badge.textContent = `x${originalValue}`;
+                badge.style.display = originalValue > 0 ? '' : 'none';
+            }
+        }
+        this.pending.clear();
+        this._clearAllIndicators();
+        this._hideBar(immediate);
+    }
+
+    // ── Indicator helpers ──
+
+    _updateIndicator(input) {
+        const tile = input.closest('.inv-card-tile') ?? input.closest('.card-tile');
+        if (!tile) return;
+
+        const originalValue = this.pending.get(input);
+        if (originalValue === undefined) {
+            this._clearIndicator(tile);
+            return;
+        }
+
+        const currentValue = parseInt(input.value) || 0;
+        const delta = currentValue - originalValue;
+
+        let ind = tile.querySelector('.inv-tile-qty-indicator');
+        if (!ind) {
+            ind = document.createElement('div');
+            ind.className = 'inv-tile-qty-indicator';
+            tile.appendChild(ind);
+        }
+
+        tile.classList.add('has-pending');
+
+        if (currentValue === 0) {
+            ind.innerHTML = '<div class="inv-tile-qty-indicator-box indicator-del">🗑</div>';
+        } else if (delta > 0) {
+            ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-add">+${delta}</div>`;
+        } else {
+            ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-sub">${delta}</div>`;
+        }
+    }
+
+    _clearIndicator(tile) {
+        tile.classList.remove('has-pending');
+        const ind = tile.querySelector('.inv-tile-qty-indicator');
+        if (ind) ind.innerHTML = '';
+    }
+
+    _clearAllIndicators() {
+        document.querySelectorAll('.has-pending').forEach(tile => this._clearIndicator(tile));
+    }
+
+    // ── Bar helpers ──
+
+    _showBar() {
+        const bar = document.getElementById(this.barId);
+        if (!bar) return;
+        bar.classList.remove('hidden', 'confirmed');
+        const msg = bar.querySelector('.inv-qty-confirm-msg');
+        if (msg) msg.textContent = 'Confirm changes?';
+        void bar.offsetWidth;
+        bar.classList.add('visible');
+    }
+
+    _hideBar(immediate = false) {
+        const bar = document.getElementById(this.barId);
+        if (!bar) return;
+        bar.classList.remove('visible', 'confirmed');
+        if (immediate) {
+            bar.classList.add('hidden');
+        } else {
+            setTimeout(() => bar.classList.add('hidden'), 230);
+        }
+    }
+}
+
+// ── Standalone indicator helpers (used by inventory.js) ──
+function updateTileIndicator(input, pendingMap) {
+    const tile = input.closest('.inv-card-tile') ?? input.closest('.card-tile');
+    if (!tile) return;
+    const originalValue = pendingMap.get(input);
+    if (originalValue === undefined) {
+        clearTileIndicator(tile);
+        return;
+    }
+    const currentValue = parseInt(input.value) || 0;
+    const delta = currentValue - originalValue;
+    let ind = tile.querySelector('.inv-tile-qty-indicator');
+    if (!ind) {
+        ind = document.createElement('div');
+        ind.className = 'inv-tile-qty-indicator';
+        tile.appendChild(ind);
+    }
+    tile.classList.add('has-pending');
+    if (currentValue === 0) {
+        ind.innerHTML = '<div class="inv-tile-qty-indicator-box indicator-del">🗑</div>';
+    } else if (delta > 0) {
+        ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-add">+${delta}</div>`;
+    } else {
+        ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-sub">${delta}</div>`;
+    }
+}
+
+function clearTileIndicator(tile) {
+    tile.classList.remove('has-pending');
+    const ind = tile.querySelector('.inv-tile-qty-indicator');
+    if (ind) ind.innerHTML = '';
+}
+
+function clearAllIndicators() {
+    document.querySelectorAll('.has-pending').forEach(clearTileIndicator);
+}
+
+// ── Card search edit mode instance ──
+// Wired to the cards-qty-confirm-bar; commits directly to the default bin.
+const cardsEditMode = new TileEditMode('cards-qty-confirm-bar', async (changes) => {
+    for (const c of changes) {
+        if (!c.foilId) continue;
+        await commitQtyToDefault(c.cardId, c.editionId, c.foilId, c.quantity);
+        // Update badge after commit
+        const badge = c.input.closest('.card-tile')?.querySelector('.inv-qty-badge');
+        if (badge) {
+            badge.textContent = `x${c.quantity}`;
+            badge.style.display = c.quantity > 0 ? '' : 'none';
+        }
+    }
+});
+
 // ── Attach inventory overlay to any card tile ──
-// Injects: dim layer (inside edition-tile-wrap), qty badge, name/foil overlay, +/input/− controls
-// All writes go to the user's default bin.
 function attachInvOverlay(tile, cardId, editionId, cardName) {
     if (!currentUser) return;
 
     const qty = snapQty(cardId, editionId);
 
-    // Dim layer inside .edition-tile-wrap — clipped to card shape by wrap's overflow:hidden
+    // Dim layer inside .edition-tile-wrap
     const wrap = tile.querySelector('.edition-tile-wrap');
     if (wrap && !wrap.querySelector('.card-tile-dim')) {
         const dim = document.createElement('div');
         dim.className = 'card-tile-dim';
-        // Insert before first child so it sits beneath the image in z-order
         wrap.insertBefore(dim, wrap.firstChild);
     }
 
@@ -148,6 +335,11 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
             <div class="inv-card-tile-foil" data-foil-label="${cardId}-${editionId}">—</div>
         </div>`;
     tile.appendChild(overlay);
+
+    // Indicator (shown when edit mode is active and mouse is not hovering)
+    const indicator = document.createElement('div');
+    indicator.className = 'inv-tile-qty-indicator';
+    tile.appendChild(indicator);
 
     // +/input/− controls
     const ctrl = document.createElement('div');
@@ -176,6 +368,8 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
                 const label = toFoilLabel(kind) || '—';
                 const el = tile.querySelector(`[data-foil-label="${cardId}-${editionId}"]`);
                 if (el) el.textContent = label;
+                // Store foilId on input for commitFn to read
+                ctrl.querySelector('.inv-tile-qty-input').dataset.foilId = foilId;
             }
         } catch { /* silent */
         }
@@ -184,14 +378,20 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
 
     tile.addEventListener('mouseenter', resolveFoil, {once: true});
 
+    const input = ctrl.querySelector('.inv-tile-qty-input');
+
     async function adjustQty(delta) {
         const fid = await resolveFoil();
         if (!fid) return;
-        const input = ctrl.querySelector('.inv-tile-qty-input');
-        const newQty = Math.max(0, (parseInt(input.value) || 0) + delta);
+        const before = parseInt(input.value) || 0;
+        const newQty = Math.max(0, before + delta);
         input.value = newQty;
-        await commitQtyToDefault(cardId, editionId, fid, newQty);
-        updateBadge(newQty);
+        if (cardsEditMode.isActive()) {
+            cardsEditMode.stage(input, before);
+        } else {
+            await commitQtyToDefault(cardId, editionId, fid, newQty);
+            updateBadge(newQty);
+        }
     }
 
     function updateBadge(newQty) {
@@ -208,21 +408,25 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
         adjustQty(-1);
     });
 
-    const input = ctrl.querySelector('.inv-tile-qty-input');
     input.addEventListener('click', e => e.stopPropagation());
     input.addEventListener('focus', () => input.select());
     input.addEventListener('change', async () => {
         const fid = await resolveFoil();
         const val = Math.max(0, parseInt(input.value) || 0);
         input.value = val;
-        await commitQtyToDefault(cardId, editionId, fid, val);
-        updateBadge(val);
+        if (cardsEditMode.isActive()) {
+            const orig = cardsEditMode.pending.has(input)
+                ? cardsEditMode.pending.get(input)
+                : val;
+            cardsEditMode.stage(input, orig);
+        } else {
+            await commitQtyToDefault(cardId, editionId, fid, val);
+            updateBadge(val);
+        }
     });
 }
 
 // ── Scroll wheel on quantity inputs ──
-// Bin tiles: stage the change (show confirmation banner).
-// Card search tiles: commit immediately via change event.
 document.addEventListener('wheel', e => {
     if (!e.target.matches('.inv-tile-qty-input')) return;
     e.preventDefault();
@@ -238,9 +442,12 @@ document.addEventListener('wheel', e => {
     input.value = newVal;
 
     const isInvTile = !!input.closest('.inv-card-tile');
+    const isCardTile = !!input.closest('.card-tile');
 
     if (isInvTile && typeof tileQtyStage === 'function') {
         tileQtyStage(input, originalValue);
+    } else if (isCardTile) {
+        cardsEditMode.stage(input, originalValue);
     } else {
         input.dispatchEvent(new Event('change', {bubbles: true}));
     }

@@ -422,50 +422,15 @@ function isEditMode() {
 }
 
 
-// ── Update the change indicator on a tile ──
-function updateTileIndicator(input) {
-    const tile = input.closest('.inv-card-tile');
-    if (!tile) return;
-
-    const originalValue = pendingQtyChanges.get(input);
-    if (originalValue === undefined) {
-        // No pending change — clear indicator
-        tile.classList.remove('has-pending');
-        const ind = tile.querySelector('.inv-tile-qty-indicator');
-        if (ind) ind.innerHTML = '';
-        return;
-    }
-
-    const currentValue = parseInt(input.value) || 0;
-    const delta = currentValue - originalValue;
-    const ind = tile.querySelector('.inv-tile-qty-indicator');
-    if (!ind) return;
-
-    tile.classList.add('has-pending');
-
-    if (currentValue === 0) {
-        ind.innerHTML = '<div class="inv-tile-qty-indicator-box indicator-del">🗑</div>';
-    } else if (delta > 0) {
-        ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-add">+${delta}</div>`;
-    } else {
-        ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-sub">${delta}</div>`;
-    }
-}
-
-function clearAllIndicators() {
-    document.querySelectorAll('.inv-card-tile.has-pending').forEach(tile => {
-        tile.classList.remove('has-pending');
-        const ind = tile.querySelector('.inv-tile-qty-indicator');
-        if (ind) ind.innerHTML = '';
-    });
-}
+// ── Indicator helpers delegated to tiles.js ──
+// updateTileIndicator, clearTileIndicator, clearAllIndicators defined in tiles.js
 
 function enterEditMode(input, originalValue) {
     // Only record originalValue the first time this input is touched in this session
     if (!pendingQtyChanges.has(input)) {
         pendingQtyChanges.set(input, originalValue);
     }
-    updateTileIndicator(input);
+    updateTileIndicator(input, pendingQtyChanges);
     showQtyConfirmBar();
 }
 

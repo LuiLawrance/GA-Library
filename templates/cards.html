@@ -29,6 +29,14 @@
 </div>
 
 <div class="cards-body">
+    <div class="inv-qty-confirm-bar hidden" id="cards-qty-confirm-bar">
+        <span class="inv-qty-confirm-msg">Confirm changes?</span>
+        <div class="inv-qty-confirm-actions">
+            <button class="inv-qty-confirm-btn inv-qty-confirm-apply" onclick="cardsEditMode.apply()">Apply</button>
+            <button class="inv-qty-confirm-btn inv-qty-confirm-discard" onclick="cardsEditMode.discard()">Discard
+            </button>
+        </div>
+    </div>
     <div id="card-drawer" class="card-drawer hidden">
         <div class="drawer-inner">
             <div id="drawer-content"></div>

@@ -54,3 +54,12 @@
     color: rgba(255, 255, 255, 0.75);
     text-align: center;
 }
+
+/* ── Edit mode indicator triggers for card search tiles ── */
+.card-tile.has-pending .inv-tile-qty-indicator {
+    opacity: 1;
+}
+
+.card-tile.has-pending:hover .inv-tile-qty-indicator {
+    opacity: 0;
+}

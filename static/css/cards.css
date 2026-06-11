@@ -399,3 +399,11 @@
 .card-tile--authed:hover .edition-tile-wrap {
     transform: scale(1.03);
 }
+
+/* ── Card search confirm bar — same style as inventory, anchored to cards-body ── */
+#cards-qty-confirm-bar {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-10px);
+}
