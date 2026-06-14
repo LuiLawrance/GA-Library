@@ -1551,7 +1551,7 @@ async function openInvDrawer(cardId, editionId, cardName) {
             cardInfo.querySelector('.drawer-tab-info').classList.add('hidden');
             const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
             themaPanel.classList.remove('hidden');
-            themaPanel.innerHTML = buildThemaHTML(card.editions[editionId]?.thema || {});
+            themaPanel.innerHTML = buildTabThemaPanel(card.editions[editionId]);
         }
 
         drawer.classList.remove('hidden');
@@ -1620,7 +1620,7 @@ function selectInvDrawerEdition(editionId) {
 
     if (invDrawerActiveTab === 'thema') {
         const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
-        if (themaPanel) themaPanel.innerHTML = buildThemaHTML(edition?.thema || {});
+        if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
     }
 }
 

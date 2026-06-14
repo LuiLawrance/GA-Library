@@ -17,6 +17,92 @@ function parseEffect(text, cardName) {
 
 const THEMA_CATEGORIES = ['charm', 'ferocity', 'grace', 'mystique', 'valor'];
 
+function buildCollectorHTML(foils) {
+    if (!foils || Object.keys(foils).length === 0) {
+        return `<div class="thema-empty">No population data available for this edition.</div>`;
+    }
+
+    // Separate nonfoil, base foil, and special foils
+    const entries = Object.values(foils);
+    const nonfoilEntry = entries.find(f => f.kind?.toLowerCase() === 'nonfoil');
+    const foilEntry = entries.find(f => f.kind?.toLowerCase() === 'foil');
+    const specials = entries.filter(f => {
+        const k = f.kind?.toLowerCase();
+        return k !== 'nonfoil' && k !== 'foil';
+    });
+
+    // Max population across top-level foil types for bar scaling
+    const topPops = [nonfoilEntry, foilEntry, ...specials]
+        .filter(Boolean)
+        .map(f => f.population ?? 0);
+    const maxPop = Math.max(...topPops, 1);
+
+    function printingBadge(printing) {
+        if (printing == null) return '';
+        return printing
+            ? `<span class="collector-badge collector-badge--printing">Printing</span>`
+            : `<span class="collector-badge collector-badge--oop">Out of Print</span>`;
+    }
+
+    function foilRow(foilObj, label, isVariant = false, parentPop = null) {
+        const pop = foilObj.population ?? null;
+        const pct = pop != null ? Math.round((pop / maxPop) * 100) : 0;
+        const parentPct = (isVariant && parentPop && pop != null)
+            ? Math.round((pop / parentPop) * 100)
+            : null;
+
+        return `
+            <div class="collector-row${isVariant ? ' collector-row--variant' : ''}">
+                <div class="collector-kind">${label}</div>
+                <div class="collector-bar-wrap">
+                    <div class="collector-bar${isVariant ? ' collector-bar--variant' : ''}" style="width: ${pct}%"></div>
+                </div>
+                <div class="collector-meta">
+                    ${pop != null ? `<span class="collector-pop">${pop.toLocaleString()}</span>` : '<span class="collector-pop collector-pop--unknown">—</span>'}
+                    ${parentPct != null ? `<span class="collector-pct">${parentPct}%</span>` : ''}
+                    ${printingBadge(foilObj.printing)}
+                </div>
+            </div>`;
+    }
+
+    function foilBlock(foilObj, label) {
+        if (!foilObj) return '';
+        const variants = Object.values(foilObj.variants || {});
+        const variantPop = variants.reduce((s, v) => s + (v.population ?? 0), 0);
+        const basePop = (foilObj.population ?? 0) - variantPop;
+
+        // If there are variants, show the base remainder as a sub-row
+        let variantHTML = '';
+        if (variants.length > 0) {
+            if (basePop > 0) {
+                variantHTML += foilRow(
+                    {population: basePop, printing: foilObj.printing},
+                    `Standard ${toFoilLabel(foilObj.kind)}`,
+                    true,
+                    foilObj.population
+                );
+            }
+            variants.forEach(v => {
+                variantHTML += foilRow(v, toFoilLabel(v.kind), true, foilObj.population);
+            });
+        }
+
+        return foilRow(foilObj, label) + variantHTML;
+    }
+
+    const rows = [
+        foilBlock(nonfoilEntry, 'Non-Foil'),
+        foilBlock(foilEntry, 'Foil'),
+        ...specials.map(f => foilBlock(f, toFoilLabel(f.kind)))
+    ].join('');
+
+    return `
+        <div class="collector-section">
+            <div class="collector-section-label">Population</div>
+            ${rows}
+        </div>`;
+}
+
 function buildThemaHTML(thema) {
     const hasNonfoil = thema?.nonfoil && Object.keys(thema.nonfoil).length > 0;
     const hasFoil = thema?.foil && Object.keys(thema.foil).length > 0;
@@ -75,6 +161,15 @@ function buildThemaHTML(thema) {
     return `<div class="thema-grid${columns.length === 1 ? ' thema-grid--single' : ''}">${colsHTML}</div>`;
 }
 
+function buildTabThemaPanel(edition) {
+    const foils = edition?.foils || {};
+    const thema = edition?.thema || {};
+    return buildCollectorHTML(foils)
+        + `<div class="collector-thema-divider"></div>`
+        + `<div class="collector-section-label">Thema</div>`
+        + buildThemaHTML(thema);
+}
+
 function switchDrawerTab(tab, drawerId = 'card-drawer') {
     if (drawerId === 'card-drawer') {
         drawerActiveTab = tab;
@@ -109,8 +204,7 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
 
         const currentEditionId = drawer.dataset.selectedEdition;
         const editions = JSON.parse(drawer.dataset.editions || '{}');
-        const thema = editions[currentEditionId]?.thema || {};
-        themaPanel.innerHTML = buildThemaHTML(thema);
+        themaPanel.innerHTML = buildTabThemaPanel(editions[currentEditionId]);
     }
 }
 
@@ -269,9 +363,8 @@ async function openCardDrawer(cardId, editionId, cardName) {
             if (drawerActiveTab === 'thema') {
                 infoPanel.classList.add('hidden');
                 themaPanel.classList.remove('hidden');
-                const currentEditionId = drawer.dataset.selectedEdition;
                 const editions = JSON.parse(drawer.dataset.editions || '{}');
-                themaPanel.innerHTML = buildThemaHTML(editions[currentEditionId]?.thema || {});
+                themaPanel.innerHTML = buildTabThemaPanel(editions[drawer.dataset.selectedEdition]);
             }
         }
 
@@ -362,9 +455,6 @@ function selectDrawerEdition(editionId) {
     if (drawerActiveTab === 'thema') {
         const cardInfo = drawer.querySelector('.drawer-card-info');
         const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
-        if (themaPanel) {
-            const thema = edition?.thema || {};
-            themaPanel.innerHTML = buildThemaHTML(thema);
-        }
+        if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
     }
 }
