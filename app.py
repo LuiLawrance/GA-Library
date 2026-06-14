@@ -101,6 +101,25 @@ async def api_cards_search(request: Request, q: str = ""):
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
 
+    def enrich(cards):
+        set_file_cache = {}
+        for card in cards:
+            card_info = info_data.get(card["card_id"], {})
+            edition_info = card_info.get("editions", {}).get(card["edition_id"], {})
+            card["element"] = card_info.get("element") or ""
+            set_prefix = edition_info.get("set_prefix", "")
+            key = set_prefix.lower().replace(" ", "_")
+            if key not in set_file_cache:
+                path = f"DATA_GA/SETS_GA/{key}.json"
+                set_file_cache[key] = json.load(open(path)) if os.path.exists(path) else {}
+            set_data = set_file_cache[key]
+            card["collector_number"] = next(
+                (num for num, eids in set_data.items()
+                 if card["edition_id"] in (eids if isinstance(eids, list) else [eids])),
+                ""
+            )
+        return cards
+
     query = q.strip().lower()
     cards = []
 
@@ -136,7 +155,7 @@ async def api_cards_search(request: Request, q: str = ""):
                     })
 
             if not set_filters:
-                return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+                return JSONResponse({"cards": enrich(cards), "message": None, "fuzzy": False})
 
         # ── Step 1: API call ──
         already_found = {c["card_id"] for c in cards}
@@ -255,7 +274,7 @@ async def api_cards_search(request: Request, q: str = ""):
             ))
 
         if cards:
-            return JSONResponse({"cards": cards, "message": None, "fuzzy": False})
+            return JSONResponse({"cards": enrich(cards), "message": None, "fuzzy": False})
 
     if not query:
         return JSONResponse({"cards": [], "message": "No cards found.", "fuzzy": False})
@@ -291,7 +310,7 @@ async def api_cards_search(request: Request, q: str = ""):
                 fuzzy_added = True
 
     if cards:
-        return JSONResponse({"cards": cards, "message": None, "fuzzy": fuzzy_added})
+        return JSONResponse({"cards": enrich(cards), "message": None, "fuzzy": fuzzy_added})
 
     return JSONResponse({"cards": [], "message": f"No card found for '{q}'.", "fuzzy": False})
 
@@ -442,6 +461,8 @@ async def api_sets_search(prefix: str):
                 "edition_id": edition_id,
                 "name": slug_entry["name"],
                 "rarity": rarity,
+                "element": card_info.get("element") or "",
+                "collector_number": collector_number,
             })
 
     return JSONResponse({"cards": cards})

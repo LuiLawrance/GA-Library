@@ -191,6 +191,13 @@ async function searchCards() {
 
     results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Searching...</p>';
 
+    // Reset filters on new search
+    cardSearchResults = [];
+    cardFilters.sort = 'collector';
+    cardFilters.rarity = '';
+    cardFilters.element = '';
+    updateCardsFilterState();
+
     // Refresh snapshot and bin name cache on each new search
     _defaultBinName = null;
     await loadInvSnapshot();
@@ -210,6 +217,7 @@ async function searchCards() {
                 results.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;">No cards found for set '${setPrefix}'.</p>`;
                 return;
             }
+            cardSearchResults = data.cards;
             results.innerHTML = '';
             for (let i = 0; i < data.cards.length; i++) {
                 results.appendChild(buildCardTile(data.cards[i], i));
@@ -235,6 +243,7 @@ async function searchCards() {
             return;
         }
 
+        cardSearchResults = data.cards;
         results.innerHTML = '';
 
         if (data.fuzzy) {
@@ -326,9 +335,126 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.default-bin-wrap')) {
         document.getElementById('default-bin-menu')?.classList.add('hidden');
     }
+    if (!e.target.closest('.cards-filter-wrap')) {
+        closeCardsFilter();
+    }
 });
 
-// ── Qty font scaling for card search grid ──
+// ── Card search filter ──
+let cardSearchResults = [];
+const cardFilters = {sort: 'collector', rarity: '', element: ''};
+
+function toggleCardsFilter() {
+    const menu = document.getElementById('cards-filter-menu');
+    const btn = document.getElementById('cards-filter-btn');
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) {
+        menu.classList.add('hidden');
+        btn.classList.remove('open');
+    } else {
+        populateCardsFilterMenus();
+        menu.classList.remove('hidden');
+        btn.classList.add('open');
+    }
+}
+
+function closeCardsFilter() {
+    const menu = document.getElementById('cards-filter-menu');
+    const btn = document.getElementById('cards-filter-btn');
+    if (menu) menu.classList.add('hidden');
+    if (btn) btn.classList.remove('open');
+}
+
+function populateCardsFilterMenus() {
+    const rarityOrder = ['C', 'U', 'R', 'SR', 'UR', 'PR', 'CSR', 'CUR', 'CPR'];
+    const rarities = [...new Set(cardSearchResults.map(c => rarityMap[c.rarity]).filter(Boolean))]
+        .sort((a, b) => rarityOrder.indexOf(a) - rarityOrder.indexOf(b));
+    const elements = [...new Set(cardSearchResults.map(c => c.element).filter(Boolean))].sort();
+    renderCardsFilterChips('cards-filter-sort-options', ['collector', 'name'], 'sort');
+    renderCardsFilterChips('cards-filter-element-options', elements, 'element');
+    renderCardsFilterChips('cards-filter-rarity-options', rarities, 'rarity');
+}
+
+function renderCardsFilterChips(containerId, values, filterKey) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    if (!values.length) {
+        container.innerHTML = '<span style="font-size:0.7rem;color:var(--text-muted);opacity:0.5;">None</span>';
+        return;
+    }
+    values.forEach(val => {
+        const chip = document.createElement('button');
+        chip.className = 'inv-filter-chip' + (cardFilters[filterKey] === val ? ' selected' : '');
+        chip.textContent = val;
+        chip.onclick = e => {
+            e.stopPropagation();
+            if (filterKey === 'sort') {
+                // Sort always has a value — just switch
+                container.querySelectorAll('.inv-filter-chip').forEach(c => c.classList.remove('selected'));
+                cardFilters.sort = val;
+                chip.classList.add('selected');
+            } else if (cardFilters[filterKey] === val) {
+                cardFilters[filterKey] = '';
+                chip.classList.remove('selected');
+            } else {
+                container.querySelectorAll('.inv-filter-chip').forEach(c => c.classList.remove('selected'));
+                cardFilters[filterKey] = val;
+                chip.classList.add('selected');
+            }
+            updateCardsFilterState();
+            applyCardsFilters();
+        };
+        container.appendChild(chip);
+    });
+}
+
+function _sortCollectorNumber(num) {
+    if (!num) return [Infinity, ''];
+    const m = String(num).match(/^(\d+)([A-Z]*)$/i);
+    return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, String(num)];
+}
+
+function updateCardsFilterState() {
+    const btn = document.getElementById('cards-filter-btn');
+    const label = document.getElementById('cards-filter-label');
+    if (!btn || !label) return;
+    const activeCount = Object.entries(cardFilters).filter(([k, v]) => k !== 'sort' && v).length;
+    btn.classList.toggle('active', activeCount > 0);
+    label.textContent = activeCount > 0 ? `Filter (${activeCount})` : 'Filter';
+}
+
+function clearCardsFilters() {
+    cardFilters.sort = 'collector';
+    cardFilters.rarity = '';
+    cardFilters.element = '';
+    updateCardsFilterState();
+    populateCardsFilterMenus();
+    applyCardsFilters();
+}
+
+function applyCardsFilters() {
+    updateCardsFilterState();
+    const results = document.getElementById('card-results');
+    if (!results) return;
+    let filtered = [...cardSearchResults];
+    if (cardFilters.rarity)
+        filtered = filtered.filter(c => (rarityMap[c.rarity] || '') === cardFilters.rarity);
+    if (cardFilters.element)
+        filtered = filtered.filter(c => c.element === cardFilters.element);
+    if (cardFilters.sort === 'name') {
+        filtered.sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+        // collector: sort by collector number numerically
+        filtered.sort((a, b) => {
+            const [nA, sA] = _sortCollectorNumber(a.collector_number);
+            const [nB, sB] = _sortCollectorNumber(b.collector_number);
+            return nA !== nB ? nA - nB : sA.localeCompare(sB);
+        });
+    }
+    results.innerHTML = '';
+    filtered.forEach((card, i) => results.appendChild(buildCardTile(card, i)));
+}
 
 // Event delegation: scale on typed input
 document.addEventListener('input', e => {

@@ -50,6 +50,13 @@ async function navigate(path, pushState = true) {
         selectedSets.clear();
         updateSetDropdownLabel();
         await loadSets();
+        // Reset card search filter state
+        if (typeof cardSearchResults !== 'undefined') {
+            cardSearchResults = [];
+            cardFilters.sort = 'collector';
+            cardFilters.rarity = '';
+            cardFilters.element = '';
+        }
         const binWrap = document.getElementById('default-bin-wrap');
         if (binWrap) {
             if (currentUser) {

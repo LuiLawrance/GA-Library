@@ -232,7 +232,7 @@ function renderBinCards() {
     if (!grid) return;
 
     const filter = document.getElementById('inv-card-filter')?.value?.toLowerCase() || '';
-    const sort = binFilters.sort || 'name';
+    const sort = binFilters.sort || 'collector';
 
     let rows = [...binCardRows];
 
@@ -302,7 +302,7 @@ function renderBinCards() {
 }
 
 // ── Bin filter state ──
-const binFilters = {sort: 'name', set: '', element: '', rarity: '', foil: ''};
+const binFilters = {sort: 'collector', set: '', element: '', rarity: '', foil: ''};
 
 function toggleFilterDropdown() {
     const menu = document.getElementById('inv-filter-menu');
@@ -389,7 +389,7 @@ function updateFilterButtonState() {
 }
 
 function clearBinFilters() {
-    binFilters.sort = 'name';
+    binFilters.sort = 'collector';
     binFilters.set = '';
     binFilters.element = '';
     binFilters.rarity = '';

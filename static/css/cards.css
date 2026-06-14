@@ -407,3 +407,108 @@
     left: 50%;
     transform: translateX(-50%) translateY(-10px);
 }
+
+/* ── Cards filter button & menu ── */
+.cards-filter-wrap {
+    position: relative;
+}
+
+.cards-filter-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.2s, color 0.2s;
+    white-space: nowrap;
+}
+
+.cards-filter-btn:hover {
+    border-color: var(--border-focus);
+}
+
+.cards-filter-btn.open {
+    border-color: var(--border-focus);
+}
+
+.cards-filter-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.cards-filter-arrow {
+    display: inline-block;
+    font-size: 1.1rem;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.25s ease;
+}
+
+.cards-filter-btn.open .cards-filter-arrow {
+    transform: rotate(90deg);
+}
+
+.cards-filter-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 200px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 300;
+    overflow: hidden;
+    animation: dropdownReveal 0.2s ease forwards;
+}
+
+.cards-filter-section {
+    padding: 10px 14px 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.cards-filter-section:last-of-type {
+    border-bottom: none;
+}
+
+.cards-filter-section-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.cards-filter-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-bottom: 6px;
+}
+
+.cards-filter-clear-btn {
+    display: block;
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border);
+    padding: 8px 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: color 0.15s;
+    letter-spacing: 0.04em;
+}
+
+.cards-filter-clear-btn:hover {
+    color: var(--error);
+}

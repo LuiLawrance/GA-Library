@@ -25,6 +25,27 @@
             <div class="autocomplete-list hidden" id="autocomplete-list"></div>
         </div>
         <button class="btn-search" onclick="searchCards()">Search</button>
+        <div class="cards-filter-wrap">
+            <button class="cards-filter-btn" id="cards-filter-btn" onclick="toggleCardsFilter()">
+                <span id="cards-filter-label">Filter</span>
+                <span class="cards-filter-arrow">&#8249;</span>
+            </button>
+            <div class="cards-filter-menu hidden" id="cards-filter-menu">
+                <div class="cards-filter-section">
+                    <div class="cards-filter-section-label">Sort</div>
+                    <div class="cards-filter-options" id="cards-filter-sort-options"></div>
+                </div>
+                <div class="cards-filter-section">
+                    <div class="cards-filter-section-label">Element</div>
+                    <div class="cards-filter-options" id="cards-filter-element-options"></div>
+                </div>
+                <div class="cards-filter-section">
+                    <div class="cards-filter-section-label">Rarity</div>
+                    <div class="cards-filter-options" id="cards-filter-rarity-options"></div>
+                </div>
+                <button class="cards-filter-clear-btn" onclick="clearCardsFilters()">Clear all</button>
+            </div>
+        </div>
     </div>
 </div>
 
