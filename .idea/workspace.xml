@@ -4,16 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="0ef7b4b7-70df-4e78-80a5-600fa4c2f697" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/css/drawer.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/css/drawer.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/css/inventory.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/css/inventory.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/js/drawer.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/drawer.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/js/inventory.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/inventory.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/templates/cards.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/cards.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/templates/inventory.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/inventory.html" afterDir="false" />
-    </list>
+    <list default="true" id="0ef7b4b7-70df-4e78-80a5-600fa4c2f697" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

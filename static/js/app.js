@@ -19,6 +19,10 @@ async function navigate(path, pushState = true) {
     content.classList.add('fade-out');
     await sleep(150);
 
+    // Reset drawer tab states when navigating away
+    if (typeof drawerActiveTab !== 'undefined') drawerActiveTab = 'info';
+    if (typeof invDrawerActiveTab !== 'undefined') invDrawerActiveTab = 'info';
+
     if (pushState) {
         window.history.pushState({}, '', path);
     }
