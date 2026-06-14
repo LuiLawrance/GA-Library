@@ -228,6 +228,9 @@
             </button>
             <button class="inv-modal-danger" id="settings-delete-btn" onclick="deleteBin()">Delete Bin</button>
         </div>
+        <button class="inv-settings-import-export-btn" onclick="closeBinSettings(); openImportExportModal()">⇅ Import /
+            Export
+        </button>
     </div>
 </div>
 
@@ -324,6 +327,42 @@
         <div class="inv-modal-actions">
             <button class="inv-modal-submit" onclick="saveCardModal()">Save</button>
             <button class="inv-modal-danger" onclick="removeCardModal()">Remove</button>
+        </div>
+    </div>
+</div>
+<!-- ── Import / Export modal ── -->
+<div class="inv-modal-overlay hidden" id="inv-import-export-modal" onclick="closeImportExportModal()">
+    <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <div>
+                <div class="inv-modal-title">Import / Export</div>
+                <div class="inv-modal-set" id="import-export-bin-label"></div>
+            </div>
+            <button class="inv-modal-close" onclick="closeImportExportModal()">✕</button>
+        </div>
+        <div class="inv-import-export-tabs">
+            <button class="inv-import-export-tab active" id="import-tab-btn" onclick="switchImportExportTab('import')">
+                Import
+            </button>
+            <button class="inv-import-export-tab" id="export-tab-btn" onclick="switchImportExportTab('export')">Export
+            </button>
+        </div>
+        <div id="import-panel">
+            <div class="inv-label" style="margin-bottom:6px;">Paste your list below</div>
+            <div class="inv-import-format-hint">Format: <code>4x Card Name (SET) #42 Foil Kind</code></div>
+            <div class="inv-textarea-wrap">
+                <textarea class="inv-import-textarea" id="import-textarea"
+                          placeholder="4x Merlin, Unbound Sage (DOA) #42 Nonfoil&#10;1x Silvie, Loved by All (DOA) #1 Foil"></textarea>
+            </div>
+            <div class="inv-import-results hidden" id="import-results"></div>
+            <button class="inv-modal-submit" id="import-submit-btn" onclick="submitImport()">Import</button>
+        </div>
+        <div class="hidden" id="export-panel">
+            <div class="inv-label" style="margin-bottom:6px;">Copy your list below</div>
+            <div class="inv-textarea-wrap">
+                <textarea class="inv-import-textarea" id="export-textarea" readonly></textarea>
+            </div>
+            <button class="inv-modal-submit" id="export-copy-btn" onclick="copyExport()">Copy to Clipboard</button>
         </div>
     </div>
 </div>

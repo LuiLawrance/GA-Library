@@ -1665,7 +1665,7 @@ function closeInvDrawer() {
     const drawer = document.getElementById('inv-card-drawer');
     if (!drawer) return;
     drawer.classList.remove('open');
-    document.getElementById('inv-drawer-sidebar').classList.add('hidden');
+    document.getElementById('inv-drawer-sidebar')?.classList.add('hidden');
     selectedInvCardId = null;
     invDrawerActiveTab = 'info';
     const gridWrap = document.querySelector('.inv-card-grid-wrap');
@@ -1891,6 +1891,122 @@ async function ctxMoveToNewBin() {
     } catch (err) {
         document.getElementById('move-modal-error').textContent = err.message || 'Failed.';
         document.getElementById('move-modal-error').classList.remove('hidden');
+    }
+}
+
+// ═══════════════════════════════════════
+// IMPORT / EXPORT
+// ═══════════════════════════════════════
+
+let importExportTab = 'import';
+
+function openImportExportModal() {
+    if (!activeBin) return;
+    document.getElementById('import-export-bin-label').textContent = activeBin;
+    document.getElementById('import-textarea').value = '';
+    document.getElementById('export-textarea').value = '';
+    document.getElementById('import-results').classList.add('hidden');
+    document.getElementById('import-results').innerHTML = '';
+    document.getElementById('import-submit-btn').textContent = 'Import';
+    document.getElementById('import-submit-btn').disabled = false;
+    switchImportExportTab('import');
+    document.getElementById('inv-import-export-modal').classList.remove('hidden');
+
+    // Pre-load export content
+    loadExport();
+}
+
+function closeImportExportModal() {
+    document.getElementById('inv-import-export-modal').classList.add('hidden');
+}
+
+function switchImportExportTab(tab) {
+    importExportTab = tab;
+    document.getElementById('import-tab-btn').classList.toggle('active', tab === 'import');
+    document.getElementById('export-tab-btn').classList.toggle('active', tab === 'export');
+    document.getElementById('import-panel').classList.toggle('hidden', tab !== 'import');
+    document.getElementById('export-panel').classList.toggle('hidden', tab !== 'export');
+}
+
+async function loadExport() {
+    const textarea = document.getElementById('export-textarea');
+    textarea.value = 'Loading...';
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/export`);
+        const data = await res.json();
+        textarea.value = data.lines.join('\n');
+    } catch {
+        textarea.value = 'Failed to load export.';
+    }
+}
+
+async function copyExport() {
+    const textarea = document.getElementById('export-textarea');
+    await navigator.clipboard.writeText(textarea.value);
+    const btn = document.getElementById('export-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => {
+        btn.textContent = 'Copy to Clipboard';
+    }, 1800);
+}
+
+async function submitImport() {
+    const textarea = document.getElementById('import-textarea');
+    const lines = textarea.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+
+    const btn = document.getElementById('import-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+
+    const resultsEl = document.getElementById('import-results');
+    resultsEl.innerHTML = '';
+    resultsEl.classList.add('hidden');
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({lines})
+        });
+        const data = await res.json();
+
+        const successes = data.results.filter(r => r.ok);
+        const failures = data.results.filter(r => !r.ok);
+
+        let html = '';
+
+        if (successes.length) {
+            html += `<div class="inv-import-summary inv-import-summary--ok">✓ ${successes.length} line${successes.length !== 1 ? 's' : ''} imported successfully</div>`;
+        }
+
+        if (failures.length) {
+            html += `<div class="inv-import-summary inv-import-summary--err">✕ ${failures.length} line${failures.length !== 1 ? 's' : ''} failed</div>`;
+            html += failures.map(r =>
+                `<div class="inv-import-error-line"><span class="inv-import-error-text">${r.error}</span><span class="inv-import-error-raw">${r.line}</span></div>`
+            ).join('');
+        }
+
+        resultsEl.innerHTML = html;
+        resultsEl.classList.remove('hidden');
+
+        if (successes.length) {
+            await enrichAndRenderBinCards(invBins[activeBin]);
+            // Reload local bin state
+            const invRes = await fetch('/api/inventory');
+            if (invRes.ok) {
+                const invData = await invRes.json();
+                invBins = invData.bins || {};
+            }
+        }
+
+        btn.textContent = 'Import Again';
+        btn.disabled = false;
+    } catch {
+        resultsEl.innerHTML = '<div class="inv-import-summary inv-import-summary--err">Request failed.</div>';
+        resultsEl.classList.remove('hidden');
+        btn.textContent = 'Import';
+        btn.disabled = false;
     }
 }
 

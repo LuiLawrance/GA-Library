@@ -1689,3 +1689,187 @@
     background: rgba(220, 80, 80, 0.15);
     font-size: 1.3rem;
 }
+
+/* ── Import / Export modal ── */
+.inv-modal-import-export {
+    width: 520px;
+    max-width: min(520px, 95vw);
+}
+
+.inv-import-export-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+}
+
+.inv-import-export-tab {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 7px 14px;
+    margin-bottom: -1px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.inv-import-export-tab:hover {
+    color: var(--text);
+}
+
+.inv-import-export-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.inv-import-format-hint {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.inv-import-format-hint code {
+    color: var(--text);
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+}
+
+.inv-textarea-wrap {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow-y: auto;
+    height: 180px;
+    margin-bottom: 12px;
+    transition: border-color 0.2s;
+    background: var(--bg);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.inv-textarea-wrap:focus-within {
+    border-color: var(--border-focus);
+}
+
+.inv-textarea-wrap::-webkit-scrollbar {
+    display: none;
+}
+
+.inv-import-textarea {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--bg);
+    border: none;
+    border-radius: 0;
+    padding: 10px 12px;
+    width: 100%;
+    min-height: 180px;
+    height: auto;
+    resize: none;
+    outline: none;
+    overflow: visible;
+    line-height: 1.6;
+    box-sizing: border-box;
+    margin-bottom: 0;
+    display: block;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.inv-import-textarea::-webkit-scrollbar {
+    display: none;
+}
+
+.inv-import-textarea::placeholder {
+    color: var(--text-muted);
+    opacity: 0.4;
+}
+
+
+.inv-import-summary {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+}
+
+.inv-import-summary--ok {
+    color: #4caf7d;
+    background: rgba(76, 175, 125, 0.08);
+    border: 1px solid rgba(76, 175, 125, 0.25);
+}
+
+.inv-import-summary--err {
+    color: var(--error);
+    background: rgba(200, 110, 110, 0.08);
+    border: 1px solid rgba(200, 110, 110, 0.2);
+}
+
+.inv-import-error-line {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.inv-import-error-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--error);
+}
+
+.inv-import-error-raw {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+.inv-settings-import-export-btn {
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 14px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+    text-align: left;
+    margin-top: 4px;
+}
+
+.inv-settings-import-export-btn:hover {
+    border-color: var(--border-focus);
+    color: var(--text);
+}
+
+
+.inv-import-results {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+    max-height: 140px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.inv-import-results::-webkit-scrollbar {
+    display: none;
+}
