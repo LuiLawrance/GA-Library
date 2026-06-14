@@ -14,15 +14,15 @@
                 <span id="set-dropdown-label">Sets</span>
                 <span class="set-dropdown-arrow">&#8249;</span>
             </button>
-            <div id="set-dropdown-menu" class="set-dropdown-menu hidden">
+            <div class="set-dropdown-menu hidden" id="set-dropdown-menu">
                 <div id="set-dropdown-options"></div>
             </div>
         </div>
         <div class="autocomplete-wrap">
-            <input type="text" id="card-search" placeholder="Search cards..." autocomplete="off"
-                   onkeydown="handleCardKeydown(event)"
-                   oninput="fetchSuggestions(this.value)">
-            <div id="autocomplete-list" class="autocomplete-list hidden"></div>
+            <input autocomplete="off" id="card-search" oninput="fetchSuggestions(this.value)" onkeydown="handleCardKeydown(event)"
+                   placeholder="Search cards..."
+                   type="text">
+            <div class="autocomplete-list hidden" id="autocomplete-list"></div>
         </div>
         <button class="btn-search" onclick="searchCards()">Search</button>
     </div>
@@ -37,13 +37,22 @@
             </button>
         </div>
     </div>
-    <div id="card-drawer" class="card-drawer hidden">
+    <div class="card-drawer hidden" id="card-drawer">
         <div class="drawer-inner">
             <div id="drawer-content"></div>
         </div>
     </div>
-    <button id="drawer-close-btn" class="drawer-close-btn hidden" onclick="closeCardDrawer()">&#x2715;</button>
+    <div class="drawer-sidebar hidden" id="drawer-sidebar">
+        <button class="drawer-sidebar-close" onclick="closeCardDrawer()">&#x2715;</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
+                title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                title="Thema">🏷️
+        </button>
+    </div>
     <div class="card-grid-wrap">
-        <div id="card-results" class="card-grid"></div>
+        <div class="card-grid" id="card-results"></div>
     </div>
 </div>

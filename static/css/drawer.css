@@ -42,31 +42,77 @@
     background: var(--border-focus);
 }
 
-.drawer-close-btn {
+.drawer-sidebar {
     position: absolute;
     top: 12px;
     right: 830px;
-    left: auto;
-    width: 32px;
-    height: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 50%;
+    border-radius: 14px;
+    padding: 6px;
+    z-index: 201;
+    box-shadow: -4px 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.drawer-sidebar-close {
+    width: 34px;
+    height: 34px;
+    background: none;
+    border: none;
+    border-radius: 9px;
     color: #c86e6e;
-    font-size: 1rem;
+    font-size: 0.9rem;
     font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: color 0.2s, border-color 0.2s, background 0.2s;
-    z-index: 201;
+    transition: color 0.2s, background 0.2s;
+    flex-shrink: 0;
 }
 
-.drawer-close-btn:hover {
+.drawer-sidebar-close:hover {
     color: #ffffff;
     background: #c86e6e;
-    border-color: #c86e6e;
+}
+
+.drawer-sidebar-divider {
+    width: 20px;
+    height: 1px;
+    background: var(--border);
+    margin: 2px 0;
+    flex-shrink: 0;
+}
+
+.drawer-sidebar-btn {
+    width: 34px;
+    height: 34px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    font-size: 1.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+    opacity: 0.35;
+    flex-shrink: 0;
+}
+
+.drawer-sidebar-btn:hover {
+    background: var(--bg-hover);
+    opacity: 0.75;
+}
+
+.drawer-sidebar-btn.active {
+    background: rgba(200, 169, 110, 0.12);
+    border-color: rgba(200, 169, 110, 0.5);
+    opacity: 1;
 }
 
 .drawer-inner {
@@ -389,4 +435,98 @@
     color: #ff9de2;
     background: rgba(0, 0, 0, 0.6);
     text-shadow: 0 0 6px rgba(255, 157, 226, 0.6);
+}
+
+/* ── Thema Panel ── */
+.drawer-tab-info {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.drawer-tab-thema {
+    padding: 4px 0;
+}
+
+.thema-empty {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    padding: 16px 0;
+}
+
+.thema-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+}
+
+.thema-grid--single {
+    grid-template-columns: 1fr;
+    max-width: 420px;
+}
+
+.thema-col-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.thema-col-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+.thema-dynamic-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.thema-row {
+    display: grid;
+    grid-template-columns: 72px 1fr 36px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.thema-cat {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: capitalize;
+    color: var(--text-muted);
+}
+
+.thema-bar-wrap {
+    height: 6px;
+    background: var(--bg);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+
+.thema-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.4s ease;
+    min-width: 2px;
+}
+
+.thema-val {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text);
+    text-align: right;
 }

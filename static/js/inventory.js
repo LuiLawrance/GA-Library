@@ -1429,6 +1429,7 @@ async function deleteBin() {
 // ═══════════════════════════════════════
 
 let selectedInvCardId = null;
+let invDrawerActiveTab = 'info';
 
 async function openInvDrawer(cardId, editionId, cardName) {
     const drawer = document.getElementById('inv-card-drawer');
@@ -1444,6 +1445,7 @@ async function openInvDrawer(cardId, editionId, cardName) {
         return;
     }
 
+    const isAlreadyOpen = selectedInvCardId !== null;
     selectedInvCardId = cardId;
 
     try {
@@ -1506,6 +1508,7 @@ async function openInvDrawer(cardId, editionId, cardName) {
 
         const drawerContent = document.getElementById('inv-drawer-content');
         drawer.dataset.editions = JSON.stringify(Object.fromEntries(editions));
+        drawer.dataset.selectedEdition = editionId;
 
         const inner = document.createElement('div');
         inner.className = 'drawer-content-animate';
@@ -1520,15 +1523,18 @@ async function openInvDrawer(cardId, editionId, cardName) {
                         </div>
                         ${card.element ? `<img class="drawer-element" src="/elements/${card.element}.png" alt="${card.element}">` : ''}
                     </div>
-                    <div>
-                        <div class="drawer-section-label">Types</div>
-                        <div class="drawer-types">
-                            ${(card.types || []).map(t => `<span class="drawer-type-tag">${t}</span>`).join('')}
+                    <div class="drawer-tab-info">
+                        <div>
+                            <div class="drawer-section-label">Types</div>
+                            <div class="drawer-types">
+                                ${(card.types || []).map(t => `<span class="drawer-type-tag">${t}</span>`).join('')}
+                            </div>
                         </div>
+                        ${statsHTML ? `<div><div class="drawer-section-label">Stats</div><div class="drawer-stats">${statsHTML}</div></div>` : ''}
+                        ${card.effect ? `<div><div class="drawer-section-label">Effect</div><div class="drawer-effect">${parseEffect(card.effect, cardName)}</div></div>` : ''}
+                        ${legalityHTML ? `<div><div class="drawer-section-label">Legality</div><div class="drawer-legality">${legalityHTML}</div></div>` : ''}
                     </div>
-                    ${statsHTML ? `<div><div class="drawer-section-label">Stats</div><div class="drawer-stats">${statsHTML}</div></div>` : ''}
-                    ${card.effect ? `<div><div class="drawer-section-label">Effect</div><div class="drawer-effect">${parseEffect(card.effect, cardName)}</div></div>` : ''}
-                    ${legalityHTML ? `<div><div class="drawer-section-label">Legality</div><div class="drawer-legality">${legalityHTML}</div></div>` : ''}
+                    <div class="drawer-tab-thema hidden"></div>
                 </div>
             </div>
             <div class="drawer-editions-section">
@@ -1539,10 +1545,24 @@ async function openInvDrawer(cardId, editionId, cardName) {
         drawerContent.innerHTML = '';
         drawerContent.appendChild(inner);
 
+        // Apply active tab to newly rendered panels
+        const cardInfo = drawer.querySelector('.drawer-card-info');
+        if (cardInfo && invDrawerActiveTab === 'thema') {
+            cardInfo.querySelector('.drawer-tab-info').classList.add('hidden');
+            const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
+            themaPanel.classList.remove('hidden');
+            themaPanel.innerHTML = buildThemaHTML(card.editions[editionId]?.thema || {});
+        }
+
         drawer.classList.remove('hidden');
         setTimeout(() => {
             drawer.classList.add('open');
-            document.getElementById('inv-drawer-close-btn').classList.remove('hidden');
+            if (!isAlreadyOpen) invDrawerActiveTab = 'info';
+            const sidebar = document.getElementById('inv-drawer-sidebar');
+            sidebar.classList.remove('hidden');
+            sidebar.querySelectorAll('.drawer-sidebar-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === invDrawerActiveTab);
+            });
             document.querySelector('.footer')?.classList.add('footer-hidden');
             const initialTile = document.getElementById(`edition-tile-inv-${editionId}`);
             if (initialTile) initialTile.classList.add('edition-selected');
@@ -1557,8 +1577,9 @@ function closeInvDrawer() {
     const drawer = document.getElementById('inv-card-drawer');
     if (!drawer) return;
     drawer.classList.remove('open');
-    document.getElementById('inv-drawer-close-btn').classList.add('hidden');
+    document.getElementById('inv-drawer-sidebar').classList.add('hidden');
     selectedInvCardId = null;
+    invDrawerActiveTab = 'info';
     const gridWrap = document.querySelector('.inv-card-grid-wrap');
     if (!gridWrap || gridWrap.scrollTop === 0) {
         document.querySelector('.footer')?.classList.remove('footer-hidden');
@@ -1579,6 +1600,9 @@ function selectInvDrawerEdition(editionId) {
     const drawer = document.getElementById('inv-card-drawer');
     const editions = JSON.parse(drawer.dataset.editions || '{}');
     const edition = editions[editionId];
+
+    drawer.dataset.selectedEdition = editionId;
+
     if (edition) {
         const setEl = drawer.querySelector('.drawer-set');
         if (setEl) setEl.textContent = `${edition.set_name} (${edition.set_prefix}) — #${edition.collector_number || '?'}`;
@@ -1593,6 +1617,11 @@ function selectInvDrawerEdition(editionId) {
 
     drawer.querySelectorAll('.drawer-edition-tile img').forEach(img => img.classList.remove('edition-selected'));
     document.getElementById(`edition-tile-inv-${editionId}`)?.classList.add('edition-selected');
+
+    if (invDrawerActiveTab === 'thema') {
+        const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
+        if (themaPanel) themaPanel.innerHTML = buildThemaHTML(edition?.thema || {});
+    }
 }
 
 

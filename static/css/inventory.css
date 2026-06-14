@@ -385,8 +385,8 @@
     border-radius: 8px;
 }
 
-/* Inventory drawer close button — mirror drawer.css but scoped */
-#inv-drawer-close-btn {
+/* Inventory drawer sidebar — mirror drawer.css but scoped */
+#inv-drawer-sidebar {
     right: 830px;
 }
 

@@ -1,5 +1,5 @@
-from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, set_search, \
-    UPDATE_THRESHOLD
+from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, JSON_THEMA, \
+    set_search, UPDATE_THRESHOLD
 from datetime import date, datetime, timedelta
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -319,9 +319,13 @@ async def api_cards_suggest(q: str):
 @app.get("/api/cards/{card_id}")
 async def api_card_detail(card_id: str):
     info_file = new_json(JSON_INFO)
+    thema_file = new_json(JSON_THEMA)
 
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
+
+    with thema_file.open("r", encoding="utf-8") as f:
+        thema_data = json.load(f)
 
     card_info = info_data.get(card_id)
 
@@ -346,6 +350,7 @@ async def api_card_detail(card_id: str):
             )
 
         edition_info["collector_number"] = collector_number
+        edition_info["thema"] = thema_data.get(edition_id, {})
 
     return JSONResponse({"card_id": card_id, "card": card_info})
 

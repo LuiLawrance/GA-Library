@@ -27,35 +27,35 @@
                     <div class="inv-detail-counts" id="detail-bin-counts"></div>
                     <div class="inv-detail-controls">
                         <button class="inv-detail-add-btn" onclick="openAddModal()" title="Add card">+</button>
-                        <input type="text" id="inv-card-filter" class="inv-detail-search"
-                               placeholder="Search cards..." autocomplete="off"
-                               oninput="filterBinCards(this.value)">
+                        <input autocomplete="off" class="inv-detail-search" id="inv-card-filter"
+                               oninput="filterBinCards(this.value)" placeholder="Search cards..."
+                               type="text">
                         <div class="inv-filter-dropdown-wrap">
                             <button class="inv-filter-dropdown-btn" id="inv-filter-btn"
                                     onclick="toggleFilterDropdown()">
                                 <span id="inv-filter-label">Filter &amp; Sort</span>
                                 <span class="inv-filter-arrow">&#8249;</span>
                             </button>
-                            <div id="inv-filter-menu" class="inv-filter-menu hidden">
+                            <div class="inv-filter-menu hidden" id="inv-filter-menu">
                                 <div class="inv-filter-section">
                                     <div class="inv-filter-section-label">Sort</div>
-                                    <div id="inv-filter-sort-options" class="inv-filter-options"></div>
+                                    <div class="inv-filter-options" id="inv-filter-sort-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
                                     <div class="inv-filter-section-label">Set</div>
-                                    <div id="inv-filter-set-options" class="inv-filter-options"></div>
+                                    <div class="inv-filter-options" id="inv-filter-set-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
                                     <div class="inv-filter-section-label">Element</div>
-                                    <div id="inv-filter-element-options" class="inv-filter-options"></div>
+                                    <div class="inv-filter-options" id="inv-filter-element-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
                                     <div class="inv-filter-section-label">Rarity</div>
-                                    <div id="inv-filter-rarity-options" class="inv-filter-options"></div>
+                                    <div class="inv-filter-options" id="inv-filter-rarity-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
                                     <div class="inv-filter-section-label">Foil</div>
-                                    <div id="inv-filter-foil-options" class="inv-filter-options"></div>
+                                    <div class="inv-filter-options" id="inv-filter-foil-options"></div>
                                 </div>
                                 <button class="inv-filter-clear-btn" onclick="clearBinFilters()">Clear all</button>
                             </div>
@@ -74,13 +74,21 @@
                     </button>
                 </div>
             </div>
-            <div id="inv-card-drawer" class="card-drawer hidden">
+            <div class="card-drawer hidden" id="inv-card-drawer">
                 <div class="drawer-inner">
                     <div id="inv-drawer-content"></div>
                 </div>
             </div>
-            <button id="inv-drawer-close-btn" class="drawer-close-btn hidden" onclick="closeInvDrawer()">&#x2715;
-            </button>
+            <div class="drawer-sidebar hidden" id="inv-drawer-sidebar">
+                <button class="drawer-sidebar-close" onclick="closeInvDrawer()">&#x2715;</button>
+                <div class="drawer-sidebar-divider"></div>
+                <button class="drawer-sidebar-btn active" data-tab="info"
+                        onclick="switchDrawerTab('info', 'inv-card-drawer')" title="Info">ℹ️
+                </button>
+                <button class="drawer-sidebar-btn" data-tab="thema"
+                        onclick="switchDrawerTab('thema', 'inv-card-drawer')" title="Thema">🏷️
+                </button>
+            </div>
             <div class="inv-card-grid-wrap">
                 <div class="inv-card-grid" id="inv-card-grid"></div>
             </div>
@@ -90,7 +98,7 @@
 </div>
 
 <!-- ── Bin context menu ── -->
-<div id="inv-bin-context-menu" class="inv-context-menu hidden">
+<div class="inv-context-menu hidden" id="inv-bin-context-menu">
     <button class="inv-context-item" id="ctx-set-default" onclick="ctxSetDefault()">
         <span class="inv-context-icon">★</span> Set as Default
     </button>
@@ -107,14 +115,14 @@
 </div>
 
 <!-- ── Card context menu ── -->
-<div id="inv-card-context-menu" class="inv-context-menu hidden">
+<div class="inv-context-menu hidden" id="inv-card-context-menu">
     <button class="inv-context-item" onclick="ctxCardMove()">
         <span class="inv-context-icon">⇄</span> Move to Bin
     </button>
 </div>
 
 <!-- ── Move card modal ── -->
-<div id="inv-move-modal" class="inv-modal-overlay hidden" onclick="closeMoveModal()">
+<div class="inv-modal-overlay hidden" id="inv-move-modal" onclick="closeMoveModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Move to Bin</span>
@@ -125,7 +133,7 @@
             <label class="inv-field-label">Quantity to move</label>
             <div class="inv-qty-wrap">
                 <button class="inv-qty-btn" onclick="changeMoveQty(-1)">−</button>
-                <input type="number" class="inv-qty-input" id="move-qty" placeholder="All" min="1">
+                <input class="inv-qty-input" id="move-qty" min="1" placeholder="All" type="number">
                 <button class="inv-qty-btn" onclick="changeMoveQty(1)">+</button>
             </div>
         </div>
@@ -134,12 +142,12 @@
         <button class="inv-move-new-bin-btn" onclick="ctxMoveToNewBin()">
             <span>+</span> Create new bin &amp; move
         </button>
-        <div id="move-modal-error" class="inv-modal-error hidden"></div>
+        <div class="inv-modal-error hidden" id="move-modal-error"></div>
     </div>
 </div>
 
 <!-- ── Rename bin modal ── -->
-<div id="inv-rename-modal" class="inv-modal-overlay hidden" onclick="closeRenameModal()">
+<div class="inv-modal-overlay hidden" id="inv-rename-modal" onclick="closeRenameModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Rename Bin</span>
@@ -147,16 +155,16 @@
         </div>
         <div class="inv-field-group">
             <label class="inv-field-label">Name</label>
-            <input type="text" id="rename-bin-input" class="inv-text-input"
-                   onkeydown="if(event.key==='Enter') submitRenameBin()">
+            <input class="inv-text-input" id="rename-bin-input" onkeydown="if(event.key==='Enter') submitRenameBin()"
+                   type="text">
         </div>
-        <div id="rename-bin-error" class="inv-modal-error hidden"></div>
+        <div class="inv-modal-error hidden" id="rename-bin-error"></div>
         <button class="inv-modal-submit" onclick="submitRenameBin()">Rename</button>
     </div>
 </div>
 
 <!-- ── Edit description modal ── -->
-<div id="inv-desc-modal" class="inv-modal-overlay hidden" onclick="closeDescModal()">
+<div class="inv-modal-overlay hidden" id="inv-desc-modal" onclick="closeDescModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Edit Description</span>
@@ -164,16 +172,16 @@
         </div>
         <div class="inv-field-group">
             <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
-            <input type="text" id="desc-bin-input" class="inv-text-input" placeholder="..."
-                   onkeydown="if(event.key==='Enter') submitDescBin()">
+            <input class="inv-text-input" id="desc-bin-input" onkeydown="if(event.key==='Enter') submitDescBin()" placeholder="..."
+                   type="text">
         </div>
-        <div id="desc-bin-error" class="inv-modal-error hidden"></div>
+        <div class="inv-modal-error hidden" id="desc-bin-error"></div>
         <button class="inv-modal-submit" onclick="submitDescBin()">Save</button>
     </div>
 </div>
 
 <!-- ── Create bin modal ── -->
-<div id="inv-create-modal" class="inv-modal-overlay hidden" onclick="closeCreateModal()">
+<div class="inv-modal-overlay hidden" id="inv-create-modal" onclick="closeCreateModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">New Bin</span>
@@ -182,22 +190,22 @@
         <div class="inv-modal-fields">
             <div class="inv-field-group">
                 <label class="inv-field-label">Name</label>
-                <input type="text" id="create-bin-name" class="inv-text-input"
+                <input class="inv-text-input" id="create-bin-name" onkeydown="if(event.key==='Enter') submitCreateBin()"
                        placeholder="e.g. Trade Box, Binder 1..."
-                       onkeydown="if(event.key==='Enter') submitCreateBin()">
+                       type="text">
             </div>
             <div class="inv-field-group">
                 <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
-                <input type="text" id="create-bin-desc" class="inv-text-input" placeholder="...">
+                <input class="inv-text-input" id="create-bin-desc" placeholder="..." type="text">
             </div>
         </div>
-        <div id="create-bin-error" class="inv-modal-error hidden"></div>
+        <div class="inv-modal-error hidden" id="create-bin-error"></div>
         <button class="inv-modal-submit" onclick="submitCreateBin()">Create Bin</button>
     </div>
 </div>
 
 <!-- ── Bin settings modal ── -->
-<div id="inv-settings-modal" class="inv-modal-overlay hidden" onclick="closeBinSettings()">
+<div class="inv-modal-overlay hidden" id="inv-settings-modal" onclick="closeBinSettings()">
     <div class="inv-modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Bin Settings</span>
@@ -206,14 +214,14 @@
         <div class="inv-modal-fields">
             <div class="inv-field-group">
                 <label class="inv-field-label">Name</label>
-                <input type="text" id="settings-bin-name" class="inv-text-input">
+                <input class="inv-text-input" id="settings-bin-name" type="text">
             </div>
             <div class="inv-field-group">
                 <label class="inv-field-label">Description</label>
-                <input type="text" id="settings-bin-desc" class="inv-text-input" placeholder="...">
+                <input class="inv-text-input" id="settings-bin-desc" placeholder="..." type="text">
             </div>
         </div>
-        <div id="settings-bin-error" class="inv-modal-error hidden"></div>
+        <div class="inv-modal-error hidden" id="settings-bin-error"></div>
         <div class="inv-modal-actions">
             <button class="inv-modal-submit" onclick="submitBinSettings()">Save</button>
             <button class="inv-btn-make-default" id="settings-default-btn" onclick="settingsSetDefault()">Make Default
@@ -224,7 +232,7 @@
 </div>
 
 <!-- ── Add card modal ── -->
-<div id="inv-add-modal" class="inv-modal-overlay hidden" onclick="closeAddModal()">
+<div class="inv-modal-overlay hidden" id="inv-add-modal" onclick="closeAddModal()">
     <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
         <div class="inv-modal-header inv-add-modal-header">
             <button class="inv-btn-back-arrow hidden" id="add-back-btn" onclick="backToSearch()">‹</button>
@@ -236,12 +244,12 @@
         <div id="add-step-search">
             <div class="inv-add-search-wrap">
                 <div class="autocomplete-wrap" style="flex:1">
-                    <input type="text" id="add-card-search" class="inv-text-input"
-                           placeholder="Search cards..."
-                           onkeydown="handleAddCardKeydown(event)"
+                    <input autocomplete="off" class="inv-text-input" id="add-card-search"
                            oninput="fetchAddCardSuggestions(this.value)"
-                           autocomplete="off">
-                    <div id="add-card-autocomplete" class="autocomplete-list hidden"></div>
+                           onkeydown="handleAddCardKeydown(event)"
+                           placeholder="Search cards..."
+                           type="text">
+                    <div class="autocomplete-list hidden" id="add-card-autocomplete"></div>
                 </div>
                 <button class="btn-search" onclick="searchAddCards()">Search</button>
             </div>
@@ -254,9 +262,9 @@
         </div>
 
         <!-- Foil + qty step (hidden until card selected) -->
-        <div id="add-step-foil" class="hidden">
+        <div class="hidden" id="add-step-foil">
             <div class="inv-foil-step-body">
-                <img class="inv-modal-img-large" id="add-modal-img" src="" alt="">
+                <img alt="" class="inv-modal-img-large" id="add-modal-img" src="">
                 <div class="inv-foil-step-right">
                     <div class="inv-foil-step-top">
                         <div>
@@ -270,12 +278,12 @@
                             <label class="inv-field-label">Quantity</label>
                             <div class="inv-qty-wrap">
                                 <button class="inv-qty-btn" onclick="changeAddQty(-1)">−</button>
-                                <input type="number" class="inv-qty-input" id="add-modal-qty" value="1" min="1"
-                                       max="999">
+                                <input class="inv-qty-input" id="add-modal-qty" max="999" min="1" type="number"
+                                       value="1">
                                 <button class="inv-qty-btn" onclick="changeAddQty(1)">+</button>
                             </div>
                         </div>
-                        <button class="inv-modal-submit" id="add-modal-submit" onclick="submitAddCard()" disabled>
+                        <button class="inv-modal-submit" disabled id="add-modal-submit" onclick="submitAddCard()">
                             Add to Bin
                         </button>
                     </div>
@@ -286,7 +294,7 @@
 </div>
 
 <!-- ── Card detail modal (click on existing card) ── -->
-<div id="inv-card-modal" class="inv-modal-overlay hidden" onclick="closeCardModal()">
+<div class="inv-modal-overlay hidden" id="inv-card-modal" onclick="closeCardModal()">
     <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <div>
@@ -296,7 +304,7 @@
             <button class="inv-modal-close" onclick="closeCardModal()">✕</button>
         </div>
         <div class="inv-add-card-preview">
-            <img class="inv-modal-img" id="card-modal-img" src="" alt="">
+            <img alt="" class="inv-modal-img" id="card-modal-img" src="">
             <div class="inv-add-card-detail">
                 <div class="inv-field-group">
                     <label class="inv-field-label">Foil Type</label>
@@ -306,7 +314,7 @@
                     <label class="inv-field-label">Quantity</label>
                     <div class="inv-qty-wrap">
                         <button class="inv-qty-btn" onclick="changeCardModalQty(-1)">−</button>
-                        <input type="number" class="inv-qty-input" id="card-modal-qty" value="1" min="0" max="999">
+                        <input class="inv-qty-input" id="card-modal-qty" max="999" min="0" type="number" value="1">
                         <button class="inv-qty-btn" onclick="changeCardModalQty(1)">+</button>
                     </div>
                 </div>
