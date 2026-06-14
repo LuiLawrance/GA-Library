@@ -157,13 +157,17 @@ async function loadSets() {
     }
 }
 
-function buildCardTile(card, index) {
+function buildCardTile(card, index, total = 1) {
     const rarity = rarityMap[card.rarity] || "";
     const rarityClass = `rarity-${rarity.toLowerCase()}`;
 
     const tile = document.createElement('div');
     tile.className = currentUser ? 'card-tile card-tile--authed' : 'card-tile card-tile--guest';
-    tile.style.animationDelay = `${index * 60}ms`;
+
+    // Scale delay so the last tile never arrives later than ~600ms
+    const maxDelay = 600;
+    const delay = total <= 1 ? 0 : Math.min(index * 60, Math.round((index / (total - 1)) * maxDelay));
+    tile.style.animationDelay = `${delay}ms`;
     tile.dataset.cardId = card.card_id;
     tile.innerHTML = `
         <div class="edition-tile-wrap">
@@ -220,7 +224,7 @@ async function searchCards() {
             cardSearchResults = data.cards;
             results.innerHTML = '';
             for (let i = 0; i < data.cards.length; i++) {
-                results.appendChild(buildCardTile(data.cards[i], i));
+                results.appendChild(buildCardTile(data.cards[i], i, data.cards.length));
             }
         } catch {
             results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Set search failed.</p>';
@@ -251,7 +255,7 @@ async function searchCards() {
         }
 
         for (let i = 0; i < data.cards.length; i++) {
-            results.appendChild(buildCardTile(data.cards[i], i));
+            results.appendChild(buildCardTile(data.cards[i], i, data.cards.length));
         }
     } catch {
         results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Search failed.</p>';
@@ -453,7 +457,7 @@ function applyCardsFilters() {
         });
     }
     results.innerHTML = '';
-    filtered.forEach((card, i) => results.appendChild(buildCardTile(card, i)));
+    filtered.forEach((card, i) => results.appendChild(buildCardTile(card, i, filtered.length)));
 }
 
 // Event delegation: scale on typed input

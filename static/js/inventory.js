@@ -80,22 +80,25 @@ function renderBinGrid() {
     const totalCards = binNames.reduce((sum, n) => sum + countBinEntries(invBins[n].cards || {}), 0);
     subtitle.textContent = `${binNames.length} bin${binNames.length !== 1 ? 's' : ''} · ${totalCards} card${totalCards !== 1 ? 's' : ''}`;
 
+    const maxBinDelay = 400;
     grid.innerHTML = '';
-    binNames.forEach((name, i) => grid.appendChild(buildBinTile(name, invBins[name], i)));
+    binNames.forEach((name, i) => grid.appendChild(buildBinTile(name, invBins[name], i, binNames.length)));
 
     const createTile = document.createElement('div');
     createTile.className = 'inv-bin-create';
-    createTile.style.animationDelay = `${binNames.length * 50}ms`;
+    createTile.style.animationDelay = `${Math.min(binNames.length * 50, maxBinDelay)}ms`;
     createTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">New Bin</span>`;
     createTile.onclick = openCreateModal;
     grid.appendChild(createTile);
 }
 
-function buildBinTile(name, bin, index) {
+function buildBinTile(name, bin, index, total = 1) {
     const count = countBinEntries(bin.cards || {});
     const tile = document.createElement('div');
     tile.className = `inv-bin-tile${bin.default ? ' default-bin' : ''}`;
-    tile.style.animationDelay = `${index * 50}ms`;
+    const maxDelay = 400;
+    const delay = total <= 1 ? 0 : Math.min(index * 50, Math.round((index / (total - 1)) * maxDelay));
+    tile.style.animationDelay = `${delay}ms`;
     tile.innerHTML = `
         <span class="inv-bin-icon">${bin.default ? '📦' : '⬡'}</span>
         ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
@@ -280,7 +283,7 @@ function renderBinCards() {
         grid.appendChild(empty);
     } else {
         rows.forEach((row, i) => {
-            const tile = buildInvCardTile(row, i);
+            const tile = buildInvCardTile(row, i, rows.length);
             const input = tile.querySelector('.inv-tile-qty-input');
             if (input) scaleQtyFont(input);
             grid.appendChild(tile);
@@ -295,7 +298,7 @@ function renderBinCards() {
     // Add card tile always at end
     const addTile = document.createElement('div');
     addTile.className = 'inv-card-add-tile';
-    addTile.style.animationDelay = `${Math.min(rows.length, 30) * 40}ms`;
+    addTile.style.animationDelay = `${Math.min(rows.length * 40, 640)}ms`;
     addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
     addTile.onclick = openAddModal;
     grid.appendChild(addTile);
@@ -678,13 +681,15 @@ function updateInvCounts() {
     if (countEl) countEl.textContent = `${binCardRows.length} card${binCardRows.length !== 1 ? 's' : ''} · ${totalQty} cop${totalQty !== 1 ? 'ies' : 'y'}`;
 }
 
-function buildInvCardTile(row, index) {
+function buildInvCardTile(row, index, total = 1) {
     const rarity = rarityMapInv[row.rarity] || '';
     const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
 
     const tile = document.createElement('div');
     tile.className = 'inv-card-tile';
-    tile.style.animationDelay = `${Math.min(index, 30) * 40}ms`;
+    const maxDelay = 600;
+    const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * maxDelay));
+    tile.style.animationDelay = `${delay}ms`;
     tile.dataset.cardId = row.card_id;
     tile.dataset.editionId = row.edition_id;
     tile.dataset.foilId = row.foil_id;
