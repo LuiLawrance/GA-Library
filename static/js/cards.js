@@ -187,6 +187,8 @@ async function searchCards() {
 
     if (!query && selectedSets.size === 0) return;
 
+    _startCardGridQtyObserver();
+
     results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Searching...</p>';
 
     // Refresh snapshot and bin name cache on each new search
@@ -325,3 +327,45 @@ document.addEventListener('click', e => {
         document.getElementById('default-bin-menu')?.classList.add('hidden');
     }
 });
+
+// ── Qty font scaling for card search grid ──
+
+// Event delegation: scale on typed input
+document.addEventListener('input', e => {
+    if (e.target.matches('#card-results .inv-tile-qty-input')) {
+        if (typeof scaleQtyFont === 'function') scaleQtyFont(e.target);
+    }
+});
+
+// Watch card-results for new tiles; scale their inputs and observe their indicators
+const _cardGridQtyObserver = new MutationObserver(mutations => {
+    for (const m of mutations) {
+        m.addedNodes.forEach(node => {
+            if (node.nodeType !== 1) return;
+            // Scale qty input
+            const input = node.querySelector?.('.inv-tile-qty-input');
+            if (input && typeof scaleQtyFont === 'function') scaleQtyFont(input);
+            // Watch indicator for this tile
+            const ind = node.querySelector?.('.inv-tile-qty-indicator');
+            if (ind && typeof _indicatorObserver !== 'undefined') {
+                _indicatorObserver.observe(ind, {childList: true});
+            }
+        });
+    }
+});
+
+// Start observing once the results grid is populated
+function _startCardGridQtyObserver() {
+    const grid = document.getElementById('card-results');
+    if (grid) _cardGridQtyObserver.observe(grid, {childList: true});
+}
+
+// Also hook refreshResultsBadges to re-scale after badge refresh sets .value
+const _origRefreshResultsBadges = refreshResultsBadges;
+refreshResultsBadges = function () {
+    _origRefreshResultsBadges();
+    if (typeof scaleQtyFont !== 'function') return;
+    const grid = document.getElementById('card-results');
+    if (!grid) return;
+    grid.querySelectorAll('.inv-tile-qty-input').forEach(input => scaleQtyFont(input));
+};

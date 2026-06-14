@@ -12,6 +12,49 @@ let addAcIndex = -1;
 
 const rarityMapInv = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
 
+// ── Quantity font scaling ──
+function scaleQtyFont(input) {
+    const len = String(input.value || '0').replace('-', '').length;
+    const isTile = input.classList.contains('inv-tile-qty-input');
+    if (isTile) {
+        input.style.fontSize = len <= 3 ? '1.1rem' : len === 4 ? '0.85rem' : '0.7rem';
+    } else {
+        input.style.fontSize = len <= 3 ? '1rem' : len === 4 ? '0.8rem' : '0.65rem';
+    }
+}
+
+function scaleIndicatorFont(box) {
+    const text = box.textContent || '';
+    const len = text.replace(/[^0-9]/g, '').length;
+    box.style.fontSize = len <= 4 ? '1rem' : len === 5 ? '0.8rem' : '0.65rem';
+}
+
+// Watch for indicator box content changes (tiles.js sets innerHTML directly)
+const _indicatorObserver = new MutationObserver(mutations => {
+    for (const m of mutations) {
+        const box = m.target.querySelector('.inv-tile-qty-indicator-box');
+        if (box) scaleIndicatorFont(box);
+    }
+});
+
+function _observeIndicators() {
+    document.querySelectorAll('.inv-tile-qty-indicator').forEach(ind => {
+        _indicatorObserver.observe(ind, {childList: true, subtree: false});
+    });
+}
+
+// Also observe the grid so newly added tiles get watched
+const _gridObserver = new MutationObserver(mutations => {
+    for (const m of mutations) {
+        m.addedNodes.forEach(node => {
+            if (node.nodeType !== 1) return;
+            node.querySelectorAll('.inv-tile-qty-indicator').forEach(ind => {
+                _indicatorObserver.observe(ind, {childList: true, subtree: false});
+            });
+        });
+    }
+});
+
 // ═══════════════════════════════════════
 // LOAD & RENDER BINS
 // ═══════════════════════════════════════
@@ -236,8 +279,18 @@ function renderBinCards() {
         empty.innerHTML = `<span class="inv-empty-icon">⬡</span><p>No cards in this bin.</p><p class="inv-empty-sub">Click the + tile to add cards.</p>`;
         grid.appendChild(empty);
     } else {
-        rows.forEach((row, i) => grid.appendChild(buildInvCardTile(row, i)));
+        rows.forEach((row, i) => {
+            const tile = buildInvCardTile(row, i);
+            const input = tile.querySelector('.inv-tile-qty-input');
+            if (input) scaleQtyFont(input);
+            grid.appendChild(tile);
+        });
     }
+
+    // Observe grid for new tiles and watch existing indicators
+    _gridObserver.disconnect();
+    _gridObserver.observe(grid, {childList: true});
+    _observeIndicators();
 
     // Add card tile always at end
     const addTile = document.createElement('div');
@@ -369,6 +422,7 @@ function tileQtyChange(btn, delta) {
     const before = parseInt(input.value) || 0;
     const newVal = Math.max(0, before + delta);
     input.value = newVal;
+    scaleQtyFont(input);
 
     if (isEditMode()) {
         // Already in edit mode — absorb this change into the session
@@ -658,6 +712,7 @@ function buildInvCardTile(row, index) {
                 data-edition-id="${row.edition_id}"
                 data-foil-id="${row.foil_id}"
                 onchange="tileQtySet(this)"
+                oninput="scaleQtyFont(this)"
                 onclick="event.stopPropagation()"
                 onfocus="this.select()">
             <button class="inv-tile-qty-btn inv-tile-qty-sub" onclick="event.stopPropagation(); tileQtyChange(this, -1)">−</button>
@@ -683,7 +738,9 @@ function openCardModal(row) {
     document.getElementById('card-modal-set').textContent = `${row.setPrefix}${row.rarity ? ' · ' + (rarityMapInv[row.rarity] || '') : ''}`;
     document.getElementById('card-modal-img').src = `/images/${row.edition_id}.jpg`;
     document.getElementById('card-modal-foil').textContent = row.foilKind;
-    document.getElementById('card-modal-qty').value = row.quantity;
+    const cardModalQtyEl = document.getElementById('card-modal-qty');
+    cardModalQtyEl.value = row.quantity;
+    scaleQtyFont(cardModalQtyEl);
     document.getElementById('inv-card-modal').classList.remove('hidden');
 }
 
@@ -875,7 +932,9 @@ async function goToFoilStep(cardId, editionId, cardName) {
     document.getElementById('add-modal-set').textContent = '';
     document.getElementById('add-modal-img').src = `/images/${editionId}.jpg`;
     document.getElementById('add-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);">Loading...</div>';
-    document.getElementById('add-modal-qty').value = 1;
+    const addModalQtyEl = document.getElementById('add-modal-qty');
+    addModalQtyEl.value = 1;
+    scaleQtyFont(addModalQtyEl);
     document.getElementById('add-modal-submit').disabled = true;
 
     document.getElementById('add-step-search').classList.add('hidden');
@@ -1813,4 +1872,12 @@ async function ctxMoveToNewBin() {
 window.initInventory = async function () {
     if (!currentUser) return;
     await loadInventory();
+
+    // Wire font scaling to static modal qty inputs
+    ['move-qty', 'add-modal-qty', 'card-modal-qty'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', () => scaleQtyFont(el));
+        scaleQtyFont(el);
+    });
 };
