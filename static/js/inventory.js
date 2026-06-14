@@ -1601,16 +1601,47 @@ async function openInvDrawer(cardId, editionId, cardName) {
                 <div class="drawer-editions">${editionsHTML}</div>
             </div>`;
 
-        drawerContent.innerHTML = '';
-        drawerContent.appendChild(inner);
+        const doInsert = () => {
+            drawerContent.innerHTML = '';
+            drawerContent.appendChild(inner);
 
-        // Apply active tab to newly rendered panels
-        const cardInfo = drawer.querySelector('.drawer-card-info');
-        if (cardInfo && invDrawerActiveTab === 'thema') {
-            cardInfo.querySelector('.drawer-tab-info').classList.add('hidden');
-            const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
-            themaPanel.classList.remove('hidden');
-            themaPanel.innerHTML = buildTabThemaPanel(card.editions[editionId]);
+            // Mark the selected edition tile immediately
+            const initialTile = document.getElementById(`edition-tile-inv-${editionId}`);
+            if (initialTile) initialTile.classList.add('edition-selected');
+
+            // Apply active tab to newly rendered panels
+            const cardInfo = drawer.querySelector('.drawer-card-info');
+            if (cardInfo && invDrawerActiveTab === 'thema') {
+                cardInfo.querySelector('.drawer-tab-info').classList.add('hidden');
+                const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
+                themaPanel.classList.remove('hidden');
+                themaPanel.innerHTML = buildTabThemaPanel(card.editions[editionId]);
+            }
+        };
+
+        if (isAlreadyOpen) {
+            const existing = drawerContent.firstElementChild;
+            if (existing) {
+                existing.style.transition = 'opacity 0.15s ease';
+                existing.style.opacity = '0';
+
+                setTimeout(() => {
+                    doInsert();
+                    inner.style.opacity = '0';
+                    inner.style.transition = 'opacity 0.2s ease';
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        inner.style.opacity = '1';
+                        setTimeout(() => {
+                            inner.style.transition = '';
+                            inner.style.opacity = '';
+                        }, 220);
+                    }));
+                }, 150);
+            } else {
+                doInsert();
+            }
+        } else {
+            doInsert();
         }
 
         drawer.classList.remove('hidden');
@@ -1623,8 +1654,6 @@ async function openInvDrawer(cardId, editionId, cardName) {
                 btn.classList.toggle('active', btn.dataset.tab === invDrawerActiveTab);
             });
             document.querySelector('.footer')?.classList.add('footer-hidden');
-            const initialTile = document.getElementById(`edition-tile-inv-${editionId}`);
-            if (initialTile) initialTile.classList.add('edition-selected');
         }, 10);
 
     } catch {

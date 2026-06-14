@@ -195,17 +195,46 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
     if (!infoPanel || !themaPanel) return;
 
-    if (tab === 'info') {
-        infoPanel.classList.remove('hidden');
-        themaPanel.classList.add('hidden');
-    } else {
-        infoPanel.classList.add('hidden');
-        themaPanel.classList.remove('hidden');
+    const outgoing = tab === 'info' ? themaPanel : infoPanel;
+    const incoming = tab === 'info' ? infoPanel : themaPanel;
 
+    // Populate incoming content before animating in
+    if (tab !== 'info') {
         const currentEditionId = drawer.dataset.selectedEdition;
         const editions = JSON.parse(drawer.dataset.editions || '{}');
         themaPanel.innerHTML = buildTabThemaPanel(editions[currentEditionId]);
     }
+
+    // Fade out outgoing
+    outgoing.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+    outgoing.style.opacity = '0';
+    outgoing.style.transform = 'translateY(-6px)';
+
+    setTimeout(() => {
+        outgoing.classList.add('hidden');
+        outgoing.style.transition = '';
+        outgoing.style.opacity = '';
+        outgoing.style.transform = '';
+
+        // Fade in incoming
+        incoming.classList.remove('hidden');
+        incoming.style.opacity = '0';
+        incoming.style.transform = 'translateY(6px)';
+        incoming.style.transition = 'opacity 0.18s ease, transform 0.18s ease';
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                incoming.style.opacity = '1';
+                incoming.style.transform = 'translateY(0)';
+            });
+        });
+
+        setTimeout(() => {
+            incoming.style.transition = '';
+            incoming.style.opacity = '';
+            incoming.style.transform = '';
+        }, 200);
+    }, 150);
 }
 
 async function openCardDrawer(cardId, editionId, cardName) {
@@ -222,6 +251,7 @@ async function openCardDrawer(cardId, editionId, cardName) {
     }
 
     selectedCardId = cardId;
+    const isAlreadyOpen = drawerIsOpen;
 
     try {
         const res = await fetch(`/api/cards/${cardId}`);
@@ -352,23 +382,52 @@ async function openCardDrawer(cardId, editionId, cardName) {
             </div>
         `;
 
-        drawerContent.innerHTML = '';
-        drawerContent.appendChild(inner);
+        const doInsert = () => {
+            drawerContent.innerHTML = '';
+            drawerContent.appendChild(inner);
 
-        // Apply active tab to the newly rendered panels
-        const cardInfo = drawer.querySelector('.drawer-card-info');
-        if (cardInfo && drawerIsOpen) {
-            const infoPanel = cardInfo.querySelector('.drawer-tab-info');
-            const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
-            if (drawerActiveTab === 'thema') {
-                infoPanel.classList.add('hidden');
-                themaPanel.classList.remove('hidden');
-                const editions = JSON.parse(drawer.dataset.editions || '{}');
-                themaPanel.innerHTML = buildTabThemaPanel(editions[drawer.dataset.selectedEdition]);
+            // Mark the selected edition tile immediately
+            const initialTile = document.getElementById(`edition-tile-${editionId}`);
+            if (initialTile) initialTile.classList.add('edition-selected');
+
+            // Apply active tab to the newly rendered panels
+            const cardInfo = drawer.querySelector('.drawer-card-info');
+            if (cardInfo && drawerIsOpen) {
+                const infoPanel = cardInfo.querySelector('.drawer-tab-info');
+                const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
+                if (drawerActiveTab === 'thema') {
+                    infoPanel.classList.add('hidden');
+                    themaPanel.classList.remove('hidden');
+                    const editions = JSON.parse(drawer.dataset.editions || '{}');
+                    themaPanel.innerHTML = buildTabThemaPanel(editions[drawer.dataset.selectedEdition]);
+                }
             }
-        }
+        };
 
-        const isAlreadyOpen = drawerIsOpen;
+        if (drawerIsOpen) {
+            const existing = drawerContent.firstElementChild;
+            if (existing) {
+                existing.style.transition = 'opacity 0.15s ease';
+                existing.style.opacity = '0';
+
+                setTimeout(() => {
+                    doInsert();
+                    inner.style.opacity = '0';
+                    inner.style.transition = 'opacity 0.2s ease';
+                    requestAnimationFrame(() => requestAnimationFrame(() => {
+                        inner.style.opacity = '1';
+                        setTimeout(() => {
+                            inner.style.transition = '';
+                            inner.style.opacity = '';
+                        }, 220);
+                    }));
+                }, 150);
+            } else {
+                doInsert();
+            }
+        } else {
+            doInsert();
+        }
 
         drawer.classList.remove('hidden');
         setTimeout(() => {
@@ -381,9 +440,6 @@ async function openCardDrawer(cardId, editionId, cardName) {
                 btn.classList.toggle('active', btn.dataset.tab === drawerActiveTab);
             });
             document.querySelector('.footer').classList.add('footer-hidden');
-
-            const initialTile = document.getElementById(`edition-tile-${editionId}`);
-            if (initialTile) initialTile.classList.add('edition-selected');
         }, 10);
 
     } catch {
