@@ -874,7 +874,8 @@ async def api_bin_create(request: Request):
     if name in inv:
         raise HTTPException(status_code=400, detail="Bin already exists")
 
-    inv[name] = {"default": False, "desc": desc, "public": False, "cards": {}}
+    inv[name] = {"banner": None, "default": False, "desc": desc, "public": False, "symbol": None, "tags": None,
+                 "cards": {}}
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
 

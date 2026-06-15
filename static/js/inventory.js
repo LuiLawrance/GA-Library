@@ -105,7 +105,7 @@ function buildBinTile(name, bin, index, total = 1) {
             ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
         </div>
         <div class="inv-bin-name">${name}</div>
-        ${bin.desc ? `<div class="inv-bin-desc">${bin.desc}</div>` : ''}
+        <div class="inv-bin-desc">${bin.desc || ''}</div>
         <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
     tile.onclick = () => openBinDetail(name);
     tile.addEventListener('contextmenu', e => {
@@ -1379,7 +1379,7 @@ async function submitCreateBin() {
             body: JSON.stringify({name, desc})
         });
         if (res.ok) {
-            invBins[name] = {default: false, desc, public: false, cards: {}};
+            invBins[name] = {banner: null, default: false, desc, public: false, symbol: null, tags: null, cards: {}};
             closeCreateModal();
             renderBinGrid();
         } else {
