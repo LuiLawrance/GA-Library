@@ -100,10 +100,13 @@ function buildBinTile(name, bin, index, total = 1) {
     const delay = total <= 1 ? 0 : Math.min(index * 50, Math.round((index / (total - 1)) * maxDelay));
     tile.style.animationDelay = `${delay}ms`;
     tile.innerHTML = `
-        <span class="inv-bin-icon">${bin.default ? '📦' : '⬡'}</span>
-        ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
+        <div class="inv-bin-icon-row">
+            <span class="inv-bin-icon">${bin.default ? '📦' : '⬡'}</span>
+            ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
+        </div>
         <div class="inv-bin-name">${name}</div>
-        <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}${bin.desc ? ' · ' + bin.desc : ''}</div>`;
+        ${bin.desc ? `<div class="inv-bin-desc">${bin.desc}</div>` : ''}
+        <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
     tile.onclick = () => openBinDetail(name);
     tile.addEventListener('contextmenu', e => {
         e.preventDefault();
