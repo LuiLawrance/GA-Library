@@ -164,10 +164,19 @@ function buildThemaHTML(thema) {
 function buildTabThemaPanel(edition) {
     const foils = edition?.foils || {};
     const thema = edition?.thema || {};
+    const illustrator = edition?.illustrator || null;
+
+    const illustratorHTML = illustrator
+        ? `<div class="collector-thema-divider"></div>
+           <div class="collector-section-label">Illustrator</div>
+           <div class="collector-illustrator">${illustrator}</div>`
+        : '';
+
     return buildCollectorHTML(foils)
         + `<div class="collector-thema-divider"></div>`
         + `<div class="collector-section-label">Thema</div>`
-        + buildThemaHTML(thema);
+        + buildThemaHTML(thema)
+        + illustratorHTML;
 }
 
 function switchDrawerTab(tab, drawerId = 'card-drawer') {

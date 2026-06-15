@@ -284,7 +284,7 @@
     background: #1a1a1a;
     border: 1px solid #ffffff;
     border-radius: 4px;
-    padding: 1px 6px;
+    padding: 1px 3px;
     letter-spacing: 0.04em;
 }
 
@@ -555,7 +555,14 @@
     background: transparent;
 }
 
-/* ── Thema Panel ── */
+.collector-illustrator {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.82rem;
+    color: var(--text);
+    padding: 2px 0 4px;
+    text-align: center;
+}
+
 .drawer-tab-info {
     display: flex;
     flex-direction: column;
