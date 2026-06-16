@@ -1,3 +1,4 @@
+from deck_ga import deck_init
 from inv_ga import inv_init
 from pathlib import Path
 from util_file import new_json
@@ -6,6 +7,7 @@ import bcrypt
 import json
 
 DIR_DECK = "DATA_GA/DECK_GA"
+DIR_DECKS = "DATA_GA/DECKS_GA"
 DIR_INV = "DATA_GA/INV_GA"
 DIR_WISH = "DATA_GA/WISH_GA"
 
@@ -33,8 +35,8 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
         json.dump(users_data, f, indent=4, ensure_ascii=False)
 
     inv_init(username, debug)
+    deck_init(username, debug)
     new_json(f"{DIR_WISH}/{username}.json", debug)
-    new_json(f"{DIR_DECK}/{username}.json", debug)
 
     if debug:
         print(f"Created user: {username}")
@@ -66,6 +68,21 @@ def user_delete(username: str, debug: bool = False) -> None:
         else:
             if debug:
                 print(f"File not found: {file}")
+
+    # Remove individual deck files
+    decks_dir = Path(f"{DIR_DECKS}/{username}")
+
+    if decks_dir.exists():
+        for deck_file in decks_dir.iterdir():
+            deck_file.unlink()
+
+            if debug:
+                print(f"Deleted file: {deck_file}")
+
+        decks_dir.rmdir()
+
+        if debug:
+            print(f"Deleted directory: {decks_dir}")
 
     if debug:
         print(f"Deleted user: {username}")

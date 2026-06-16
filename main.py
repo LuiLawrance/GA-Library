@@ -1,4 +1,5 @@
 from api_ga import card_reset, card_search, set_search
+from deck_ga import deck_card_add, deck_create, deck_delete, deck_edit, deck_list, deck_view
 from inv_ga import bin_create, bin_delete, bin_edit, bin_list, inv_edit
 from pricing_ga import add_listing, add_sale
 from user import user_create, user_delete, user_reset
@@ -16,6 +17,45 @@ def user_exists(username: str) -> bool:
     return username in users_data
 
 
+def menu_decks(username: str) -> None:
+    while True:
+        print(f"\nDecks — [ {username} ]")
+        print("0. Back")
+        print("1. View Decks")
+        print("2. View Deck")
+        print("3. Add / Edit Card")
+        print("4. Create Deck")
+        print("5. Edit Deck")
+        print("6. Delete Deck")
+
+        choice = input("\nSelect option: ").strip()
+
+        match choice:
+            case "0":
+                return
+
+            case "1":
+                deck_list(username)
+
+            case "2":
+                deck_view(username)
+
+            case "3":
+                deck_card_add(username)
+
+            case "4":
+                deck_create(username)
+
+            case "5":
+                deck_edit(username)
+
+            case "6":
+                deck_delete(username)
+
+            case _:
+                print("\nInvalid option.")
+
+
 def menu_inventory(username: str) -> None:
     while True:
         print(f"\nInventory — [ {username} ]")
@@ -25,6 +65,7 @@ def menu_inventory(username: str) -> None:
         print("3. Edit Bin")
         print("4. Create Bin")
         print("5. Delete Bin")
+        print("6. Decks")
 
         choice = input("\nSelect option: ").strip()
 
@@ -48,6 +89,9 @@ def menu_inventory(username: str) -> None:
 
             case "5":
                 bin_delete(username)
+
+            case "6":
+                menu_decks(username)
 
             case _:
                 print("\nInvalid option.")
