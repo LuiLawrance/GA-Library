@@ -226,6 +226,7 @@ async function searchCards() {
             for (let i = 0; i < data.cards.length; i++) {
                 results.appendChild(buildCardTile(data.cards[i], i, data.cards.length));
             }
+            window.history.pushState({}, '', `/cards?set_prefix=${encodeURIComponent(setPrefix)}`);
         } catch {
             results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Set search failed.</p>';
         }
@@ -257,6 +258,8 @@ async function searchCards() {
         for (let i = 0; i < data.cards.length; i++) {
             results.appendChild(buildCardTile(data.cards[i], i, data.cards.length));
         }
+
+        window.history.pushState({}, '', `/cards?${params}`);
     } catch {
         results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Search failed.</p>';
     }

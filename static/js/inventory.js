@@ -128,7 +128,7 @@ function countBinEntries(cards) {
 // BIN DETAIL
 // ═══════════════════════════════════════
 
-async function openBinDetail(binName) {
+async function openBinDetail(binName, pushUrl = true) {
     safeDiscardEditMode();
     activeBin = binName;
     binCardRows = [];
@@ -154,6 +154,8 @@ async function openBinDetail(binName) {
     const deleteBtn = document.getElementById('settings-delete-btn');
     if (deleteBtn) deleteBtn.style.display = bin.default ? 'none' : '';
 
+    if (pushUrl) window.history.pushState({}, '', `/inventory?bin=${encodeURIComponent(binName)}`);
+
     await enrichAndRenderBinCards(bin);
 }
 
@@ -164,6 +166,7 @@ function closeBinDetail() {
     binCardRows = [];
     document.getElementById('inv-detail-view').classList.add('hidden');
     document.getElementById('inv-bins-view').classList.remove('hidden');
+    window.history.pushState({}, '', '/inventory');
     renderBinGrid();
 }
 
@@ -2033,4 +2036,11 @@ window.initInventory = async function () {
         el.addEventListener('input', () => scaleQtyFont(el));
         scaleQtyFont(el);
     });
+
+    // ── Restore bin from URL params ──
+    const urlParams = new URLSearchParams(window.location.search);
+    const binName = urlParams.get('bin');
+    if (binName && invBins[binName]) {
+        await openBinDetail(binName, false);
+    }
 };

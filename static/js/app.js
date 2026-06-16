@@ -27,11 +27,13 @@ async function navigate(path, pushState = true) {
         window.history.pushState({}, '', path);
     }
 
+    const pathname = path.split('?')[0];
+
     document.querySelectorAll('.navbar a').forEach(a => {
-        a.classList.toggle('active', a.getAttribute('href') === path);
+        a.classList.toggle('active', a.getAttribute('href') === pathname);
     });
 
-    const fragment = routes[path] || routes['/'];
+    const fragment = routes[pathname] || routes['/'];
     const res = await fetch(fragment);
     const html = await res.text();
 
@@ -46,7 +48,7 @@ async function navigate(path, pushState = true) {
     // Reset footer visibility when navigating
     document.querySelector('.footer').classList.remove('footer-hidden');
 
-    if (path === '/cards') {
+    if (pathname === '/cards') {
         selectedSets.clear();
         updateSetDropdownLabel();
         await loadSets();
@@ -67,9 +69,26 @@ async function navigate(path, pushState = true) {
             }
         }
         setTimeout(setupFooterScroll, 100);
+
+        // ── Restore search from URL params ──
+        const urlParams = new URLSearchParams(window.location.search);
+        const setPrefix = urlParams.get('set_prefix');
+        const q = urlParams.get('q');
+        const sets = urlParams.getAll('set');
+
+        if (setPrefix) {
+            document.getElementById('card-search').value = `$${setPrefix}`;
+            await searchCards();
+        } else if (q || sets.length) {
+            document.getElementById('card-search').value = q || '';
+            selectedSets = new Set(sets);
+            updateSetDropdownLabel();
+            renderSetOptions();
+            await searchCards();
+        }
     }
 
-    if (path === '/inventory') {
+    if (pathname === '/inventory') {
         if (typeof window.initInventory === 'function') {
             await window.initInventory();
         }
@@ -278,7 +297,7 @@ document.addEventListener('click', e => {
 
 // ── Browser back/forward ──
 window.addEventListener('popstate', () => {
-    navigate(window.location.pathname, false);
+    navigate(window.location.pathname + window.location.search, false);
 });
 
 // ── Enter key ──
@@ -295,5 +314,5 @@ document.addEventListener('keydown', e => {
 // ── Init ──
 (async () => {
     await checkAuth();
-    await navigate(window.location.pathname, false);
+    await navigate(window.location.pathname + window.location.search, false);
 })();
