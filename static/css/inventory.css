@@ -39,6 +39,27 @@
     padding: 24px 32px 20px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+.inv-bins-create-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.inv-bins-create-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .inv-subtitle {

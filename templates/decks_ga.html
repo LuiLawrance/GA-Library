@@ -19,13 +19,24 @@
                 <span class="dga-back-arrow">←</span>
                 <span>My Decks</span>
             </div>
-            <div class="dga-detail-title-wrap">
-                <span class="dga-detail-name" id="dga-detail-name"></span>
-                <span class="dga-detail-format" id="dga-detail-format"></span>
+            <div class="dga-detail-title-row">
+                <div>
+                    <div class="dga-detail-title-wrap">
+                        <span class="dga-detail-name" id="dga-detail-name"></span>
+                        <span class="dga-detail-format" id="dga-detail-format"></span>
+                    </div>
+                    <div class="dga-detail-meta" id="dga-detail-desc"></div>
+                </div>
+                <div class="dga-detail-header-right">
+                    <div class="dga-detail-counts" id="dga-detail-counts"></div>
+                    <div class="inv-detail-controls">
+                        <button class="inv-detail-add-btn" onclick="openDeckAddModal()" title="Add card">+</button>
+                        <button class="inv-settings-btn" onclick="openDeckSettingsModal()" title="Deck settings">⚙
+                        </button>
+                    </div>
+                </div>
             </div>
-            <button class="dga-settings-btn" onclick="openDeckSettingsModal()">Settings</button>
         </div>
-        <div class="dga-detail-desc" id="dga-detail-desc"></div>
         <div class="dga-card-grid-wrap">
             <div class="dga-card-grid" id="dga-card-grid"></div>
         </div>
@@ -41,8 +52,20 @@
             </div>
             <div class="dga-modal-field">
                 <label class="dga-modal-label">Format</label>
-                <input class="dga-modal-input" id="dga-create-format" type="text"
-                       placeholder="e.g. Standard, Draft..."/>
+                <div class="dga-fmt-dropdown-wrap">
+                    <button type="button" class="dga-fmt-dropdown-btn" id="dga-create-format-btn"
+                            onclick="toggleDgaFormatDropdown('create')">
+                        <span id="dga-create-format-label">None</span>
+                        <span class="dga-fmt-dropdown-arrow">&#8249;</span>
+                    </button>
+                    <div class="dga-fmt-dropdown-menu hidden" id="dga-create-format-menu">
+                        <div class="dga-fmt-dropdown-option selected" data-value="">None</div>
+                        <div class="dga-fmt-dropdown-option" data-value="Standard">Standard</div>
+                        <div class="dga-fmt-dropdown-option" data-value="Draft">Draft</div>
+                        <div class="dga-fmt-dropdown-option" data-value="Pantheon">Pantheon</div>
+                    </div>
+                    <input type="hidden" id="dga-create-format" value="">
+                </div>
             </div>
             <div class="dga-modal-field">
                 <label class="dga-modal-label">Description</label>
@@ -56,27 +79,107 @@
         </div>
     </div>
 
-    <!-- ── Deck settings modal ── -->
-    <div class="dga-modal-overlay hidden" id="dga-settings-modal">
-        <div class="dga-modal">
-            <div class="dga-modal-title">Deck Settings</div>
-            <div class="dga-modal-field">
-                <label class="dga-modal-label">Name</label>
-                <input class="dga-modal-input" id="dga-settings-name" type="text"/>
+    <!-- ── Deck settings modal — mirrors inv-settings-modal ── -->
+    <div id="dga-settings-modal" class="inv-modal-overlay hidden" onclick="closeDeckSettingsModal()">
+        <div class="inv-modal" onclick="event.stopPropagation()">
+            <div class="inv-modal-header">
+                <span class="inv-modal-title">Deck Settings</span>
+                <button class="inv-modal-close" onclick="closeDeckSettingsModal()">✕</button>
             </div>
-            <div class="dga-modal-field">
-                <label class="dga-modal-label">Format</label>
-                <input class="dga-modal-input" id="dga-settings-format" type="text"/>
+            <div class="inv-modal-fields">
+                <div class="inv-field-group">
+                    <label class="inv-field-label">Name</label>
+                    <input type="text" id="dga-settings-name" class="inv-text-input">
+                </div>
+                <div class="inv-field-group">
+                    <label class="inv-field-label">Format</label>
+                    <div class="dga-fmt-dropdown-wrap">
+                        <button type="button" class="dga-fmt-dropdown-btn" id="dga-settings-format-btn"
+                                onclick="toggleDgaFormatDropdown('settings')">
+                            <span id="dga-settings-format-label">None</span>
+                            <span class="dga-fmt-dropdown-arrow">&#8249;</span>
+                        </button>
+                        <div class="dga-fmt-dropdown-menu hidden" id="dga-settings-format-menu">
+                            <div class="dga-fmt-dropdown-option selected" data-value="">None</div>
+                            <div class="dga-fmt-dropdown-option" data-value="Standard">Standard</div>
+                            <div class="dga-fmt-dropdown-option" data-value="Draft">Draft</div>
+                            <div class="dga-fmt-dropdown-option" data-value="Pantheon">Pantheon</div>
+                        </div>
+                        <input type="hidden" id="dga-settings-format" value="">
+                    </div>
+                </div>
+                <div class="inv-field-group">
+                    <label class="inv-field-label">Description</label>
+                    <input type="text" id="dga-settings-desc" class="inv-text-input" maxlength="100" placeholder="...">
+                </div>
             </div>
-            <div class="dga-modal-field">
-                <label class="dga-modal-label">Description</label>
-                <input class="dga-modal-input" id="dga-settings-desc" type="text"/>
+            <div id="dga-settings-error" class="inv-modal-error hidden"></div>
+            <div class="inv-modal-actions">
+                <button class="inv-modal-submit" onclick="submitDeckSettings()">Save</button>
+                <button class="inv-modal-danger" onclick="submitDeleteDeck()">Delete Deck</button>
             </div>
-            <div class="dga-modal-error hidden" id="dga-settings-error"></div>
-            <div class="dga-modal-actions">
-                <button class="dga-modal-delete" onclick="submitDeleteDeck()">Delete Deck</button>
-                <button class="dga-modal-cancel" onclick="closeDeckSettingsModal()">Cancel</button>
-                <button class="dga-modal-confirm" onclick="submitDeckSettings()">Save</button>
+        </div>
+    </div>
+
+    <!-- ── Add card modal ── -->
+    <div id="dga-add-modal" class="inv-modal-overlay hidden" onclick="closeDeckAddModal()">
+        <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+            <div class="inv-modal-header inv-add-modal-header">
+                <button class="inv-btn-back-arrow hidden" id="dga-add-back-btn" onclick="dgaBackToSearch()">‹</button>
+                <span class="inv-modal-title">Add Card</span>
+                <button class="inv-modal-close" onclick="closeDeckAddModal()">✕</button>
+            </div>
+
+            <!-- Search step -->
+            <div id="dga-add-step-search">
+                <div class="inv-add-search-wrap">
+                    <div class="autocomplete-wrap" style="flex:1">
+                        <input type="text" id="dga-add-card-search" class="inv-text-input"
+                               placeholder="Search cards..."
+                               onkeydown="handleDgaAddCardKeydown(event)"
+                               oninput="fetchDgaAddCardSuggestions(this.value)"
+                               autocomplete="off">
+                        <div id="dga-add-card-autocomplete" class="autocomplete-list hidden"></div>
+                    </div>
+                    <button class="btn-search" onclick="searchDgaAddCards()">Search</button>
+                </div>
+                <div class="inv-add-results" id="dga-add-card-results">
+                    <div class="inv-search-placeholder" style="padding:30px 0">
+                        <span class="inv-empty-icon">⬡</span>
+                        <p>Search for a card to add it.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Foil + qty step (hidden until card selected) -->
+            <div id="dga-add-step-foil" class="hidden">
+                <div class="inv-foil-step-body">
+                    <img class="inv-modal-img-large" id="dga-add-modal-img" src="" alt="">
+                    <div class="inv-foil-step-right">
+                        <div class="inv-foil-step-top">
+                            <div>
+                                <div class="inv-modal-title" id="dga-add-modal-name"></div>
+                                <div class="inv-modal-set" id="dga-add-modal-set"></div>
+                            </div>
+                            <div class="inv-modal-foils" id="dga-add-modal-foils"></div>
+                        </div>
+                        <div class="inv-foil-step-bottom">
+                            <div class="inv-modal-qty-row">
+                                <label class="inv-field-label">Quantity</label>
+                                <div class="inv-qty-wrap">
+                                    <button class="inv-qty-btn" onclick="changeDgaAddQty(-1)">−</button>
+                                    <input type="number" class="inv-qty-input" id="dga-add-modal-qty" value="1" min="1"
+                                           max="999">
+                                    <button class="inv-qty-btn" onclick="changeDgaAddQty(1)">+</button>
+                                </div>
+                            </div>
+                            <button class="inv-modal-submit" id="dga-add-modal-submit" onclick="submitDgaAddCard()"
+                                    disabled>
+                                Add to Deck
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

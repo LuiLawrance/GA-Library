@@ -1195,3 +1195,31 @@ async def api_deck_delete(deck_name: str, request: Request):
         os.remove(deck_file)
 
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/decks/{deck_name}/card")
+async def api_deck_card_add(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    card_id = body.get("card_id")
+    edition_id = body.get("edition_id")
+    foil_id = body.get("foil_id")
+    quantity = int(body.get("quantity", 1))
+
+    if not all([card_id, edition_id, foil_id]):
+        raise HTTPException(status_code=400, detail="Missing required fields")
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    cards = deck_data["cards"]
+    cards.setdefault(card_id, {}).setdefault(edition_id, {})
+    existing = cards[card_id][edition_id].get(foil_id, 0)
+    cards[card_id][edition_id][foil_id] = existing + quantity
+
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True})
