@@ -11,6 +11,7 @@ const routes = {
     '/decks': '/fragments/decks',
     '/prices': '/fragments/prices',
     '/inventory': '/fragments/inventory',
+    '/decks_ga': '/fragments/decks_ga',
 };
 
 async function navigate(path, pushState = true) {
@@ -94,6 +95,12 @@ async function navigate(path, pushState = true) {
         }
         setTimeout(setupInvFooterScroll, 100);
     }
+
+    if (pathname === '/decks_ga') {
+        if (typeof window.initDecksGa === 'function') {
+            await window.initDecksGa();
+        }
+    }
 }
 
 function sleep(ms) {
@@ -158,6 +165,7 @@ function setLoggedIn(username) {
     document.getElementById('topbar-login-btn').classList.add('hidden');
     document.getElementById('topbar-logout-btn').classList.remove('hidden');
     document.getElementById('nav-inventory').classList.remove('hidden');
+    document.getElementById('nav-decks-ga').classList.remove('hidden');
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.remove('hidden');
     if (typeof initDefaultBinPicker === 'function') initDefaultBinPicker();
@@ -168,6 +176,7 @@ function setLoggedOut() {
     document.getElementById('topbar-login-btn').classList.remove('hidden');
     document.getElementById('topbar-logout-btn').classList.add('hidden');
     document.getElementById('nav-inventory').classList.add('hidden');
+    document.getElementById('nav-decks-ga').classList.add('hidden');
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.add('hidden');
 }

@@ -515,6 +515,11 @@ async def get_image(edition_id: str):
     return FileResponse(path)
 
 
+@app.get("/decks_ga", response_class=HTMLResponse)
+async def decks_ga_page():
+    return serve_index()
+
+
 @app.get("/inventory", response_class=HTMLResponse)
 async def inventory_page():
     return serve_index()
@@ -535,6 +540,12 @@ async def fragment_collection():
 @app.get("/fragments/decks", response_class=HTMLResponse)
 async def fragment_decks():
     with open("templates/decks.html", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/decks_ga", response_class=HTMLResponse)
+async def fragment_decks_ga():
+    with open("templates/decks_ga.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
@@ -1021,4 +1032,166 @@ async def api_card_delete(request: Request):
         raise HTTPException(status_code=404, detail="Card entry not found")
 
     _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+# ════════════════════════════════════════
+# ── Decks GA API ──
+# ════════════════════════════════════════
+
+DIR_DECK_INDEX = "DATA_GA/DECK_GA"
+DIR_DECKS_GA = "DATA_GA/DECKS_GA"
+
+
+def _deck_index_load(username: str) -> dict:
+    path = f"{DIR_DECK_INDEX}/{username}.json"
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _deck_index_save(username: str, data: dict) -> None:
+    os.makedirs(DIR_DECK_INDEX, exist_ok=True)
+    with open(f"{DIR_DECK_INDEX}/{username}.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def _deck_load(username: str, deck_name: str) -> dict | None:
+    path = f"{DIR_DECKS_GA}/{username}/{deck_name}.json"
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _deck_save(username: str, deck_name: str, data: dict) -> None:
+    os.makedirs(f"{DIR_DECKS_GA}/{username}", exist_ok=True)
+    with open(f"{DIR_DECKS_GA}/{username}/{deck_name}.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def _deck_card_count(cards: dict) -> int:
+    total = 0
+    for editions in cards.values():
+        for foils in editions.values():
+            for qty in foils.values():
+                total += qty
+    return total
+
+
+@app.get("/api/decks")
+async def api_decks_list(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    index = _deck_index_load(user)
+
+    result = {}
+    for name, entry in index.items():
+        deck_data = _deck_load(user, name)
+        count = _deck_card_count(deck_data["cards"]) if deck_data else 0
+        result[name] = {**entry, "card_count": count}
+
+    return JSONResponse({"decks": result})
+
+
+@app.post("/api/decks")
+async def api_deck_create(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    name = body.get("name", "").strip()
+    fmt = body.get("format", "").strip()
+    desc = body.get("desc", "").strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    index = _deck_index_load(user)
+    if name in index:
+        raise HTTPException(status_code=400, detail="Deck already exists")
+
+    created = date.today().isoformat()
+    index[name] = {"desc": desc, "format": fmt, "created": created}
+    _deck_index_save(user, index)
+    _deck_save(user, name, {"desc": desc, "format": fmt, "cards": {}})
+
+    return JSONResponse({"ok": True, "created": created})
+
+
+@app.get("/api/decks/{deck_name}")
+async def api_deck_get(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    return JSONResponse(deck_data)
+
+
+@app.patch("/api/decks/{deck_name}")
+async def api_deck_patch(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    new_name = body.get("name", "").strip()
+    fmt = body.get("format", "").strip()
+    desc = body.get("desc", "").strip()
+
+    index = _deck_index_load(user)
+    if deck_name not in index:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    if new_name and new_name != deck_name:
+        if new_name in index:
+            raise HTTPException(status_code=400, detail="Deck name already taken")
+
+        index[new_name] = index.pop(deck_name)
+
+        old_path = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
+        new_path = f"{DIR_DECKS_GA}/{user}/{new_name}.json"
+        if os.path.exists(old_path):
+            os.rename(old_path, new_path)
+
+        deck_name = new_name
+
+    index[deck_name]["format"] = fmt
+    index[deck_name]["desc"] = desc
+    _deck_index_save(user, index)
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data:
+        deck_data["format"] = fmt
+        deck_data["desc"] = desc
+        _deck_save(user, deck_name, deck_data)
+
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/decks/{deck_name}")
+async def api_deck_delete(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    index = _deck_index_load(user)
+    if deck_name not in index:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    del index[deck_name]
+    _deck_index_save(user, index)
+
+    deck_file = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
+    if os.path.exists(deck_file):
+        os.remove(deck_file)
+
     return JSONResponse({"ok": True})

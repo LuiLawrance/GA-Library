@@ -1,0 +1,84 @@
+<div class="dga-page" id="dga-page">
+
+    <!-- ── Deck list view ── -->
+    <div class="dga-list-view" id="dga-list-view">
+        <div class="dga-header">
+            <div>
+                <span class="dga-label">My Decks</span>
+                <span class="dga-subtitle" id="dga-subtitle">Loading...</span>
+            </div>
+            <button class="dga-create-btn" onclick="openCreateDeckModal()">+ New Deck</button>
+        </div>
+        <div class="dga-deck-grid" id="dga-deck-grid"></div>
+    </div>
+
+    <!-- ── Deck detail view ── -->
+    <div class="dga-detail-view hidden" id="dga-detail-view">
+        <div class="dga-detail-header">
+            <div class="dga-detail-back" onclick="closeDeckDetail()">
+                <span class="dga-back-arrow">←</span>
+                <span>My Decks</span>
+            </div>
+            <div class="dga-detail-title-wrap">
+                <span class="dga-detail-name" id="dga-detail-name"></span>
+                <span class="dga-detail-format" id="dga-detail-format"></span>
+            </div>
+            <button class="dga-settings-btn" onclick="openDeckSettingsModal()">Settings</button>
+        </div>
+        <div class="dga-detail-desc" id="dga-detail-desc"></div>
+        <div class="dga-card-grid-wrap">
+            <div class="dga-card-grid" id="dga-card-grid"></div>
+        </div>
+    </div>
+
+    <!-- ── Create deck modal ── -->
+    <div class="dga-modal-overlay hidden" id="dga-create-modal">
+        <div class="dga-modal">
+            <div class="dga-modal-title">New Deck</div>
+            <div class="dga-modal-field">
+                <label class="dga-modal-label">Name</label>
+                <input class="dga-modal-input" id="dga-create-name" type="text" placeholder="Deck name"/>
+            </div>
+            <div class="dga-modal-field">
+                <label class="dga-modal-label">Format</label>
+                <input class="dga-modal-input" id="dga-create-format" type="text"
+                       placeholder="e.g. Standard, Draft..."/>
+            </div>
+            <div class="dga-modal-field">
+                <label class="dga-modal-label">Description</label>
+                <input class="dga-modal-input" id="dga-create-desc" type="text" placeholder="Optional"/>
+            </div>
+            <div class="dga-modal-error hidden" id="dga-create-error"></div>
+            <div class="dga-modal-actions">
+                <button class="dga-modal-cancel" onclick="closeCreateDeckModal()">Cancel</button>
+                <button class="dga-modal-confirm" onclick="submitCreateDeck()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Deck settings modal ── -->
+    <div class="dga-modal-overlay hidden" id="dga-settings-modal">
+        <div class="dga-modal">
+            <div class="dga-modal-title">Deck Settings</div>
+            <div class="dga-modal-field">
+                <label class="dga-modal-label">Name</label>
+                <input class="dga-modal-input" id="dga-settings-name" type="text"/>
+            </div>
+            <div class="dga-modal-field">
+                <label class="dga-modal-label">Format</label>
+                <input class="dga-modal-input" id="dga-settings-format" type="text"/>
+            </div>
+            <div class="dga-modal-field">
+                <label class="dga-modal-label">Description</label>
+                <input class="dga-modal-input" id="dga-settings-desc" type="text"/>
+            </div>
+            <div class="dga-modal-error hidden" id="dga-settings-error"></div>
+            <div class="dga-modal-actions">
+                <button class="dga-modal-delete" onclick="submitDeleteDeck()">Delete Deck</button>
+                <button class="dga-modal-cancel" onclick="closeDeckSettingsModal()">Cancel</button>
+                <button class="dga-modal-confirm" onclick="submitDeckSettings()">Save</button>
+            </div>
+        </div>
+    </div>
+
+</div>
