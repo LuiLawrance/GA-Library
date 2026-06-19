@@ -1165,8 +1165,9 @@ async def api_deck_export(deck_name: str, request: Request):
     return JSONResponse({"text": "\n".join(lines).strip()})
 
 
-@app.post("/api/decks/{deck_name}/import")
-async def api_deck_import(deck_name: str, request: Request):
+@app.post("/api/decks/{deck_name}/import/parse")
+async def api_deck_import_parse(deck_name: str, request: Request):
+    """Parse import text. Returns resolved cards (local match) and unresolved (need API lookup)."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -1177,61 +1178,108 @@ async def api_deck_import(deck_name: str, request: Request):
         raise HTTPException(status_code=404, detail="Deck not found")
 
     slug_file = new_json(JSON_SLUGS)
-    info_file = new_json(JSON_INFO)
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
     name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
+
+    resolved = []  # {card_id, name, qty, section}
+    unresolved = []  # {name, qty, section}
     current_section = None
-    not_found = []
     sections = deck_data["sections"]
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
-
-        # Section header
         if line.startswith("#"):
-            section_name = line.lstrip("#").strip()
-            if section_name not in sections:
-                sections[section_name] = {}
-            current_section = section_name
+            current_section = line.lstrip("#").strip()
+            if current_section not in sections:
+                sections[current_section] = {}
             continue
-
         if current_section is None:
             continue
-
-        # Card line: "qty Card Name"
         parts = line.split(" ", 1)
         if len(parts) != 2 or not parts[0].isdigit():
             continue
-
         qty = int(parts[0])
         card_name = parts[1].strip()
-
-        # Step 1 — exact match in local slug data
         card_id = name_to_id.get(card_name.lower())
-
-        # Step 2 — not found locally, try the external API
-        if not card_id:
-            api_results = _api_search(_format_search(card_name))
-            if api_results:
-                # Reload slug data in case API updated it
-                with slug_file.open("r", encoding="utf-8") as f:
-                    slug_data = json.load(f)
-                name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
-                card_id = name_to_id.get(card_name.lower())
-
         if card_id:
-            sections[current_section][card_id] = sections[current_section].get(card_id, 0) + qty
+            resolved.append({"card_id": card_id, "name": card_name, "qty": qty, "section": current_section})
         else:
-            not_found.append(card_name)
+            unresolved.append({"name": card_name, "qty": qty, "section": current_section})
+
+    # Save new sections (may have been created during parse)
+    _deck_save(user, deck_name, deck_data)
+
+    return JSONResponse({"resolved": resolved, "unresolved": unresolved})
+
+
+@app.post("/api/decks/{deck_name}/import/commit")
+async def api_deck_import_commit(deck_name: str, request: Request):
+    """Add a batch of already-resolved cards to the deck."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    cards = body.get("cards", [])  # [{card_id, qty, section}]
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    for item in cards:
+        card_id = item.get("card_id")
+        section = item.get("section")
+        qty = int(item.get("qty", 1))
+        if not card_id or not section:
+            continue
+        if section not in deck_data["sections"]:
+            deck_data["sections"][section] = {}
+        deck_data["sections"][section][card_id] = deck_data["sections"][section].get(card_id, 0) + qty
 
     _deck_save(user, deck_name, deck_data)
-    return JSONResponse({"ok": True, "not_found": not_found})
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/decks/{deck_name}/import/resolve")
+async def api_deck_import_resolve(deck_name: str, request: Request):
+    """Resolve a single card name via API search and add it to the deck."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    card_name = body.get("name", "").strip()
+    section = body.get("section", "").strip()
+    qty = int(body.get("qty", 1))
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    slug_file = new_json(JSON_SLUGS)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
+
+    card_id = name_to_id.get(card_name.lower())
+
+    if not card_id:
+        api_result = _api_search(_format_search(card_name))
+        if api_result:
+            with slug_file.open("r", encoding="utf-8") as f:
+                slug_data = json.load(f)
+            name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
+            card_id = name_to_id.get(card_name.lower())
+
+    if card_id:
+        if section not in deck_data["sections"]:
+            deck_data["sections"][section] = {}
+        deck_data["sections"][section][card_id] = deck_data["sections"][section].get(card_id, 0) + qty
+        _deck_save(user, deck_name, deck_data)
+        return JSONResponse({"ok": True, "card_id": card_id, "found": True})
+
+    return JSONResponse({"ok": True, "found": False})
 
 
 @app.get("/api/decks/{deck_name}")

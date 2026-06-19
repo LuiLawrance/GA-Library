@@ -100,6 +100,7 @@ async function navigate(path, pushState = true) {
         if (typeof window.initDecksGa === 'function') {
             await window.initDecksGa();
         }
+        setTimeout(setupDgaFooterScroll, 100);
     }
 }
 
@@ -114,6 +115,23 @@ function setupInvFooterScroll() {
     if (!gridWrap || !footer) return;
 
     gridWrap.addEventListener('scroll', () => {
+        if (gridWrap.scrollTop > 150) {
+            footer.classList.add('footer-hidden');
+        } else if (gridWrap.scrollTop === 0) {
+            footer.classList.remove('footer-hidden');
+        }
+    });
+}
+
+function setupDgaFooterScroll() {
+    const gridWrap = document.querySelector('.dga-card-grid-wrap');
+    const footer = document.querySelector('.footer');
+
+    if (!gridWrap || !footer) return;
+
+    gridWrap.addEventListener('scroll', () => {
+        if (drawerIsOpen) return;
+
         if (gridWrap.scrollTop > 150) {
             footer.classList.add('footer-hidden');
         } else if (gridWrap.scrollTop === 0) {

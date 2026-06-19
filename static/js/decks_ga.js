@@ -11,8 +11,155 @@ let dgaAddModalPreSection = null;
 let dgaAddAcIndex = -1;
 
 // ═══════════════════════════════════════
-// FORMAT DROPDOWN
+// DECK CONTEXT MENU
 // ═══════════════════════════════════════
+
+let dgaCtxTargetDeck = null;
+
+function dgaOpenContextMenu(e, deckName) {
+    dgaCtxTargetDeck = deckName;
+    const menu = document.getElementById('dga-context-menu');
+    menu.classList.remove('hidden');
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 130);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+}
+
+function dgaCloseContextMenu() {
+    document.getElementById('dga-context-menu').classList.add('hidden');
+    dgaCtxTargetDeck = null;
+}
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('#dga-context-menu')) dgaCloseContextMenu();
+});
+document.addEventListener('contextmenu', e => {
+    if (!e.target.closest('.dga-deck-tile')) dgaCloseContextMenu();
+});
+
+function dgaCtxRename() {
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    if (!name) return;
+    const input = document.getElementById('dga-rename-input');
+    input.value = name;
+    input.dataset.original = name;
+    document.getElementById('dga-rename-error').classList.add('hidden');
+    document.getElementById('dga-rename-modal').classList.remove('hidden');
+    setTimeout(() => {
+        input.focus();
+        input.select();
+    }, 50);
+}
+
+function dgaCloseRenameModal() {
+    document.getElementById('dga-rename-modal').classList.add('hidden');
+}
+
+async function dgaSubmitRename() {
+    const input = document.getElementById('dga-rename-input');
+    const newName = input.value.trim();
+    const oldName = input.dataset.original;
+    const errEl = document.getElementById('dga-rename-error');
+
+    if (!newName) return;
+    if (newName === oldName) {
+        dgaCloseRenameModal();
+        return;
+    }
+    if (gaDecks[newName]) {
+        errEl.textContent = 'A deck with that name already exists.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(oldName)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                name: newName,
+                format: gaDecks[oldName]?.format || '',
+                desc: gaDecks[oldName]?.desc || ''
+            })
+        });
+        if (!res.ok) {
+            errEl.textContent = 'Failed to rename.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        const existing = gaDecks[oldName];
+        delete gaDecks[oldName];
+        gaDecks[newName] = {...existing};
+        dgaCloseRenameModal();
+        renderDeckGrid();
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+function dgaCtxEditDesc() {
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    if (!name) return;
+    const input = document.getElementById('dga-desc-input');
+    input.value = gaDecks[name]?.desc || '';
+    input.dataset.deck = name;
+    document.getElementById('dga-desc-error').classList.add('hidden');
+    document.getElementById('dga-desc-modal').classList.remove('hidden');
+    setTimeout(() => {
+        input.focus();
+    }, 50);
+}
+
+function dgaCloseDescModal() {
+    document.getElementById('dga-desc-modal').classList.add('hidden');
+}
+
+async function dgaSubmitDesc() {
+    const input = document.getElementById('dga-desc-input');
+    const desc = input.value.trim();
+    const name = input.dataset.deck;
+    const errEl = document.getElementById('dga-desc-error');
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, format: gaDecks[name]?.format || '', desc})
+        });
+        if (!res.ok) {
+            errEl.textContent = 'Failed to save.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        if (gaDecks[name]) gaDecks[name].desc = desc;
+        dgaCloseDescModal();
+        renderDeckGrid();
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function dgaCtxDelete() {
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    if (!name) return;
+    if (!confirm(`Delete deck "${name}"? Cards inside will be removed.`)) return;
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(name)}`, {method: 'DELETE'});
+        if (!res.ok) return;
+        delete gaDecks[name];
+        renderDeckGrid();
+    } catch {
+        console.error('Failed to delete deck');
+    }
+}
+
 
 function toggleDgaFormatDropdown(scope) {
     const menu = document.getElementById(`dga-${scope}-format-menu`);
@@ -113,6 +260,10 @@ function buildDeckTile(name, entry, index, total) {
         <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
 
     tile.onclick = () => openDeckDetail(name);
+    tile.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        dgaOpenContextMenu(e, name);
+    });
     return tile;
 }
 
@@ -272,6 +423,9 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
         </div>`;
 
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
+    tile.addEventListener('click', () => {
+        if (editionId) openCardDrawer(card_id, editionId, cardName);
+    });
     return tile;
 }
 
@@ -697,55 +851,106 @@ async function dgaSubmitImport() {
     const btn = document.getElementById('dga-import-submit-btn');
     const resultsEl = document.getElementById('dga-import-results');
     btn.disabled = true;
-    btn.textContent = 'Importing...';
+    btn.textContent = 'Parsing...';
     resultsEl.innerHTML = '';
     resultsEl.classList.add('hidden');
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import`, {
+        // Step 1 — parse text, get resolved + unresolved lists
+        const parseRes = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import/parse`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({text: lines})
         });
-        const data = await res.json();
+        const parseData = await parseRes.json();
 
+        const resolved = parseData.resolved || [];
+        const unresolved = parseData.unresolved || [];
+        const total = resolved.length + unresolved.length;
+
+        // Step 2 — commit all locally-resolved cards in one shot
+        if (resolved.length) {
+            await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import/commit`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({cards: resolved})
+            });
+        }
+
+        // Step 3 — resolve unresolved cards one at a time with progress bar
+        const notFound = [];
+        let done = resolved.length;
+
+        if (unresolved.length) {
+            resultsEl.innerHTML = dgaProgressHTML(done, total, unresolved[0].name);
+            resultsEl.classList.remove('hidden');
+
+            for (const item of unresolved) {
+                dgaUpdateProgress(done, total, item.name);
+                const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import/resolve`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: item.name, qty: item.qty, section: item.section})
+                });
+                const data = await res.json();
+                if (!data.found) notFound.push(item.name);
+                done++;
+                dgaUpdateProgress(done, total, done < total ? unresolved[done - resolved.length]?.name || '' : '');
+            }
+        }
+
+        // Step 4 — reload deck and render
         const deckRes = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`);
         activeDeckData = await deckRes.json();
         renderDeckSections(activeDeckData);
         renderSectionList();
 
-        let total = 0;
+        let totalQty = 0;
         for (const cards of Object.values(activeDeckData.sections || {}))
-            for (const qty of Object.values(cards)) total += qty;
-        if (gaDecks[activeDeck]) gaDecks[activeDeck].card_count = total;
+            for (const qty of Object.values(cards)) totalQty += qty;
+        if (gaDecks[activeDeck]) gaDecks[activeDeck].card_count = totalQty;
 
-        // Show results
-        let html = '';
-        const importedCount = Object.values(activeDeckData.sections || {})
-            .reduce((s, cards) => s + Object.keys(cards).length, 0);
-        html += `<div class="inv-import-summary inv-import-summary--ok">✓ Import complete</div>`;
+        dgaLoadExport();
 
-        if (data.not_found?.length) {
-            html += `<div class="inv-import-summary inv-import-summary--err">✕ ${data.not_found.length} card${data.not_found.length !== 1 ? 's' : ''} not found</div>`;
-            html += data.not_found.map(n =>
-                `<div class="inv-import-error-line"><span class="inv-import-error-raw">${n}</span></div>`
-            ).join('');
+        // Final result
+        const imported = total - notFound.length;
+        let html = `<div class="inv-import-summary inv-import-summary--ok">✓ ${imported} card${imported !== 1 ? 's' : ''} imported</div>`;
+        if (notFound.length) {
+            html += `<div class="inv-import-summary inv-import-summary--err">✕ ${notFound.length} not found</div>`;
+            html += notFound.map(n => `<div class="inv-import-error-line"><span class="inv-import-error-raw">${n}</span></div>`).join('');
         }
-
         resultsEl.innerHTML = html;
         resultsEl.classList.remove('hidden');
 
-        // Refresh export textarea
-        dgaLoadExport();
-
         btn.textContent = 'Import Again';
         btn.disabled = false;
+
     } catch {
         resultsEl.innerHTML = '<div class="inv-import-summary inv-import-summary--err">Request failed.</div>';
         resultsEl.classList.remove('hidden');
         btn.textContent = 'Import';
         btn.disabled = false;
     }
+}
+
+function dgaProgressHTML(done, total, currentCard) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const label = currentCard ? `${done}/${total} — ${currentCard}` : `${done}/${total}`;
+    return `
+        <div class="dga-progress-wrap">
+            <div class="dga-progress-label" id="dga-progress-label">${label}</div>
+            <div class="dga-progress-track">
+                <div class="dga-progress-bar" id="dga-progress-bar" style="width:${pct}%"></div>
+            </div>
+        </div>`;
+}
+
+function dgaUpdateProgress(done, total, currentCard) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const label = document.getElementById('dga-progress-label');
+    const bar = document.getElementById('dga-progress-bar');
+    if (label) label.textContent = currentCard ? `${done}/${total} — ${currentCard}` : `${done}/${total}`;
+    if (bar) bar.style.width = `${pct}%`;
 }
 
 // ═══════════════════════════════════════

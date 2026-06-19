@@ -1,5 +1,53 @@
 <div class="dga-page" id="dga-page">
 
+    <!-- ── Deck context menu ── -->
+    <div class="inv-context-menu hidden" id="dga-context-menu">
+        <button class="inv-context-item" onclick="dgaCtxRename()">
+            <span class="inv-context-icon">✎</span> Rename
+        </button>
+        <button class="inv-context-item" onclick="dgaCtxEditDesc()">
+            <span class="inv-context-icon">≡</span> Edit Description
+        </button>
+        <div class="inv-context-divider"></div>
+        <button class="inv-context-item inv-context-item-danger" onclick="dgaCtxDelete()">
+            <span class="inv-context-icon">✕</span> Delete Deck
+        </button>
+    </div>
+
+    <!-- ── Deck rename modal ── -->
+    <div class="inv-modal-overlay hidden" id="dga-rename-modal" onclick="dgaCloseRenameModal()">
+        <div class="inv-modal" onclick="event.stopPropagation()">
+            <div class="inv-modal-header">
+                <span class="inv-modal-title">Rename Deck</span>
+                <button class="inv-modal-close" onclick="dgaCloseRenameModal()">✕</button>
+            </div>
+            <div class="inv-field-group">
+                <label class="inv-field-label">Name</label>
+                <input class="inv-text-input" id="dga-rename-input" onkeydown="if(event.key==='Enter') dgaSubmitRename(); if(event.key==='Escape') dgaCloseRenameModal();"
+                       type="text">
+            </div>
+            <div class="inv-modal-error hidden" id="dga-rename-error"></div>
+            <button class="inv-modal-submit" onclick="dgaSubmitRename()">Rename</button>
+        </div>
+    </div>
+
+    <!-- ── Deck edit description modal ── -->
+    <div class="inv-modal-overlay hidden" id="dga-desc-modal" onclick="dgaCloseDescModal()">
+        <div class="inv-modal" onclick="event.stopPropagation()">
+            <div class="inv-modal-header">
+                <span class="inv-modal-title">Edit Description</span>
+                <button class="inv-modal-close" onclick="dgaCloseDescModal()">✕</button>
+            </div>
+            <div class="inv-field-group">
+                <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+                <input class="inv-text-input" id="dga-desc-input" maxlength="100" onkeydown="if(event.key==='Enter') dgaSubmitDesc(); if(event.key==='Escape') dgaCloseDescModal();" placeholder="..."
+                       type="text">
+            </div>
+            <div class="inv-modal-error hidden" id="dga-desc-error"></div>
+            <button class="inv-modal-submit" onclick="dgaSubmitDesc()">Save</button>
+        </div>
+    </div>
+
     <!-- ── Deck list view ── -->
     <div class="dga-list-view" id="dga-list-view">
         <div class="dga-header">
@@ -37,8 +85,26 @@
                 </div>
             </div>
         </div>
-        <div class="dga-card-grid-wrap">
-            <div class="dga-card-grid" id="dga-card-grid"></div>
+        <div class="dga-cards-body">
+            <!-- ── Card drawer ── -->
+            <div class="card-drawer hidden" id="card-drawer">
+                <div class="drawer-inner">
+                    <div id="drawer-content"></div>
+                </div>
+            </div>
+            <div class="drawer-sidebar hidden" id="drawer-sidebar">
+                <button class="drawer-sidebar-close" onclick="closeCardDrawer()">✕</button>
+                <div class="drawer-sidebar-divider"></div>
+                <button class="drawer-sidebar-btn active" data-tab="info"
+                        onclick="switchDrawerTab('info', 'card-drawer')" title="Info">ℹ️
+                </button>
+                <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                        title="Thema">🏷️
+                </button>
+            </div>
+            <div class="dga-card-grid-wrap">
+                <div class="dga-card-grid" id="dga-card-grid"></div>
+            </div>
         </div>
     </div>
 
@@ -220,8 +286,11 @@
                     <textarea class="inv-import-textarea" id="dga-import-textarea"
                               placeholder="# Material Deck&#10;1 Spirit of Fortuitous Fire&#10;# Main Deck&#10;1 Academy Guide"></textarea>
                 </div>
-                <div class="inv-import-results hidden" id="dga-import-results"></div>
-                <button class="inv-modal-submit" id="dga-import-submit-btn" onclick="dgaSubmitImport()">Import</button>
+                <div class="dga-import-footer">
+                    <button class="inv-modal-submit" id="dga-import-submit-btn" onclick="dgaSubmitImport()">Import
+                    </button>
+                    <div class="inv-import-results hidden" id="dga-import-results"></div>
+                </div>
             </div>
             <div class="hidden" id="dga-export-panel">
                 <div class="inv-label" style="margin-bottom:6px;">Copy your list below</div>

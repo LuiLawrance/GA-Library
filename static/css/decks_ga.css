@@ -19,6 +19,14 @@
     overflow: hidden;
 }
 
+.dga-cards-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+    height: 100%;
+}
+
 .dga-header {
     padding: 24px 32px 20px;
     border-bottom: 1px solid var(--border);
@@ -763,4 +771,54 @@
 .dga-ie-btn:hover {
     border-color: var(--border-focus);
     color: var(--text);
+}
+
+
+/* ── Import progress bar ── */
+.dga-progress-wrap {
+    padding: 10px 0 4px;
+}
+
+.dga-progress-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dga-progress-track {
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.dga-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
+/* ── Import footer — progress bar + button side by side ── */
+.dga-import-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.dga-import-footer .inv-import-results {
+    flex: 1;
+    margin-top: 0;
+    max-height: none;
+}
+
+.dga-import-footer .inv-modal-submit {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }

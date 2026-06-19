@@ -7,10 +7,9 @@
     <list default="true" id="0ef7b4b7-70df-4e78-80a5-600fa4c2f697" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deck_ga.py" beforeDir="false" afterPath="$PROJECT_DIR$/deck_ga.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/static/css/decks_ga.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/css/decks_ga.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/js/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/app.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/static/js/decks_ga.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/decks_ga.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/js/inventory.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/inventory.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/templates/decks_ga.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/decks_ga.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
