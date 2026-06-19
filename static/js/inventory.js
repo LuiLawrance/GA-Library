@@ -1690,6 +1690,10 @@ function selectInvDrawerEdition(editionId) {
     const mainImage = document.querySelector('#inv-card-drawer .drawer-card-image');
     if (!mainImage) return;
 
+    // No-op if already selected
+    const currentTile = document.querySelector(`#inv-card-drawer .drawer-edition-tile img.edition-selected`);
+    if (currentTile && currentTile.id === `edition-tile-inv-${editionId}`) return;
+
     mainImage.classList.add('switching');
     setTimeout(() => {
         mainImage.src = `/images/${editionId}.jpg`;

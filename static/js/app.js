@@ -24,6 +24,10 @@ async function navigate(path, pushState = true) {
     if (typeof drawerActiveTab !== 'undefined') drawerActiveTab = 'info';
     if (typeof invDrawerActiveTab !== 'undefined') invDrawerActiveTab = 'info';
 
+    // Reset card drawer globals so stale state from deck page doesn't bleed into inventory
+    if (typeof selectedCardId !== 'undefined') selectedCardId = null;
+    if (typeof drawerIsOpen !== 'undefined') drawerIsOpen = false;
+
     if (pushState) {
         window.history.pushState({}, '', path);
     }

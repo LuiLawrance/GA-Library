@@ -301,6 +301,15 @@ async function openDeckDetail(deckName, pushUrl = true) {
 }
 
 function closeDeckDetail() {
+    if (typeof dgaDeckEditMode !== 'undefined') dgaDeckEditMode.discard(true);
+    // Clean up drawer state so inventory drawer works correctly afterward
+    if (typeof drawerIsOpen !== 'undefined' && drawerIsOpen) {
+        const drawer = document.getElementById('card-drawer');
+        if (drawer) drawer.classList.remove('open');
+        drawerIsOpen = false;
+        selectedCardId = null;
+        document.getElementById('drawer-sidebar')?.classList.add('hidden');
+    }
     activeDeck = null;
     activeDeckData = null;
     document.getElementById('dga-detail-view').classList.add('hidden');
@@ -401,9 +410,85 @@ function updateDeckCounts(unique, total) {
     if (countEl) countEl.textContent = `${unique} card${unique !== 1 ? 's' : ''} · ${total} cop${total !== 1 ? 'ies' : 'y'}`;
 }
 
+// ── Deck tile edit mode — uses TileEditMode from tiles.js ──
+const dgaDeckEditMode = new TileEditMode('dga-qty-confirm-bar', async (changes) => {
+    for (const c of changes) {
+        const section = c.input.dataset.section;
+        if (!section) continue;
+
+        try {
+            if (c.quantity <= 0) {
+                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({card_id: c.cardId, section})
+                });
+                if (activeDeckData?.sections?.[section])
+                    delete activeDeckData.sections[section][c.cardId];
+            } else {
+                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({card_id: c.cardId, section, quantity: c.quantity})
+                });
+                if (activeDeckData?.sections?.[section])
+                    activeDeckData.sections[section][c.cardId] = c.quantity;
+            }
+            // Update badge
+            const badge = c.input.closest('.dga-card-tile')?.querySelector('.dga-qty-badge');
+            if (badge) {
+                badge.textContent = `x${c.quantity}`;
+                badge.style.display = c.quantity > 0 ? '' : 'none';
+            }
+        } catch {
+            console.error('Failed to update deck card quantity');
+        }
+    }
+
+    // Re-render to remove deleted tiles
+    const anyDeleted = changes.some(c => c.quantity <= 0);
+    if (anyDeleted) renderDeckSections(activeDeckData);
+    else updateDeckCounts(
+        Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0),
+        Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0)
+    );
+});
+
+// Override indicator helpers to find .dga-card-tile instead of .inv-card-tile
+dgaDeckEditMode._getTile = input => input.closest('.dga-card-tile');
+dgaDeckEditMode._updateIndicator = function (input) {
+    const tile = this._getTile(input);
+    if (!tile) return;
+    const originalValue = this.pending.get(input);
+    if (originalValue === undefined) {
+        this._clearIndicator(tile);
+        return;
+    }
+    const currentValue = parseInt(input.value) || 0;
+    const delta = currentValue - originalValue;
+    let ind = tile.querySelector('.inv-tile-qty-indicator');
+    if (!ind) {
+        ind = document.createElement('div');
+        ind.className = 'inv-tile-qty-indicator';
+        tile.appendChild(ind);
+    }
+    tile.classList.add('has-pending');
+    if (currentValue === 0) ind.innerHTML = '<div class="inv-tile-qty-indicator-box indicator-del">🗑</div>';
+    else if (delta > 0) ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-add">+${delta}</div>`;
+    else ind.innerHTML = `<div class="inv-tile-qty-indicator-box indicator-sub">${delta}</div>`;
+};
+dgaDeckEditMode._clearIndicator = function (tile) {
+    tile.classList.remove('has-pending');
+    const ind = tile.querySelector('.inv-tile-qty-indicator');
+    if (ind) ind.innerHTML = '';
+};
+dgaDeckEditMode._clearAllIndicators = function () {
+    document.querySelectorAll('.dga-card-tile.has-pending').forEach(t => this._clearIndicator(t));
+};
+
 function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index, total) {
     const tile = document.createElement('div');
-    tile.className = 'dga-card-tile';
+    tile.className = 'dga-card-tile inv-card-tile';
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
     tile.style.animationDelay = `${delay}ms`;
 
@@ -420,11 +505,95 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
                 <div class="dga-card-tile-name">${cardName}</div>
                 <div class="dga-card-tile-foil">${sectionName}</div>
             </div>
-        </div>`;
+        </div>
+        <div class="inv-card-tile-qty-ctrl">
+            <button class="inv-tile-qty-btn inv-tile-qty-add" type="button">+</button>
+            <input class="inv-tile-qty-input" type="number" value="${qty}" min="0" max="999"
+                data-card-id="${card_id}"
+                data-section="${sectionName}">
+            <button class="inv-tile-qty-btn inv-tile-qty-sub" type="button">−</button>
+        </div>
+        <div class="inv-tile-qty-indicator"></div>`;
+
+    const input = tile.querySelector('.inv-tile-qty-input');
+    const badge = tile.querySelector('.dga-qty-badge');
+
+    // Commit immediately — used by +/− buttons and direct text input
+    async function commitNow(newQty) {
+        badge.textContent = `x${newQty}`;
+        badge.style.display = newQty > 0 ? '' : 'none';
+        try {
+            if (newQty <= 0) {
+                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({card_id, section: sectionName})
+                });
+                if (activeDeckData?.sections?.[sectionName]) {
+                    delete activeDeckData.sections[sectionName][card_id];
+                    renderDeckSections(activeDeckData);
+                }
+            } else {
+                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({card_id, section: sectionName, quantity: newQty})
+                });
+                if (activeDeckData?.sections?.[sectionName])
+                    activeDeckData.sections[sectionName][card_id] = newQty;
+                updateDeckCounts(
+                    Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0),
+                    Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0)
+                );
+            }
+        } catch {
+            console.error('Failed to update deck card');
+        }
+    }
+
+    // +/− buttons: commit immediately (or absorb into edit session if already staging)
+    tile.querySelector('.inv-tile-qty-add').addEventListener('click', e => {
+        e.stopPropagation();
+        const before = parseInt(input.value) || 0;
+        const newVal = Math.max(0, before + 1);
+        input.value = newVal;
+        if (dgaDeckEditMode.isActive()) {
+            dgaDeckEditMode.stage(input, before);
+        } else {
+            commitNow(newVal);
+        }
+    });
+    tile.querySelector('.inv-tile-qty-sub').addEventListener('click', e => {
+        e.stopPropagation();
+        const before = parseInt(input.value) || 0;
+        const newVal = Math.max(0, before - 1);
+        input.value = newVal;
+        if (dgaDeckEditMode.isActive()) {
+            dgaDeckEditMode.stage(input, before);
+        } else {
+            commitNow(newVal);
+        }
+    });
+
+    input.addEventListener('click', e => e.stopPropagation());
+    input.addEventListener('focus', () => input.select());
+    // Direct text input: commit immediately (or absorb into edit session if staging)
+    input.addEventListener('change', () => {
+        const val = Math.max(0, parseInt(input.value) || 0);
+        input.value = val;
+        if (dgaDeckEditMode.isActive()) {
+            const orig = dgaDeckEditMode.pending.has(input) ? dgaDeckEditMode.pending.get(input) : val;
+            dgaDeckEditMode.stage(input, orig);
+        } else {
+            commitNow(val);
+        }
+    });
 
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
     tile.addEventListener('click', () => {
-        if (editionId) openCardDrawer(card_id, editionId, cardName);
+        if (editionId && document.getElementById('card-drawer')) {
+            openCardDrawer(card_id, editionId, cardName);
+        }
     });
     return tile;
 }
@@ -1213,9 +1382,19 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#dga-add-card-search') && !e.target.closest('#dga-add-card-autocomplete')) hideDgaAddAc();
 }, true);
 
-// ═══════════════════════════════════════
-// INIT
-// ═══════════════════════════════════════
+// ── Hook tileQtyStage so scroll on deck tiles routes to dgaDeckEditMode ──
+// tiles.js calls tileQtyStage(input, originalValue) for .inv-card-tile scroll events.
+// We wrap it here to intercept deck tile inputs before inventory.js handles them.
+const _origTileQtyStage = typeof tileQtyStage === 'function' ? tileQtyStage : null;
+
+function tileQtyStage(input, originalValue) {
+    if (input.closest('.dga-card-tile')) {
+        dgaDeckEditMode.stage(input, originalValue);
+    } else if (_origTileQtyStage) {
+        _origTileQtyStage(input, originalValue);
+    }
+}
+
 
 window.initDecksGa = async function () {
     if (!currentUser) return;

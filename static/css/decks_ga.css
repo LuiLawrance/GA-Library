@@ -347,7 +347,7 @@
     grid-template-columns: repeat(auto-fill, 255px);
     gap: 14px;
     align-content: start;
-    justify-content: start;
+    justify-content: center;
 }
 
 .dga-add-section-btn {

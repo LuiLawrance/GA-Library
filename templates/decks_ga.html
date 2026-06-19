@@ -86,6 +86,17 @@
             </div>
         </div>
         <div class="dga-cards-body">
+            <!-- ── Qty confirm bar ── -->
+            <div class="inv-qty-confirm-bar hidden" id="dga-qty-confirm-bar">
+                <span class="inv-qty-confirm-msg" id="dga-qty-confirm-msg">Confirm changes?</span>
+                <div class="inv-qty-confirm-actions">
+                    <button class="inv-qty-confirm-btn inv-qty-confirm-apply" onclick="dgaDeckEditMode.apply()">Apply
+                    </button>
+                    <button class="inv-qty-confirm-btn inv-qty-confirm-discard" onclick="dgaDeckEditMode.discard()">
+                        Discard
+                    </button>
+                </div>
+            </div>
             <!-- ── Card drawer ── -->
             <div class="card-drawer hidden" id="card-drawer">
                 <div class="drawer-inner">

@@ -1381,6 +1381,50 @@ async def api_deck_card_add(deck_name: str, request: Request):
     return JSONResponse({"ok": True, "quantity": max(new_qty, 0)})
 
 
+@app.patch("/api/decks/{deck_name}/card")
+async def api_deck_card_set(deck_name: str, request: Request):
+    """Set the absolute quantity of a card in a deck section."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    card_id = body.get("card_id", "").strip()
+    section = body.get("section", "").strip()
+    quantity = int(body.get("quantity", 0))
+    if not card_id or not section:
+        raise HTTPException(status_code=400, detail="Missing card_id or section")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    if section not in deck_data["sections"]:
+        raise HTTPException(status_code=400, detail="Section not found")
+    if quantity <= 0:
+        deck_data["sections"][section].pop(card_id, None)
+    else:
+        deck_data["sections"][section][card_id] = quantity
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/decks/{deck_name}/card")
+async def api_deck_card_delete(deck_name: str, request: Request):
+    """Remove a card from a deck section entirely."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    card_id = body.get("card_id", "").strip()
+    section = body.get("section", "").strip()
+    if not card_id or not section:
+        raise HTTPException(status_code=400, detail="Missing card_id or section")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    deck_data["sections"].get(section, {}).pop(card_id, None)
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/decks/{deck_name}/section")
 async def api_deck_section_add(deck_name: str, request: Request):
     user = get_current_user(request)
