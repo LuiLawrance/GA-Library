@@ -2002,13 +2002,14 @@ async function submitImport() {
         resultsEl.classList.remove('hidden');
 
         if (successes.length) {
-            await enrichAndRenderBinCards(invBins[activeBin]);
-            // Reload local bin state
+            // Reload inventory state first, then re-render with fresh data
             const invRes = await fetch('/api/inventory');
             if (invRes.ok) {
                 const invData = await invRes.json();
                 invBins = invData.bins || {};
             }
+            await enrichAndRenderBinCards(invBins[activeBin]);
+            updateInvCounts();
         }
 
         btn.textContent = 'Import Again';

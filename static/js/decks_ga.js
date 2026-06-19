@@ -1,40 +1,34 @@
 // ── State ──
-let gaDecks = {};         // index: { deckName: { desc, format, created } }
-let activeDeck = null;    // currently open deck name
-let activeDeckData = null; // full deck JSON { desc, format, cards: {} }
+let gaDecks = {};
+let activeDeck = null;
+let activeDeckData = null;
 
-// ── Add card modal state ──
+// ── Add modal state ──
 let dgaAddModalCardId = null;
-let dgaAddModalCardData = null;
+let dgaAddModalCardName = null;
 let dgaAddModalEditionId = null;
-let dgaAddModalFoilId = null;
+let dgaAddModalPreSection = null;
 let dgaAddAcIndex = -1;
 
 // ═══════════════════════════════════════
-// FORMAT DROPDOWN — mirrors set-dropdown / cards-filter-btn rotating-arrow style
+// FORMAT DROPDOWN
 // ═══════════════════════════════════════
 
 function toggleDgaFormatDropdown(scope) {
     const menu = document.getElementById(`dga-${scope}-format-menu`);
     const btn = document.getElementById(`dga-${scope}-format-btn`);
     const isOpen = !menu.classList.contains('hidden');
-    if (isOpen) {
-        menu.classList.add('hidden');
-        btn.classList.remove('open');
-    } else {
-        // Close any other open format dropdown first
-        document.querySelectorAll('.dga-fmt-dropdown-menu').forEach(m => m.classList.add('hidden'));
-        document.querySelectorAll('.dga-fmt-dropdown-btn').forEach(b => b.classList.remove('open'));
+    document.querySelectorAll('.dga-fmt-dropdown-menu').forEach(m => m.classList.add('hidden'));
+    document.querySelectorAll('.dga-fmt-dropdown-btn').forEach(b => b.classList.remove('open'));
+    if (!isOpen) {
         menu.classList.remove('hidden');
         btn.classList.add('open');
     }
 }
 
 function closeDgaFormatDropdown(scope) {
-    const menu = document.getElementById(`dga-${scope}-format-menu`);
-    const btn = document.getElementById(`dga-${scope}-format-btn`);
-    if (menu) menu.classList.add('hidden');
-    if (btn) btn.classList.remove('open');
+    document.getElementById(`dga-${scope}-format-menu`)?.classList.add('hidden');
+    document.getElementById(`dga-${scope}-format-btn`)?.classList.remove('open');
 }
 
 function selectDgaFormat(scope, value, label) {
@@ -62,6 +56,7 @@ document.addEventListener('click', e => {
     const opt = e.target.closest('.dga-fmt-dropdown-option');
     if (!opt) return;
     const menu = opt.closest('.dga-fmt-dropdown-menu');
+    if (!menu) return;
     const scope = menu.id.includes('create') ? 'create' : 'settings';
     selectDgaFormat(scope, opt.dataset.value, opt.textContent);
 });
@@ -88,7 +83,6 @@ function renderDeckGrid() {
     if (!grid) return;
 
     const names = Object.keys(gaDecks);
-    const total = names.reduce((sum, n) => sum + countDeckCards(gaDecks[n].card_count || 0), 0);
     subtitle.textContent = `${names.length} deck${names.length !== 1 ? 's' : ''}`;
 
     grid.innerHTML = '';
@@ -100,10 +94,6 @@ function renderDeckGrid() {
     createTile.innerHTML = `<span class="dga-create-plus">+</span><span class="dga-create-label">New Deck</span>`;
     createTile.onclick = openCreateDeckModal;
     grid.appendChild(createTile);
-}
-
-function countDeckCards(n) {
-    return typeof n === 'number' ? n : 0;
 }
 
 function buildDeckTile(name, entry, index, total) {
@@ -119,8 +109,8 @@ function buildDeckTile(name, entry, index, total) {
     tile.innerHTML = `
         <div class="dga-tile-icon">🃏</div>
         <div class="dga-tile-name">${name}${fmt}</div>
-        ${desc}
-        <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''} · ${entry.created || ''}</div>`;
+        <div class="dga-tile-desc">${entry.desc || ''}</div>
+        <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
 
     tile.onclick = () => openDeckDetail(name);
     return tile;
@@ -151,9 +141,9 @@ async function openDeckDetail(deckName, pushUrl = true) {
 
     try {
         const res = await fetch(`/api/decks/${encodeURIComponent(deckName)}`);
-        if (!res.ok) throw new Error('Failed to load deck');
+        if (!res.ok) throw new Error();
         activeDeckData = await res.json();
-        await enrichAndRenderDeckCards(activeDeckData.cards || {});
+        renderDeckSections(activeDeckData);
     } catch {
         if (grid) grid.innerHTML = '<p class="dga-loading">Failed to load deck.</p>';
     }
@@ -168,135 +158,116 @@ function closeDeckDetail() {
     renderDeckGrid();
 }
 
-const rarityMapDga = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
-const ALWAYS_FOIL_RARITIES_DGA = new Set([7, 8, 9]);
+// ═══════════════════════════════════════
+// SECTION RENDERING
+// ═══════════════════════════════════════
 
-function getFoilSuffixDga(row) {
-    if (ALWAYS_FOIL_RARITIES_DGA.has(row.rarity)) return '';
-    const kind = row.foilKindRaw || '';
-    if (kind === 'nonfoil' || kind === '') return '';
-    if (kind === 'foil') return '⭐';
-    return '💎';
-}
+const rarityMapDga = {1: 'C', 2: 'U', 3: 'R', 4: 'SR', 5: 'UR', 6: 'PR', 7: 'CSR', 8: 'CUR', 9: 'CPR'};
+const ALWAYS_FOIL_DGA = new Set([7, 8, 9]);
 
-async function enrichAndRenderDeckCards(cards) {
-    const rows = [];
-
-    if (Object.keys(cards).length === 0) {
-        renderDeckCardGrid([]);
-        return;
-    }
-
-    try {
-        const [infoRes, slugRes, collectorRes] = await Promise.all([
-            fetch('/api/inv/info'),
-            fetch('/api/inv/slugs'),
-            fetch('/api/inv/collector')
-        ]);
-        const infoData = infoRes.ok ? await infoRes.json() : {};
-        const slugData = slugRes.ok ? await slugRes.json() : {};
-        const collectorData = collectorRes.ok ? await collectorRes.json() : {};
-
-        for (const [card_id, editions] of Object.entries(cards)) {
-            const cardInfo = infoData[card_id] || {};
-            const slugEntry = Object.values(slugData).find(v => v.card_id === card_id);
-            const cardName = slugEntry?.name || card_id;
-
-            for (const [edition_id, foils] of Object.entries(editions)) {
-                const editionInfo = cardInfo.editions?.[edition_id] || {};
-                const foilsData = editionInfo.foils || {};
-
-                for (const [foil_id, quantity] of Object.entries(foils)) {
-                    let foilKind = 'Standard';
-                    let foilKindRaw = '';
-                    if (foilsData[foil_id]) {
-                        foilKindRaw = foilsData[foil_id].kind || '';
-                        foilKind = (typeof toFoilLabel === 'function' ? toFoilLabel(foilKindRaw) : foilKindRaw) || 'Standard';
-                    } else {
-                        for (const finfo of Object.values(foilsData)) {
-                            if (finfo.variants?.[foil_id]) {
-                                foilKindRaw = finfo.variants[foil_id].kind || '';
-                                foilKind = (typeof toFoilLabel === 'function' ? toFoilLabel(foilKindRaw) : foilKindRaw) || 'Variant';
-                                break;
-                            }
-                        }
-                    }
-                    rows.push({
-                        card_id, edition_id, foil_id, quantity,
-                        cardName,
-                        setPrefix: editionInfo.set_prefix || '',
-                        rarity: editionInfo.rarity,
-                        foilKind,
-                        foilKindRaw: foilKindRaw.toLowerCase(),
-                        element: cardInfo.element || '',
-                        collectorNumber: collectorData[edition_id] || ''
-                    });
-                }
-            }
-        }
-    } catch {
-        console.error('Failed to enrich deck cards');
-    }
-
-    renderDeckCardGrid(rows);
-}
-
-function renderDeckCardGrid(rows) {
+function renderDeckSections(deckData) {
     const grid = document.getElementById('dga-card-grid');
-    if (!grid) return;
+    const sections = deckData.sections || {};
+    const nameMap = deckData.name_map || {};
+    const editionMap = deckData.edition_map || {};
 
-    updateDeckCounts(rows);
+    let totalUnique = 0, totalQty = 0;
+    for (const cards of Object.values(sections)) {
+        for (const qty of Object.values(cards)) {
+            totalUnique++;
+            totalQty += qty;
+        }
+    }
+    updateDeckCounts(totalUnique, totalQty);
 
     grid.innerHTML = '';
 
-    if (!rows.length) {
+    if (Object.keys(sections).length === 0) {
         const empty = document.createElement('div');
-        empty.className = 'inv-empty-grid';
-        empty.innerHTML = `<span class="inv-empty-icon">⬡</span><p>No cards in this deck yet.</p><p class="inv-empty-sub">Click the + tile to add cards.</p>`;
+        empty.className = 'dga-sections-empty';
+        empty.innerHTML = `<span class="inv-empty-icon">⬡</span><p>No sections yet.</p><p class="inv-empty-sub">Add a section to get started.</p>`;
         grid.appendChild(empty);
     } else {
-        rows.forEach((row, i) => grid.appendChild(buildDeckCardTile(row, i, rows.length)));
+        for (const [sectionName, cards] of Object.entries(sections)) {
+            const block = document.createElement('div');
+            block.className = 'dga-section-block';
+
+            // Header
+            const sectionQty = Object.values(cards).reduce((s, q) => s + q, 0);
+            const header = document.createElement('div');
+            header.className = 'dga-section-header';
+            header.innerHTML = `
+                <span class="dga-section-label-group">
+                    <span class="dga-section-label dga-section-label-editable" title="Click to rename">${sectionName}</span><span class="dga-section-edit-icon">✎</span>
+                </span>
+                <span class="dga-section-count">${sectionQty} card${sectionQty !== 1 ? 's' : ''}</span>
+                <div class="dga-section-header-actions">
+                    <button class="dga-section-action-btn dga-section-action-delete" title="Delete section">✕</button>
+                </div>`;
+
+            const label = header.querySelector('.dga-section-label-editable');
+            const pencil = header.querySelector('.dga-section-edit-icon');
+            label.onclick = () => dgaStartInlineRename(label, sectionName);
+            pencil.onclick = () => dgaStartInlineRename(label, sectionName);
+            header.querySelectorAll('.dga-section-action-btn')[0].onclick = () => submitDeleteSection(sectionName);
+            block.appendChild(header);
+
+            // Per-section grid — always rendered
+            const sectionGrid = document.createElement('div');
+            sectionGrid.className = 'dga-section-grid';
+
+            // Card tiles
+            const cardEntries = Object.entries(cards);
+            cardEntries.forEach(([card_id, qty], i) => {
+                const cardName = nameMap[card_id] || card_id;
+                const editionId = editionMap[card_id] || null;
+                sectionGrid.appendChild(buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, i, cardEntries.length));
+            });
+
+            // Add tile inside this section's grid
+            const addTile = document.createElement('div');
+            addTile.className = 'inv-card-add-tile';
+            addTile.style.animationDelay = `${Math.min(cardEntries.length * 40, 640)}ms`;
+            addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
+            addTile.onclick = () => openDeckAddModal(sectionName);
+            sectionGrid.appendChild(addTile);
+
+            block.appendChild(sectionGrid);
+            grid.appendChild(block);
+        }
     }
 
-    const addTile = document.createElement('div');
-    addTile.className = 'inv-card-add-tile';
-    addTile.style.animationDelay = `${Math.min(rows.length * 40, 640)}ms`;
-    addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
-    addTile.onclick = openDeckAddModal;
-    grid.appendChild(addTile);
+    // Add section button — always visible
+    const addSection = document.createElement('button');
+    addSection.className = 'dga-add-section-btn';
+    addSection.innerHTML = `+ Add Section`;
+    addSection.onclick = openAddSectionModal;
+    grid.appendChild(addSection);
 }
 
-function updateDeckCounts(rows) {
-    const totalQty = rows.reduce((s, r) => s + r.quantity, 0);
+function updateDeckCounts(unique, total) {
     const countEl = document.getElementById('dga-detail-counts');
-    if (countEl) countEl.textContent = `${rows.length} card${rows.length !== 1 ? 's' : ''} · ${totalQty} cop${totalQty !== 1 ? 'ies' : 'y'}`;
+    if (countEl) countEl.textContent = `${unique} card${unique !== 1 ? 's' : ''} · ${total} cop${total !== 1 ? 'ies' : 'y'}`;
 }
 
-function buildDeckCardTile(row, index, total = 1) {
-    const rarity = rarityMapDga[row.rarity] || '';
-    const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
-
+function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index, total) {
     const tile = document.createElement('div');
     tile.className = 'dga-card-tile';
-    const maxDelay = 600;
-    const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * maxDelay));
+    const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
     tile.style.animationDelay = `${delay}ms`;
-    tile.dataset.cardId = row.card_id;
-    tile.dataset.editionId = row.edition_id;
-    tile.dataset.foilId = row.foil_id;
+
+    const imgSrc = editionId ? `/images/${editionId}.jpg` : '';
 
     tile.innerHTML = `
         <div class="edition-tile-wrap">
-            <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
-                onerror="this.style.opacity='0.1'">
+            <img src="${imgSrc}" alt="${cardName}" onerror="this.style.opacity='0.1'">
             <div class="card-tile-dim"></div>
-            ${rarity ? `<span class="edition-rarity-badge ${rarityClass}${getFoilSuffixDga(row) ? ' has-foil-suffix' : ''}">${rarity}${getFoilSuffixDga(row)}</span>` : ''}
         </div>
-        <span class="dga-qty-badge">x${row.quantity}</span>
+        <span class="dga-qty-badge">x${qty}</span>
         <div class="dga-card-tile-overlay">
             <div class="dga-card-tile-info">
-                <div class="dga-card-tile-name">${row.cardName}</div>
-                <div class="dga-card-tile-foil">${row.foilKind}</div>
+                <div class="dga-card-tile-name">${cardName}</div>
+                <div class="dga-card-tile-foil">${sectionName}</div>
             </div>
         </div>`;
 
@@ -332,7 +303,6 @@ async function submitCreateDeck() {
         errEl.classList.remove('hidden');
         return;
     }
-
     if (gaDecks[name]) {
         errEl.textContent = 'A deck with that name already exists.';
         errEl.classList.remove('hidden');
@@ -345,14 +315,12 @@ async function submitCreateDeck() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({name, format, desc})
         });
-
         if (!res.ok) {
             const data = await res.json();
             errEl.textContent = data.error || 'Failed to create deck.';
             errEl.classList.remove('hidden');
             return;
         }
-
         const data = await res.json();
         gaDecks[name] = {desc, format, created: data.created || '', card_count: 0};
         closeCreateDeckModal();
@@ -379,6 +347,227 @@ function openDeckSettingsModal() {
 
 function closeDeckSettingsModal() {
     document.getElementById('dga-settings-modal').classList.add('hidden');
+    closeDgaFormatDropdown('settings');
+}
+
+function renderSectionList() {
+    const container = document.getElementById('dga-settings-sections');
+    if (!container || !activeDeckData) return;
+    const sections = Object.keys(activeDeckData.sections || {});
+    container.innerHTML = '';
+    sections.forEach(name => {
+        const row = document.createElement('div');
+        row.className = 'dga-section-row';
+        row.innerHTML = `
+            <span class="dga-section-row-name">${name}</span>
+            <button class="dga-section-delete-btn" onclick="submitDeleteSection('${name.replace(/'/g, "\\'")}')">✕</button>`;
+        container.appendChild(row);
+    });
+}
+
+function dgaStartInlineRename(labelEl, sectionName) {
+    if (labelEl.isContentEditable) return;
+
+    labelEl.contentEditable = 'true';
+    labelEl.classList.add('editing');
+    labelEl.focus();
+
+    // Place cursor at end
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(labelEl);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    async function commit() {
+        labelEl.contentEditable = 'false';
+        labelEl.classList.remove('editing');
+        const newName = labelEl.textContent.trim();
+
+        if (!newName || newName === sectionName) {
+            labelEl.textContent = sectionName;
+            return;
+        }
+        if (activeDeckData?.sections?.[newName] !== undefined) {
+            labelEl.textContent = sectionName;
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}/rename`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: newName})
+            });
+            if (res.ok) {
+                const newSections = {};
+                for (const [k, v] of Object.entries(activeDeckData.sections))
+                    newSections[k === sectionName ? newName : k] = v;
+                activeDeckData.sections = newSections;
+                renderDeckSections(activeDeckData);
+            } else {
+                labelEl.textContent = sectionName;
+            }
+        } catch {
+            labelEl.textContent = sectionName;
+        }
+    }
+
+    labelEl.addEventListener('blur', commit, {once: true});
+    labelEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            labelEl.blur();
+        }
+        if (e.key === 'Escape') {
+            labelEl.removeEventListener('blur', commit);
+            labelEl.contentEditable = 'false';
+            labelEl.classList.remove('editing');
+            labelEl.textContent = sectionName;
+        }
+    });
+}
+
+function openRenameSectionModal(sectionName) {
+    document.getElementById('dga-rename-section-modal').classList.remove('hidden');
+    const input = document.getElementById('dga-rename-section-input');
+    input.value = sectionName;
+    input.dataset.original = sectionName;
+    document.getElementById('dga-rename-section-error').classList.add('hidden');
+    input.focus();
+    input.select();
+}
+
+function closeRenameSectionModal() {
+    document.getElementById('dga-rename-section-modal').classList.add('hidden');
+}
+
+async function submitRenameSectionModal() {
+    const input = document.getElementById('dga-rename-section-input');
+    const newName = input.value.trim();
+    const oldName = input.dataset.original;
+    const errEl = document.getElementById('dga-rename-section-error');
+
+    if (!newName) return;
+    if (newName === oldName) {
+        closeRenameSectionModal();
+        return;
+    }
+    if (!activeDeck) return;
+
+    if (activeDeckData?.sections?.[newName] !== undefined) {
+        errEl.textContent = 'A section with that name already exists.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(oldName)}/rename`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: newName})
+        });
+        if (!res.ok) {
+            errEl.textContent = 'Failed to rename section.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        // Update local state — preserve card order
+        const cards = activeDeckData.sections[oldName];
+        const newSections = {};
+        for (const [k, v] of Object.entries(activeDeckData.sections)) {
+            newSections[k === oldName ? newName : k] = v;
+        }
+        activeDeckData.sections = newSections;
+        closeRenameSectionModal();
+        renderDeckSections(activeDeckData);
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+function openAddSectionModal() {
+    document.getElementById('dga-add-section-modal').classList.remove('hidden');
+    const input = document.getElementById('dga-add-section-input');
+    input.value = '';
+    document.getElementById('dga-add-section-error').classList.add('hidden');
+    input.focus();
+}
+
+function closeAddSectionModal() {
+    document.getElementById('dga-add-section-modal').classList.add('hidden');
+}
+
+async function submitAddSectionModal() {
+    const input = document.getElementById('dga-add-section-input');
+    const name = input.value.trim();
+    const errEl = document.getElementById('dga-add-section-error');
+
+    if (!name) return;
+    if (!activeDeck) return;
+
+    if (activeDeckData?.sections?.[name] !== undefined) {
+        errEl.textContent = 'Section already exists.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({section: name})
+        });
+        if (!res.ok) {
+            errEl.textContent = 'Failed to add section.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        if (!activeDeckData.sections[name]) activeDeckData.sections[name] = {};
+        closeAddSectionModal();
+        renderDeckSections(activeDeckData);
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function submitAddSection() {
+    const input = document.getElementById('dga-section-new-name');
+    const name = input.value.trim();
+    if (!name || !activeDeck) return;
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({section: name})
+        });
+        if (!res.ok) return;
+        if (!activeDeckData.sections[name]) activeDeckData.sections[name] = {};
+        input.value = '';
+        renderSectionList();
+        renderDeckSections(activeDeckData);
+    } catch {
+        console.error('Failed to add section');
+    }
+}
+
+async function submitDeleteSection(sectionName) {
+    if (!activeDeck) return;
+    if (!confirm(`Delete section "${sectionName}" and all its cards?`)) return;
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}`, {method: 'DELETE'});
+        if (!res.ok) return;
+        delete activeDeckData.sections[sectionName];
+        renderSectionList();
+        renderDeckSections(activeDeckData);
+    } catch {
+        console.error('Failed to delete section');
+    }
 }
 
 async function submitDeckSettings() {
@@ -392,7 +581,6 @@ async function submitDeckSettings() {
         errEl.classList.remove('hidden');
         return;
     }
-
     if (newName !== activeDeck && gaDecks[newName]) {
         errEl.textContent = 'A deck with that name already exists.';
         errEl.classList.remove('hidden');
@@ -405,19 +593,15 @@ async function submitDeckSettings() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({name: newName, format, desc})
         });
-
         if (!res.ok) {
-            const data = await res.json();
-            errEl.textContent = data.error || 'Failed to update deck.';
+            errEl.textContent = 'Failed to update deck.';
             errEl.classList.remove('hidden');
             return;
         }
 
-        // Update local state
         const existing = gaDecks[activeDeck];
         delete gaDecks[activeDeck];
         gaDecks[newName] = {...existing, format, desc};
-
         const oldName = activeDeck;
         activeDeck = newName;
 
@@ -425,9 +609,8 @@ async function submitDeckSettings() {
         document.getElementById('dga-detail-format').textContent = format ? `[${format}]` : '';
         document.getElementById('dga-detail-desc').textContent = desc;
 
-        if (oldName !== newName) {
+        if (oldName !== newName)
             window.history.replaceState({}, '', `/decks_ga?deck=${encodeURIComponent(newName)}`);
-        }
 
         closeDeckSettingsModal();
     } catch {
@@ -442,7 +625,7 @@ async function submitDeleteDeck() {
 
     try {
         const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {method: 'DELETE'});
-        if (!res.ok) throw new Error('Delete failed');
+        if (!res.ok) throw new Error();
         delete gaDecks[activeDeck];
         closeDeckSettingsModal();
         closeDeckDetail();
@@ -453,23 +636,135 @@ async function submitDeleteDeck() {
 }
 
 // ═══════════════════════════════════════
-// ADD CARD MODAL (mirrors inventory's add-card flow)
+// IMPORT / EXPORT MODAL
 // ═══════════════════════════════════════
 
-function openDeckAddModal() {
-    dgaAddModalCardId = null;
-    dgaAddModalCardData = null;
-    dgaAddModalEditionId = null;
-    dgaAddModalFoilId = null;
-    document.getElementById('dga-add-card-search').value = '';
-    const _res = document.getElementById('dga-add-card-results');
-    if (_res) {
-        _res.style.gridTemplateColumns = '';
-        _res.classList.remove('has-scroll');
+let dgaImportExportTab = 'import';
+
+function dgaOpenImportExportModal() {
+    if (!activeDeck) return;
+    document.getElementById('dga-import-export-deck-label').textContent = activeDeck;
+    document.getElementById('dga-import-textarea').value = '';
+    document.getElementById('dga-export-textarea').value = '';
+    document.getElementById('dga-import-results').classList.add('hidden');
+    document.getElementById('dga-import-results').innerHTML = '';
+    document.getElementById('dga-import-submit-btn').textContent = 'Import';
+    document.getElementById('dga-import-submit-btn').disabled = false;
+    dgaSwitchImportExportTab('import');
+    document.getElementById('dga-import-export-modal').classList.remove('hidden');
+    dgaLoadExport();
+}
+
+function dgaCloseImportExportModal() {
+    document.getElementById('dga-import-export-modal').classList.add('hidden');
+}
+
+function dgaSwitchImportExportTab(tab) {
+    dgaImportExportTab = tab;
+    document.getElementById('dga-import-tab-btn').classList.toggle('active', tab === 'import');
+    document.getElementById('dga-export-tab-btn').classList.toggle('active', tab === 'export');
+    document.getElementById('dga-import-panel').classList.toggle('hidden', tab !== 'import');
+    document.getElementById('dga-export-panel').classList.toggle('hidden', tab !== 'export');
+}
+
+async function dgaLoadExport() {
+    const textarea = document.getElementById('dga-export-textarea');
+    textarea.value = 'Loading...';
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/export`);
+        const data = await res.json();
+        textarea.value = data.text || '';
+    } catch {
+        textarea.value = 'Failed to load export.';
     }
-    document.getElementById('dga-add-card-results').innerHTML = `<div class="inv-search-placeholder" style="padding:30px 0"><span class="inv-empty-icon">⬡</span><p>Search for a card to add it.</p></div>`;
+}
+
+async function dgaCopyExport() {
+    const textarea = document.getElementById('dga-export-textarea');
+    await navigator.clipboard.writeText(textarea.value);
+    const btn = document.getElementById('dga-export-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => {
+        btn.textContent = 'Copy to Clipboard';
+    }, 1800);
+}
+
+async function dgaSubmitImport() {
+    const textarea = document.getElementById('dga-import-textarea');
+    const lines = textarea.value.trim();
+    if (!lines || !activeDeck) return;
+
+    const btn = document.getElementById('dga-import-submit-btn');
+    const resultsEl = document.getElementById('dga-import-results');
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+    resultsEl.innerHTML = '';
+    resultsEl.classList.add('hidden');
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text: lines})
+        });
+        const data = await res.json();
+
+        const deckRes = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`);
+        activeDeckData = await deckRes.json();
+        renderDeckSections(activeDeckData);
+        renderSectionList();
+
+        let total = 0;
+        for (const cards of Object.values(activeDeckData.sections || {}))
+            for (const qty of Object.values(cards)) total += qty;
+        if (gaDecks[activeDeck]) gaDecks[activeDeck].card_count = total;
+
+        // Show results
+        let html = '';
+        const importedCount = Object.values(activeDeckData.sections || {})
+            .reduce((s, cards) => s + Object.keys(cards).length, 0);
+        html += `<div class="inv-import-summary inv-import-summary--ok">✓ Import complete</div>`;
+
+        if (data.not_found?.length) {
+            html += `<div class="inv-import-summary inv-import-summary--err">✕ ${data.not_found.length} card${data.not_found.length !== 1 ? 's' : ''} not found</div>`;
+            html += data.not_found.map(n =>
+                `<div class="inv-import-error-line"><span class="inv-import-error-raw">${n}</span></div>`
+            ).join('');
+        }
+
+        resultsEl.innerHTML = html;
+        resultsEl.classList.remove('hidden');
+
+        // Refresh export textarea
+        dgaLoadExport();
+
+        btn.textContent = 'Import Again';
+        btn.disabled = false;
+    } catch {
+        resultsEl.innerHTML = '<div class="inv-import-summary inv-import-summary--err">Request failed.</div>';
+        resultsEl.classList.remove('hidden');
+        btn.textContent = 'Import';
+        btn.disabled = false;
+    }
+}
+
+// ═══════════════════════════════════════
+// ADD CARD MODAL — simplified (search → section+qty → add)
+// ═══════════════════════════════════════
+
+function openDeckAddModal(sectionName = null) {
+    dgaAddModalCardId = null;
+    dgaAddModalCardName = null;
+    dgaAddModalEditionId = null;
+    dgaAddModalPreSection = sectionName;
+
+    document.getElementById('dga-add-card-search').value = '';
+    document.getElementById('dga-add-card-results').innerHTML = `
+        <div class="inv-search-placeholder" style="padding:30px 0">
+            <span class="inv-empty-icon">⬡</span><p>Search for a card to add it.</p>
+        </div>`;
     document.getElementById('dga-add-step-search').classList.remove('hidden');
-    document.getElementById('dga-add-step-foil').classList.add('hidden');
+    document.getElementById('dga-add-step-confirm').classList.add('hidden');
     document.getElementById('dga-add-back-btn').classList.add('hidden');
     document.querySelector('#dga-add-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
     document.getElementById('dga-add-modal').classList.remove('hidden');
@@ -479,29 +774,13 @@ function openDeckAddModal() {
 function closeDeckAddModal() {
     document.getElementById('dga-add-modal').classList.add('hidden');
     hideDgaAddAc();
-    const btn = document.getElementById('dga-add-modal-submit');
-    if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Add to Deck';
-    }
 }
 
 function dgaBackToSearch() {
-    document.getElementById('dga-add-step-foil').classList.add('hidden');
+    document.getElementById('dga-add-step-confirm').classList.add('hidden');
     document.getElementById('dga-add-step-search').classList.remove('hidden');
     document.getElementById('dga-add-back-btn').classList.add('hidden');
     document.querySelector('#dga-add-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
-    dgaAddModalCardId = null;
-    dgaAddModalCardData = null;
-    dgaAddModalEditionId = null;
-    dgaAddModalFoilId = null;
-    const results = document.getElementById('dga-add-card-results');
-    const tileCount = results ? results.querySelectorAll('.inv-search-tile').length : 0;
-    if (tileCount > 0) {
-        const cols = Math.min(tileCount, 5);
-        if (results) results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
-    }
-    setTimeout(() => document.getElementById('dga-add-card-search').focus(), 40);
 }
 
 async function searchDgaAddCards() {
@@ -521,20 +800,19 @@ async function searchDgaAddCards() {
             return;
         }
 
+        // Unique card_ids — if only one unique card, go straight to confirm
+        const uniqueIds = [...new Set(data.cards.map(c => c.card_id))];
+        if (uniqueIds.length === 1) {
+            const card = data.cards[0];
+            dgaGoToConfirm(card.card_id, card.name, card.edition_id);
+            return;
+        }
+
         const cols = Math.min(data.cards.length, 5);
         results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
         results.classList.toggle('has-scroll', data.cards.length >= 6);
 
-        const uniqueIds = new Set(data.cards.map(c => c.card_id));
-        if (uniqueIds.size === 1) {
-            const card = data.cards[0];
-            await dgaGoToFoilStep(card.card_id, card.edition_id, card.name);
-            return;
-        }
-
         data.cards.forEach((card, i) => {
-            const rarity = rarityMapDga[card.rarity] || '';
-            const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
             const tile = document.createElement('div');
             tile.className = 'inv-search-tile';
             tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
@@ -543,7 +821,7 @@ async function searchDgaAddCards() {
                     <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
                     <div class="inv-search-tile-overlay">＋</div>
                 </div>`;
-            tile.onclick = () => dgaGoToFoilStep(card.card_id, card.edition_id, card.name);
+            tile.onclick = () => dgaGoToConfirm(card.card_id, card.name, card.edition_id);
             tile.addEventListener('animationend', () => tile.classList.add('animated'));
             results.appendChild(tile);
         });
@@ -552,89 +830,53 @@ async function searchDgaAddCards() {
     }
 }
 
-async function dgaGoToFoilStep(cardId, editionId, cardName) {
+function dgaGoToConfirm(cardId, cardName, editionId) {
     dgaAddModalCardId = cardId;
+    dgaAddModalCardName = cardName;
+    dgaAddModalEditionId = editionId;
 
     document.getElementById('dga-add-modal-name').textContent = cardName;
-    document.getElementById('dga-add-modal-set').textContent = '';
-    document.getElementById('dga-add-modal-img').src = `/images/${editionId}.jpg`;
-    document.getElementById('dga-add-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);">Loading...</div>';
-    const qtyEl = document.getElementById('dga-add-modal-qty');
-    qtyEl.value = 1;
-    if (typeof scaleQtyFont === 'function') scaleQtyFont(qtyEl);
-    document.getElementById('dga-add-modal-submit').disabled = true;
+    document.getElementById('dga-add-modal-img').src = editionId ? `/images/${editionId}.jpg` : '';
+    document.getElementById('dga-add-modal-qty').value = 1;
+
+    // Populate section dropdown — pre-select the section whose + tile was clicked
+    const sections = activeDeckData ? Object.keys(activeDeckData.sections) : ['Main Deck'];
+    const preSelect = dgaAddModalPreSection && sections.includes(dgaAddModalPreSection)
+        ? dgaAddModalPreSection
+        : (sections[0] || 'Main Deck');
+    const menu = document.getElementById('dga-add-section-menu');
+    const label = document.getElementById('dga-add-section-label');
+    const hidden = document.getElementById('dga-add-section');
+    menu.innerHTML = '';
+    sections.forEach(s => {
+        const opt = document.createElement('div');
+        opt.className = `dga-fmt-dropdown-option${s === preSelect ? ' selected' : ''}`;
+        opt.dataset.value = s;
+        opt.textContent = s;
+        opt.onclick = () => {
+            hidden.value = s;
+            label.textContent = s;
+            document.querySelectorAll('#dga-add-section-menu .dga-fmt-dropdown-option').forEach(o => o.classList.toggle('selected', o === opt));
+            document.getElementById('dga-add-section-menu').classList.add('hidden');
+            document.getElementById('dga-add-section-btn').classList.remove('open');
+        };
+        menu.appendChild(opt);
+    });
+    hidden.value = preSelect;
+    label.textContent = preSelect;
 
     document.getElementById('dga-add-step-search').classList.add('hidden');
-    document.getElementById('dga-add-step-foil').classList.remove('hidden');
+    document.getElementById('dga-add-step-confirm').classList.remove('hidden');
     document.getElementById('dga-add-back-btn').classList.remove('hidden');
     document.querySelector('#dga-add-modal .inv-modal-wide').classList.add('inv-modal-foil-step');
-
-    try {
-        const res = await fetch(`/api/cards/${cardId}`);
-        const data = await res.json();
-        dgaAddModalCardData = data.card;
-
-        const editions = Object.entries(dgaAddModalCardData.editions || {}).sort((a, b) => {
-            const parseNum = s => {
-                const m = (s || 'ZZZ').match(/^(\d+)([A-Z]*)$/i);
-                return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, s];
-            };
-            const [nA, sA] = parseNum(a[1].collector_number);
-            const [nB, sB] = parseNum(b[1].collector_number);
-            return nA !== nB ? nA - nB : sA.localeCompare(sB);
-        });
-
-        const foilList = document.getElementById('dga-add-modal-foils');
-        foilList.innerHTML = '';
-        let firstOpt = null;
-
-        editions.forEach(([eid, einfo]) => {
-            const rarity = rarityMapDga[einfo.rarity] || '?';
-            Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
-                const opt = dgaBuildFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false);
-                if (!firstOpt) firstOpt = {opt, eid, fid};
-                foilList.appendChild(opt);
-                Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
-                    const vopt = dgaBuildFoilOption(eid, vid, vinfo.kind, einfo.set_prefix, rarity, einfo.collector_number, true);
-                    foilList.appendChild(vopt);
-                });
-            });
-        });
-
-        if (firstOpt) dgaSelectFoilOption(firstOpt.opt, firstOpt.eid, firstOpt.fid);
-    } catch {
-        document.getElementById('dga-add-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
-    }
 }
 
-function dgaBuildFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant) {
-    const label = kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
-    const opt = document.createElement('div');
-    opt.className = 'inv-foil-option';
-    opt.dataset.editionId = editionId;
-    opt.dataset.foilId = foilId;
-    opt.innerHTML = `
-        <div class="inv-foil-left">
-            <div class="inv-foil-name">${label}${isVariant ? ' <span style="opacity:0.5;font-size:0.85em">(variant)</span>' : ''}</div>
-            <div class="inv-foil-meta">${setPrefix} · ${rarity} · #${collectorNum || '?'}</div>
-        </div>
-        <div class="inv-foil-check"></div>`;
-    opt.onclick = () => dgaSelectFoilOption(opt, editionId, foilId);
-    return opt;
-}
-
-function dgaSelectFoilOption(opt, editionId, foilId) {
-    document.querySelectorAll('#dga-add-modal-foils .inv-foil-option').forEach(o => o.classList.remove('selected'));
-    opt.classList.add('selected');
-    dgaAddModalEditionId = editionId;
-    dgaAddModalFoilId = foilId;
-
-    const einfo = dgaAddModalCardData?.editions?.[editionId];
-    if (einfo) {
-        document.getElementById('dga-add-modal-img').src = `/images/${editionId}.jpg`;
-        document.getElementById('dga-add-modal-set').textContent = `${einfo.set_name || ''} (${einfo.set_prefix || ''}) — #${einfo.collector_number || '?'}`;
-    }
-    document.getElementById('dga-add-modal-submit').disabled = false;
+function toggleDgaAddSectionDropdown() {
+    const menu = document.getElementById('dga-add-section-menu');
+    const btn = document.getElementById('dga-add-section-btn');
+    const open = !menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', open);
+    btn.classList.toggle('open', !open);
 }
 
 function changeDgaAddQty(delta) {
@@ -643,8 +885,9 @@ function changeDgaAddQty(delta) {
 }
 
 async function submitDgaAddCard() {
-    if (!dgaAddModalCardId || !dgaAddModalEditionId || !dgaAddModalFoilId || !activeDeck) return;
+    if (!dgaAddModalCardId || !activeDeck) return;
 
+    const section = document.getElementById('dga-add-section').value;
     const quantity = parseInt(document.getElementById('dga-add-modal-qty').value) || 1;
     const btn = document.getElementById('dga-add-modal-submit');
     btn.disabled = true;
@@ -654,30 +897,30 @@ async function submitDgaAddCard() {
         const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                card_id: dgaAddModalCardId,
-                edition_id: dgaAddModalEditionId,
-                foil_id: dgaAddModalFoilId,
-                quantity
-            })
+            body: JSON.stringify({card_id: dgaAddModalCardId, section, quantity})
         });
 
         if (res.ok) {
-            if (activeDeckData) {
-                const cards = activeDeckData.cards;
-                if (!cards[dgaAddModalCardId]) cards[dgaAddModalCardId] = {};
-                if (!cards[dgaAddModalCardId][dgaAddModalEditionId]) cards[dgaAddModalCardId][dgaAddModalEditionId] = {};
-                const existing = cards[dgaAddModalCardId][dgaAddModalEditionId][dgaAddModalFoilId] || 0;
-                cards[dgaAddModalCardId][dgaAddModalEditionId][dgaAddModalFoilId] = existing + quantity;
+            // Reset button before closing
+            btn.disabled = false;
+            btn.textContent = 'Add to Deck';
+
+            // Update local state
+            if (activeDeckData?.sections?.[section] !== undefined) {
+                const existing = activeDeckData.sections[section][dgaAddModalCardId] || 0;
+                activeDeckData.sections[section][dgaAddModalCardId] = existing + quantity;
+                // Update edition map for display
+                if (dgaAddModalEditionId && !activeDeckData.edition_map[dgaAddModalCardId])
+                    activeDeckData.edition_map[dgaAddModalCardId] = dgaAddModalEditionId;
+                if (dgaAddModalCardName && !activeDeckData.name_map[dgaAddModalCardId])
+                    activeDeckData.name_map[dgaAddModalCardId] = dgaAddModalCardName;
             }
 
             closeDeckAddModal();
-            await enrichAndRenderDeckCards(activeDeckData?.cards || {});
+            renderDeckSections(activeDeckData);
 
-            // Keep deck list card_count in sync for when user returns to grid
-            if (gaDecks[activeDeck]) {
+            if (gaDecks[activeDeck])
                 gaDecks[activeDeck].card_count = (gaDecks[activeDeck].card_count || 0) + quantity;
-            }
         } else {
             btn.textContent = 'Error';
             setTimeout(() => {
@@ -694,7 +937,7 @@ async function submitDgaAddCard() {
     }
 }
 
-// ── Autocomplete (deck add modal) ──
+// ── Autocomplete ──
 
 async function fetchDgaAddCardSuggestions(value) {
     const list = document.getElementById('dga-add-card-autocomplete');
@@ -752,11 +995,8 @@ function handleDgaAddCardKeydown(e) {
         if (dgaAddAcIndex >= 0 && items[dgaAddAcIndex]) {
             document.getElementById('dga-add-card-search').value = items[dgaAddAcIndex].textContent;
             hideDgaAddAc();
-            searchDgaAddCards();
-        } else {
-            hideDgaAddAc();
-            searchDgaAddCards();
         }
+        searchDgaAddCards();
     } else if (e.key === 'Escape') {
         hideDgaAddAc();
         closeDeckAddModal();
@@ -776,7 +1016,6 @@ window.initDecksGa = async function () {
     if (!currentUser) return;
     await loadMyDecks();
 
-    // Restore deck from URL params
     const urlParams = new URLSearchParams(window.location.search);
     const deckName = urlParams.get('deck');
     if (deckName && gaDecks[deckName]) {

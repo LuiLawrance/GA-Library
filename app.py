@@ -1041,6 +1041,7 @@ async def api_card_delete(request: Request):
 
 DIR_DECK_INDEX = "DATA_GA/DECK_GA"
 DIR_DECKS_GA = "DATA_GA/DECKS_GA"
+DEFAULT_SECTIONS = ["Material Deck", "Main Deck"]
 
 
 def _deck_index_load(username: str) -> dict:
@@ -1071,13 +1072,39 @@ def _deck_save(username: str, deck_name: str, data: dict) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-def _deck_card_count(cards: dict) -> int:
+def _deck_card_count(sections: dict) -> int:
     total = 0
-    for editions in cards.values():
-        for foils in editions.values():
-            for qty in foils.values():
-                total += qty
+    for cards in sections.values():
+        for qty in cards.values():
+            total += qty
     return total
+
+
+def _make_deck_data(desc: str, fmt: str) -> dict:
+    return {
+        "desc": desc,
+        "format": fmt,
+        "sections": {s: {} for s in DEFAULT_SECTIONS}
+    }
+
+
+def _resolve_card_id(name: str, slug_data: dict) -> str | None:
+    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
+    if name.lower() in name_to_id:
+        return name_to_id[name.lower()]
+    from rapidfuzz import process, fuzz
+    matches = process.extract(name.lower(), list(name_to_id.keys()),
+                              scorer=fuzz.WRatio, score_cutoff=70, limit=1)
+    if matches:
+        return name_to_id[matches[0][0]]
+    return None
+
+
+def _pick_edition(card_id: str, info_data: dict) -> str | None:
+    editions = info_data.get(card_id, {}).get("editions", {})
+    if not editions:
+        return None
+    return random.choice(list(editions.keys()))
 
 
 @app.get("/api/decks")
@@ -1085,15 +1112,12 @@ async def api_decks_list(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     index = _deck_index_load(user)
-
     result = {}
     for name, entry in index.items():
         deck_data = _deck_load(user, name)
-        count = _deck_card_count(deck_data["cards"]) if deck_data else 0
+        count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
         result[name] = {**entry, "card_count": count}
-
     return JSONResponse({"decks": result})
 
 
@@ -1102,25 +1126,112 @@ async def api_deck_create(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
     name = body.get("name", "").strip()
     fmt = body.get("format", "").strip()
     desc = body.get("desc", "").strip()
-
     if not name:
         raise HTTPException(status_code=400, detail="Name is required")
-
     index = _deck_index_load(user)
     if name in index:
         raise HTTPException(status_code=400, detail="Deck already exists")
-
     created = date.today().isoformat()
     index[name] = {"desc": desc, "format": fmt, "created": created}
     _deck_index_save(user, index)
-    _deck_save(user, name, {"desc": desc, "format": fmt, "cards": {}})
-
+    _deck_save(user, name, _make_deck_data(desc, fmt))
     return JSONResponse({"ok": True, "created": created})
+
+
+@app.get("/api/decks/{deck_name}/export")
+async def api_deck_export(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    slug_file = new_json(JSON_SLUGS)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+    name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
+    lines = []
+    for section_name, cards in deck_data["sections"].items():
+        if not cards:
+            continue
+        lines.append(f"# {section_name}")
+        for card_id, qty in cards.items():
+            lines.append(f"{qty} {name_map.get(card_id, card_id)}")
+        lines.append("")
+    return JSONResponse({"text": "\n".join(lines).strip()})
+
+
+@app.post("/api/decks/{deck_name}/import")
+async def api_deck_import(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    text = body.get("text", "")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    slug_file = new_json(JSON_SLUGS)
+    info_file = new_json(JSON_INFO)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
+    current_section = None
+    not_found = []
+    sections = deck_data["sections"]
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        # Section header
+        if line.startswith("#"):
+            section_name = line.lstrip("#").strip()
+            if section_name not in sections:
+                sections[section_name] = {}
+            current_section = section_name
+            continue
+
+        if current_section is None:
+            continue
+
+        # Card line: "qty Card Name"
+        parts = line.split(" ", 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            continue
+
+        qty = int(parts[0])
+        card_name = parts[1].strip()
+
+        # Step 1 — exact match in local slug data
+        card_id = name_to_id.get(card_name.lower())
+
+        # Step 2 — not found locally, try the external API
+        if not card_id:
+            api_results = _api_search(_format_search(card_name))
+            if api_results:
+                # Reload slug data in case API updated it
+                with slug_file.open("r", encoding="utf-8") as f:
+                    slug_data = json.load(f)
+                name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
+                card_id = name_to_id.get(card_name.lower())
+
+        if card_id:
+            sections[current_section][card_id] = sections[current_section].get(card_id, 0) + qty
+        else:
+            not_found.append(card_name)
+
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True, "not_found": not_found})
 
 
 @app.get("/api/decks/{deck_name}")
@@ -1128,12 +1239,24 @@ async def api_deck_get(deck_name: str, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-
-    return JSONResponse(deck_data)
+    slug_file = new_json(JSON_SLUGS)
+    info_file = new_json(JSON_INFO)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+    name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
+    edition_map = {}
+    for cards in deck_data["sections"].values():
+        for card_id in cards:
+            if card_id not in edition_map:
+                eid = _pick_edition(card_id, info_data)
+                if eid:
+                    edition_map[card_id] = eid
+    return JSONResponse({**deck_data, "name_map": name_map, "edition_map": edition_map})
 
 
 @app.patch("/api/decks/{deck_name}")
@@ -1141,39 +1264,30 @@ async def api_deck_patch(deck_name: str, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
     new_name = body.get("name", "").strip()
     fmt = body.get("format", "").strip()
     desc = body.get("desc", "").strip()
-
     index = _deck_index_load(user)
     if deck_name not in index:
         raise HTTPException(status_code=404, detail="Deck not found")
-
     if new_name and new_name != deck_name:
         if new_name in index:
             raise HTTPException(status_code=400, detail="Deck name already taken")
-
         index[new_name] = index.pop(deck_name)
-
         old_path = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
         new_path = f"{DIR_DECKS_GA}/{user}/{new_name}.json"
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
-
         deck_name = new_name
-
     index[deck_name]["format"] = fmt
     index[deck_name]["desc"] = desc
     _deck_index_save(user, index)
-
     deck_data = _deck_load(user, deck_name)
     if deck_data:
         deck_data["format"] = fmt
         deck_data["desc"] = desc
         _deck_save(user, deck_name, deck_data)
-
     return JSONResponse({"ok": True})
 
 
@@ -1182,18 +1296,14 @@ async def api_deck_delete(deck_name: str, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     index = _deck_index_load(user)
     if deck_name not in index:
         raise HTTPException(status_code=404, detail="Deck not found")
-
     del index[deck_name]
     _deck_index_save(user, index)
-
     deck_file = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
     if os.path.exists(deck_file):
         os.remove(deck_file)
-
     return JSONResponse({"ok": True})
 
 
@@ -1202,24 +1312,81 @@ async def api_deck_card_add(deck_name: str, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
-    card_id = body.get("card_id")
-    edition_id = body.get("edition_id")
-    foil_id = body.get("foil_id")
+    card_id = body.get("card_id", "").strip()
+    section = body.get("section", "").strip()
     quantity = int(body.get("quantity", 1))
-
-    if not all([card_id, edition_id, foil_id]):
-        raise HTTPException(status_code=400, detail="Missing required fields")
-
+    if not card_id or not section:
+        raise HTTPException(status_code=400, detail="Missing card_id or section")
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
+    if section not in deck_data["sections"]:
+        raise HTTPException(status_code=400, detail="Section not found")
+    cards = deck_data["sections"][section]
+    new_qty = cards.get(card_id, 0) + quantity
+    if new_qty <= 0:
+        cards.pop(card_id, None)
+    else:
+        cards[card_id] = new_qty
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True, "quantity": max(new_qty, 0)})
 
-    cards = deck_data["cards"]
-    cards.setdefault(card_id, {}).setdefault(edition_id, {})
-    existing = cards[card_id][edition_id].get(foil_id, 0)
-    cards[card_id][edition_id][foil_id] = existing + quantity
 
+@app.post("/api/decks/{deck_name}/section")
+async def api_deck_section_add(deck_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    section = body.get("section", "").strip()
+    if not section:
+        raise HTTPException(status_code=400, detail="Section name required")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    if section in deck_data["sections"]:
+        raise HTTPException(status_code=400, detail="Section already exists")
+    deck_data["sections"][section] = {}
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/decks/{deck_name}/section/{section_name}")
+async def api_deck_section_delete(deck_name: str, section_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    if section_name not in deck_data["sections"]:
+        raise HTTPException(status_code=404, detail="Section not found")
+    del deck_data["sections"][section_name]
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True})
+
+
+@app.patch("/api/decks/{deck_name}/section/{section_name}/rename")
+async def api_deck_section_rename(deck_name: str, section_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name required")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    if section_name not in deck_data["sections"]:
+        raise HTTPException(status_code=404, detail="Section not found")
+    if new_name in deck_data["sections"]:
+        raise HTTPException(status_code=400, detail="Section name already taken")
+    # Rebuild sections dict preserving insertion order
+    new_sections = {}
+    for k, v in deck_data["sections"].items():
+        new_sections[new_name if k == section_name else k] = v
+    deck_data["sections"] = new_sections
     _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})

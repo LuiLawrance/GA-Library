@@ -1,13 +1,13 @@
 from pathlib import Path
-from inv_ga import _flatten_cards, _print_inv_table, _resolve_display, _prune_cards
-from pricing_ga import _select_foil, JSON_INFO
 from util_file import new_dir, new_json
 
 import json
+import random
 
 DIR_DECK = "DATA_GA/DECK_GA"
 DIR_DECKS = "DATA_GA/DECKS_GA"
-JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"
+
+DEFAULT_SECTIONS = ["Material Deck", "Main Deck"]
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -26,7 +26,6 @@ def _deck_dir(username: str) -> Path:
 
 def _load_index(username: str) -> dict:
     index_file = new_json(f"{DIR_DECK}/{username}.json")
-
     with index_file.open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -38,11 +37,9 @@ def _save_index(username: str, index_data: dict) -> None:
 
 def _load_deck(username: str, deck_name: str) -> dict | None:
     path = _deck_path(username, deck_name)
-
     if not path.exists():
         print(f"Deck file not found: {deck_name}")
         return None
-
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -54,7 +51,11 @@ def _save_deck(username: str, deck_name: str, deck_data: dict) -> None:
 
 
 def _make_deck(desc: str = "", fmt: str = "") -> dict:
-    return {"desc": desc, "format": fmt, "cards": {}}
+    return {
+        "desc": desc,
+        "format": fmt,
+        "sections": {s: {} for s in DEFAULT_SECTIONS}
+    }
 
 
 def _make_index_entry(desc: str = "", fmt: str = "") -> dict:
@@ -62,38 +63,56 @@ def _make_index_entry(desc: str = "", fmt: str = "") -> dict:
     return {"desc": desc, "format": fmt, "created": date.today().isoformat()}
 
 
+def _card_count(sections: dict) -> int:
+    """Return total card quantity across all sections."""
+    total = 0
+    for cards in sections.values():
+        for qty in cards.values():
+            total += qty
+    return total
+
+
+def _unique_card_count(sections: dict) -> int:
+    """Return unique card count across all sections."""
+    seen = set()
+    for cards in sections.values():
+        seen.update(cards.keys())
+    return len(seen)
+
+
 def _select_deck(index_data: dict, prompt: str = "Select deck") -> str | None:
     deck_names = list(index_data.keys())
-
     if not deck_names:
         print("No decks found.")
         return None
-
     for i, name in enumerate(deck_names, 1):
         fmt = index_data[name].get("format", "")
         fmt_label = f" [{fmt}]" if fmt else ""
         print(f"{i}. {name}{fmt_label}")
-
     choice = input(f"\n{prompt} (or 0 to cancel): ").strip()
-
     if choice == "0" or not choice:
         return None
-
     if not choice.isdigit() or not (1 <= int(choice) <= len(deck_names)):
         print("Invalid selection.")
         return None
-
     return deck_names[int(choice) - 1]
 
 
-def _card_count(cards: dict) -> int:
-    """Return total card quantity across all entries in a cards dict."""
-    total = 0
-    for editions in cards.values():
-        for foils in editions.values():
-            for qty in foils.values():
-                total += qty
-    return total
+def _select_section(deck_data: dict, prompt: str = "Select section") -> str | None:
+    sections = list(deck_data["sections"].keys())
+    if not sections:
+        print("No sections found.")
+        return None
+    for i, name in enumerate(sections, 1):
+        count = sum(deck_data["sections"][name].values())
+        print(f"{i}. {name} ({count} cards)")
+    choice = input(f"\n{prompt} (or 0 to cancel): ").strip()
+    if choice == "0" or not choice:
+        return None
+    if not choice.isdigit() or not (1 <= int(choice) <= len(sections)):
+        print("Invalid selection.")
+        return None
+    return sections[int(choice) - 1]
 
 
 # ── Public functions — init ───────────────────────────────────────────────────
@@ -102,10 +121,8 @@ def deck_init(username: str, debug: bool = False) -> None:
     """Initialise the deck index file for a new user."""
     new_dir(DIR_DECK)
     index_file = _index_path(username)
-
     with index_file.open("w", encoding="utf-8") as f:
         json.dump({}, f, indent=4)
-
     if debug:
         print(f"Initialised deck index | user={username}")
 
@@ -117,17 +134,15 @@ def deck_create(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     name = input("\nDeck name: ").strip()
-
     if not name:
         print("Cancelled.")
         return
-
     if name in index_data:
         print(f"Deck already exists: {name}")
         return
 
     desc = input("Description (optional): ").strip()
-    fmt = input("Format (optional): ").strip()
+    fmt = input("Format (Standard/Draft/Pantheon or blank): ").strip()
 
     index_data[name] = _make_index_entry(desc, fmt)
     _save_index(username, index_data)
@@ -145,12 +160,10 @@ def deck_delete(username: str, debug: bool = False) -> None:
 
     print("\nDecks")
     deck_name = _select_deck(index_data, "Select deck to delete")
-
     if not deck_name:
         return
 
     confirm = input(f"Delete deck '{deck_name}'? (y/n): ").strip().lower()
-
     if confirm != "y":
         print("Cancelled.")
         return
@@ -159,7 +172,6 @@ def deck_delete(username: str, debug: bool = False) -> None:
     _save_index(username, index_data)
 
     deck_file = _deck_path(username, deck_name)
-
     if deck_file.exists():
         deck_file.unlink()
 
@@ -175,7 +187,6 @@ def deck_edit(username: str, debug: bool = False) -> None:
 
     print("\nDecks")
     deck_name = _select_deck(index_data, "Select deck to edit")
-
     if not deck_name:
         return
 
@@ -195,26 +206,18 @@ def deck_edit(username: str, debug: bool = False) -> None:
 
         case "1":
             new_name = input("New name: ").strip()
-
             if not new_name:
                 print("Cancelled.")
                 return
-
             if new_name in index_data:
                 print(f"Deck already exists: {new_name}")
                 return
-
-            # Rename index entry
             index_data[new_name] = index_data.pop(deck_name)
             _save_index(username, index_data)
-
-            # Rename deck file
             old_path = _deck_path(username, deck_name)
             new_path = _deck_path(username, new_name)
-
             if old_path.exists():
                 old_path.rename(new_path)
-
             if debug:
                 print(f"Renamed deck | user={username} | {deck_name} → {new_name}")
             else:
@@ -223,15 +226,11 @@ def deck_edit(username: str, debug: bool = False) -> None:
         case "2":
             new_desc = input(f"Description [{entry.get('desc', '')}]: ").strip()
             entry["desc"] = new_desc
-
             _save_index(username, index_data)
-
             deck_data = _load_deck(username, deck_name)
-
             if deck_data:
                 deck_data["desc"] = new_desc
                 _save_deck(username, deck_name, deck_data)
-
             if debug:
                 print(f"Updated desc | user={username} | deck={deck_name}")
             else:
@@ -240,15 +239,11 @@ def deck_edit(username: str, debug: bool = False) -> None:
         case "3":
             new_fmt = input(f"Format [{entry.get('format', '')}]: ").strip()
             entry["format"] = new_fmt
-
             _save_index(username, index_data)
-
             deck_data = _load_deck(username, deck_name)
-
             if deck_data:
                 deck_data["format"] = new_fmt
                 _save_deck(username, deck_name, deck_data)
-
             if debug:
                 print(f"Updated format | user={username} | deck={deck_name}")
             else:
@@ -267,35 +262,29 @@ def deck_list(username: str, debug: bool = False) -> None:
         return
 
     print(f"\nDecks — [ {username} ]")
-
     name_w = max(len(name) for name in index_data)
 
     for name, entry in index_data.items():
         fmt = entry.get("format", "")
         desc = entry.get("desc", "")
         created = entry.get("created", "")
-
         deck_data = _load_deck(username, name)
-        count = _card_count(deck_data["cards"]) if deck_data else 0
-
+        count = _card_count(deck_data["sections"]) if deck_data else 0
         fmt_label = f" [{fmt}]" if fmt else ""
         desc_label = f" — {desc}" if desc else ""
-
         print(f"  {name:<{name_w}}{fmt_label}{desc_label}  ({count} cards, created {created})")
 
 
 def deck_view(username: str, debug: bool = False) -> None:
-    """Select a deck and view its full card list."""
+    """Select a deck and view its sections and cards."""
     index_data = _load_index(username)
 
     print("\nDecks")
     deck_name = _select_deck(index_data, "Select deck to view")
-
     if not deck_name:
         return
 
     deck_data = _load_deck(username, deck_name)
-
     if not deck_data:
         return
 
@@ -305,49 +294,66 @@ def deck_view(username: str, debug: bool = False) -> None:
 
     fmt_label = f" [{fmt}]" if fmt else ""
     desc_label = f"\n  {desc}" if desc else ""
-
     print(f"\n[ {deck_name}{fmt_label} ]{desc_label}")
 
-    rows = _flatten_cards(deck_data["cards"])
-    _print_inv_table(rows)
+    for section_name, cards in deck_data["sections"].items():
+        print(f"\n  # {section_name}")
+        if not cards:
+            print("    (empty)")
+        for card_id, qty in cards.items():
+            print(f"    {qty} {card_id}")
 
 
 def deck_card_add(username: str, debug: bool = False) -> None:
-    """Add a card to a deck."""
+    """Add a card to a section in a deck."""
     index_data = _load_index(username)
 
     print("\nDecks")
     deck_name = _select_deck(index_data, "Select deck")
-
     if not deck_name:
         return
 
     deck_data = _load_deck(username, deck_name)
-
     if not deck_data:
         return
 
-    card_name = input("\nEnter card name: ").strip()
-    result = _select_foil(card_name)
-
-    if not result:
+    print("\nSections")
+    section = _select_section(deck_data, "Select section")
+    if not section:
         return
 
-    edition_id, foil_id = result
+    card_name = input("\nEnter card name: ").strip()
+    if not card_name:
+        print("Cancelled.")
+        return
 
-    editions_file = new_json(JSON_EDITIONS)
+    # Resolve name → card_id via slugs
+    from api_ga import JSON_SLUGS
+    slug_file = new_json(JSON_SLUGS)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
 
-    with editions_file.open("r", encoding="utf-8") as f:
-        editions_data = json.load(f)
-
-    card_id = editions_data.get(edition_id, {}).get("card_id")
+    name_to_id = {data["name"].lower(): data["card_id"] for data in slug_data.values()}
+    card_id = name_to_id.get(card_name.lower())
 
     if not card_id:
-        print("Error: Could not resolve card ID.")
-        return
+        # Fuzzy match
+        from rapidfuzz import process, fuzz
+        matches = process.extract(card_name, list(name_to_id.keys()), scorer=fuzz.WRatio, score_cutoff=70, limit=5)
+        if not matches:
+            print(f"No card found for '{card_name}'.")
+            return
+        print(f"\nDid you mean:")
+        for i, (name, score, _) in enumerate(matches, 1):
+            print(f"  {i}. {name}")
+        choice = input("Select (or 0 to cancel): ").strip()
+        if not choice.isdigit() or int(choice) == 0 or int(choice) > len(matches):
+            print("Cancelled.")
+            return
+        card_id = name_to_id[matches[int(choice) - 1][0]]
 
-    cards = deck_data["cards"]
-    current_qty = cards.get(card_id, {}).get(edition_id, {}).get(foil_id, 0)
+    cards = deck_data["sections"][section]
+    current_qty = cards.get(card_id, 0)
 
     qty_input = input(f"Quantity [{current_qty}] (+, -, or integer): ").strip()
 
@@ -358,40 +364,70 @@ def deck_card_add(username: str, debug: bool = False) -> None:
     elif qty_input.lstrip("-").isdigit():
         new_qty = int(qty_input)
     else:
-        print("Invalid input, no changes made.")
+        print("Invalid input.")
         return
-
-    card_name_resolved, set_prefix, collector_number, rarity, foil_kind = _resolve_display(
-        card_id, edition_id, foil_id
-    )
-
-    label = (
-        f"{card_name_resolved} | "
-        f"{set_prefix} #{collector_number} | "
-        f"{rarity} | {foil_kind}"
-    )
 
     if new_qty <= 0:
-        if current_qty == 0:
-            print("No changes made.")
-            return
-
-        _prune_cards(cards, card_id, edition_id, foil_id)
-        _save_deck(username, deck_name, deck_data)
-
-        if debug:
-            print(f"Removed from deck | user={username} | deck={deck_name} | card_id={card_id}")
-        else:
-            print(f"\nRemoved from '{deck_name}': {label}")
-
-        return
-
-    cards.setdefault(card_id, {}).setdefault(edition_id, {})
-    cards[card_id][edition_id][foil_id] = new_qty
+        if card_id in cards:
+            del cards[card_id]
+        print(f"\nRemoved from '{section}': {card_id}")
+    else:
+        cards[card_id] = new_qty
+        print(f"\nUpdated '{section}': {card_id} x{new_qty}")
 
     _save_deck(username, deck_name, deck_data)
 
-    if debug:
-        print(f"Updated deck | user={username} | deck={deck_name} | card_id={card_id} | quantity={new_qty}")
-    else:
-        print(f"\nUpdated '{deck_name}': {label} | x{new_qty}")
+
+def deck_section_add(username: str, debug: bool = False) -> None:
+    """Add a new section to a deck."""
+    index_data = _load_index(username)
+
+    print("\nDecks")
+    deck_name = _select_deck(index_data, "Select deck")
+    if not deck_name:
+        return
+
+    deck_data = _load_deck(username, deck_name)
+    if not deck_data:
+        return
+
+    section = input("Section name: ").strip()
+    if not section:
+        print("Cancelled.")
+        return
+
+    if section in deck_data["sections"]:
+        print(f"Section already exists: {section}")
+        return
+
+    deck_data["sections"][section] = {}
+    _save_deck(username, deck_name, deck_data)
+    print(f"\nAdded section '{section}' to '{deck_name}'.")
+
+
+def deck_section_delete(username: str, debug: bool = False) -> None:
+    """Delete a section from a deck."""
+    index_data = _load_index(username)
+
+    print("\nDecks")
+    deck_name = _select_deck(index_data, "Select deck")
+    if not deck_name:
+        return
+
+    deck_data = _load_deck(username, deck_name)
+    if not deck_data:
+        return
+
+    print("\nSections")
+    section = _select_section(deck_data, "Select section to delete")
+    if not section:
+        return
+
+    confirm = input(f"Delete section '{section}' and all its cards? (y/n): ").strip().lower()
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    del deck_data["sections"][section]
+    _save_deck(username, deck_name, deck_data)
+    print(f"\nDeleted section '{section}' from '{deck_name}'.")
