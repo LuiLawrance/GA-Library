@@ -467,6 +467,11 @@ async function tileQtySet(input) {
 
 // Called by the wheel listener in tiles.js — stages instead of immediately committing
 function tileQtyStage(input, originalValue) {
+    // Deck tiles route to the deck edit mode
+    if (input.closest('.dga-card-tile') && typeof dgaDeckEditMode !== 'undefined') {
+        dgaDeckEditMode.stage(input, originalValue);
+        return;
+    }
     enterEditMode(input, originalValue);
 }
 

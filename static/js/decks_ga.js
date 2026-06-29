@@ -1382,19 +1382,6 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#dga-add-card-search') && !e.target.closest('#dga-add-card-autocomplete')) hideDgaAddAc();
 }, true);
 
-// ── Hook tileQtyStage so scroll on deck tiles routes to dgaDeckEditMode ──
-// tiles.js calls tileQtyStage(input, originalValue) for .inv-card-tile scroll events.
-// We wrap it here to intercept deck tile inputs before inventory.js handles them.
-const _origTileQtyStage = typeof tileQtyStage === 'function' ? tileQtyStage : null;
-
-function tileQtyStage(input, originalValue) {
-    if (input.closest('.dga-card-tile')) {
-        dgaDeckEditMode.stage(input, originalValue);
-    } else if (_origTileQtyStage) {
-        _origTileQtyStage(input, originalValue);
-    }
-}
-
 
 window.initDecksGa = async function () {
     if (!currentUser) return;
