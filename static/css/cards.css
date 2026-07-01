@@ -512,3 +512,33 @@
 .cards-filter-clear-btn:hover {
     color: var(--error);
 }
+
+/* ── Set search progress bar ── */
+.cards-set-progress-wrap {
+    padding: 12px 32px;
+}
+
+.cards-set-progress-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cards-set-progress-track {
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.cards-set-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}

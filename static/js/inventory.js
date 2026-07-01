@@ -1970,48 +1970,89 @@ async function copyExport() {
     }, 1800);
 }
 
+function invProgressHTML(done, total, currentCard) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const label = currentCard ? `${done}/${total} — ${currentCard}` : `${done}/${total}`;
+    return `
+        <div class="inv-progress-wrap">
+            <div class="inv-progress-label" id="inv-progress-label">${label}</div>
+            <div class="inv-progress-track">
+                <div class="inv-progress-bar" id="inv-progress-bar" style="width:${pct}%"></div>
+            </div>
+        </div>`;
+}
+
+function invUpdateProgress(done, total, currentCard) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const label = document.getElementById('inv-progress-label');
+    const bar = document.getElementById('inv-progress-bar');
+    if (label) label.textContent = currentCard ? `${done}/${total} — ${currentCard}` : `${done}/${total}`;
+    if (bar) bar.style.width = `${pct}%`;
+}
+
 async function submitImport() {
     const textarea = document.getElementById('import-textarea');
     const lines = textarea.value.split('\n').map(l => l.trim()).filter(Boolean);
-    if (!lines.length) return;
+    if (!lines.length || !activeBin) return;
 
     const btn = document.getElementById('import-submit-btn');
-    btn.disabled = true;
-    btn.textContent = 'Importing...';
-
     const resultsEl = document.getElementById('import-results');
+    btn.disabled = true;
+    btn.textContent = 'Parsing...';
     resultsEl.innerHTML = '';
     resultsEl.classList.add('hidden');
 
     try {
-        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import`, {
+        // Step 1 — parse lines, get resolved inserts + unresolved (needs API lookup) + failed (bad format/edition/foil)
+        const parseRes = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/parse`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({lines})
         });
-        const data = await res.json();
+        const parseData = await parseRes.json();
 
-        const successes = data.results.filter(r => r.ok);
-        const failures = data.results.filter(r => !r.ok);
+        const resolved = parseData.resolved || [];
+        const unresolved = parseData.unresolved || [];
+        const failed = parseData.failed || [];
+        const total = resolved.length + unresolved.length;
 
-        let html = '';
-
-        if (successes.length) {
-            html += `<div class="inv-import-summary inv-import-summary--ok">✓ ${successes.length} line${successes.length !== 1 ? 's' : ''} imported successfully</div>`;
+        // Step 2 — commit all locally-resolved inserts in one shot
+        if (resolved.length) {
+            await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/commit`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({inserts: resolved})
+            });
         }
 
-        if (failures.length) {
-            html += `<div class="inv-import-summary inv-import-summary--err">✕ ${failures.length} line${failures.length !== 1 ? 's' : ''} failed</div>`;
-            html += failures.map(r =>
-                `<div class="inv-import-error-line"><span class="inv-import-error-text">${r.error}</span><span class="inv-import-error-raw">${r.line}</span></div>`
-            ).join('');
+        // Step 3 — resolve unresolved cards one at a time via API search, with progress bar
+        const resolvedFails = [];
+        let done = resolved.length;
+
+        if (unresolved.length) {
+            resultsEl.innerHTML = invProgressHTML(done, total, unresolved[0].name);
+            resultsEl.classList.remove('hidden');
+
+            for (const item of unresolved) {
+                invUpdateProgress(done, total, item.name);
+                const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/resolve`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({line: item.line, slug: item.slug})
+                });
+                const data = await res.json();
+                if (!data.ok) resolvedFails.push({
+                    line: data.line || item.line,
+                    error: data.error || `Card not found: ${item.name}`
+                });
+                done++;
+                invUpdateProgress(done, total, done < total ? unresolved[done - resolved.length]?.name || '' : '');
+            }
         }
 
-        resultsEl.innerHTML = html;
-        resultsEl.classList.remove('hidden');
-
-        if (successes.length) {
-            // Reload inventory state first, then re-render with fresh data
+        // Step 4 — reload inventory state and re-render
+        const successCount = total - resolvedFails.length;
+        if (successCount > 0) {
             const invRes = await fetch('/api/inventory');
             if (invRes.ok) {
                 const invData = await invRes.json();
@@ -2020,6 +2061,21 @@ async function submitImport() {
             await enrichAndRenderBinCards(invBins[activeBin]);
             updateInvCounts();
         }
+
+        // Final result
+        const allFailures = [...failed, ...resolvedFails];
+        let html = '';
+        if (successCount > 0) {
+            html += `<div class="inv-import-summary inv-import-summary--ok">✓ ${successCount} line${successCount !== 1 ? 's' : ''} imported successfully</div>`;
+        }
+        if (allFailures.length) {
+            html += `<div class="inv-import-summary inv-import-summary--err">✕ ${allFailures.length} line${allFailures.length !== 1 ? 's' : ''} failed</div>`;
+            html += allFailures.map(r =>
+                `<div class="inv-import-error-line"><span class="inv-import-error-text">${r.error}</span><span class="inv-import-error-raw">${r.line}</span></div>`
+            ).join('');
+        }
+        resultsEl.innerHTML = html;
+        resultsEl.classList.remove('hidden');
 
         btn.textContent = 'Import Again';
         btn.disabled = false;

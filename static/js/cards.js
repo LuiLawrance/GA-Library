@@ -185,7 +185,86 @@ function buildCardTile(card, index, total = 1) {
     return tile;
 }
 
+function cardsSetSearchProgressInnerHTML(done, total, setPrefix, currentCard) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const label = currentCard
+        ? `Fetching ${setPrefix.toUpperCase()} — ${done}/${total} — ${currentCard}`
+        : `Fetching ${setPrefix.toUpperCase()}${total ? ` — ${done}/${total}` : '...'}`;
+    return `
+        <div class="cards-set-progress-label" id="cards-set-progress-label">${label}</div>
+        <div class="cards-set-progress-track">
+            <div class="cards-set-progress-bar" id="cards-set-progress-bar" style="width:${pct}%"></div>
+        </div>`;
+}
+
+function showCardsSetSearchProgress(done, total, setPrefix, currentCard) {
+    const wrap = document.getElementById('cards-set-progress-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = cardsSetSearchProgressInnerHTML(done, total, setPrefix, currentCard);
+    wrap.classList.remove('hidden');
+}
+
+function updateCardsSetSearchProgress(done, total, setPrefix, currentCard) {
+    const label = document.getElementById('cards-set-progress-label');
+    const bar = document.getElementById('cards-set-progress-bar');
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    if (label) {
+        label.textContent = currentCard
+            ? `Fetching ${setPrefix.toUpperCase()} — ${done}/${total} — ${currentCard}`
+            : `Fetching ${setPrefix.toUpperCase()}${total ? ` — ${done}/${total}` : '...'}`;
+    }
+    if (bar) bar.style.width = `${pct}%`;
+}
+
+function hideCardsSetSearchProgress() {
+    const wrap = document.getElementById('cards-set-progress-wrap');
+    if (!wrap) return;
+    wrap.classList.add('hidden');
+    wrap.innerHTML = '';
+}
+
+async function pollSetSearchJob(jobId, setPrefix) {
+    const pollIntervalMs = 400;
+    while (true) {
+        let data;
+        try {
+            const res = await fetch(`/api/sets/search/status/${encodeURIComponent(jobId)}`);
+            if (!res.ok) return null; // job expired/not found — fall through and load whatever is local
+            data = await res.json();
+        } catch {
+            return null;
+        }
+
+        if (data.status === 'done') {
+            // Force the bar to visibly reach 100% (done/total may lag by one tick) before returning
+            const total = data.total || data.done || 1;
+            updateCardsSetSearchProgress(total, total, setPrefix, null);
+            return data;
+        }
+
+        updateCardsSetSearchProgress(data.done || 0, data.total || 0, setPrefix, data.current_card);
+
+        if (data.status === 'error') {
+            return data;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+}
+
+let _searchCardsInFlight = false;
+
 async function searchCards() {
+    if (_searchCardsInFlight) return;
+    _searchCardsInFlight = true;
+    try {
+        await _searchCardsImpl();
+    } finally {
+        _searchCardsInFlight = false;
+    }
+}
+
+async function _searchCardsImpl() {
     const query = document.getElementById('card-search').value.trim();
     const results = document.getElementById('card-results');
 
@@ -193,6 +272,7 @@ async function searchCards() {
 
     _startCardGridQtyObserver();
 
+    hideCardsSetSearchProgress();
     results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Searching...</p>';
 
     // Reset filters on new search
@@ -214,6 +294,27 @@ async function searchCards() {
             return;
         }
         try {
+            results.innerHTML = '';
+            const startRes = await fetch(`/api/sets/search/start?prefix=${encodeURIComponent(setPrefix)}`, {method: 'POST'});
+            const startData = await startRes.json();
+
+            if (startData.job_id) {
+                showCardsSetSearchProgress(0, 0, setPrefix);
+                const jobResult = await pollSetSearchJob(startData.job_id, setPrefix);
+
+                if (jobResult && jobResult.status === 'done') {
+                    await new Promise(resolve => setTimeout(resolve, 300)); // let the 100% state register visually
+                }
+
+                hideCardsSetSearchProgress();
+
+                if (jobResult && jobResult.status === 'error') {
+                    results.innerHTML = `<p style="color:var(--text-muted);font-size:0.85rem;">Set search failed${jobResult.error ? `: ${jobResult.error}` : '.'}</p>`;
+                    return;
+                }
+            }
+
+            // Only reached once the job is fully done (or data was already cached) — safe to load results now
             const res = await fetch(`/api/sets/search?prefix=${encodeURIComponent(setPrefix)}`);
             const data = await res.json();
             await loadSets();
@@ -228,6 +329,7 @@ async function searchCards() {
             }
             window.history.pushState({}, '', `/cards?set_prefix=${encodeURIComponent(setPrefix)}`);
         } catch {
+            hideCardsSetSearchProgress();
             results.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Set search failed.</p>';
         }
         return;

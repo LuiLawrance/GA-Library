@@ -13,6 +13,8 @@ from util_file import new_json
 import json
 import os
 import random
+import threading
+import uuid
 
 load_dotenv()
 
@@ -25,6 +27,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
 
 _set_search_cache = {}
+
+# ── Set search background jobs ──
+# job_id → {status: "running"|"done"|"error", done, total, current_card, error, set_prefix}
+_set_search_jobs = {}
+_set_search_jobs_lock = threading.Lock()
 
 
 def create_token(username: str) -> str:
@@ -400,19 +407,85 @@ async def api_sets():
     return JSONResponse({"sets": sets})
 
 
+def _run_set_search_job(job_id: str, set_prefix: str) -> None:
+    def on_progress(done, total, card_name):
+        with _set_search_jobs_lock:
+            job = _set_search_jobs.get(job_id)
+            if job is None:
+                return
+            job["done"] = done
+            job["total"] = total
+            job["current_card"] = card_name
+
+    try:
+        set_search(set_prefix, False, progress_callback=on_progress)
+        with _set_search_jobs_lock:
+            job = _set_search_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "done"
+    except Exception as e:
+        with _set_search_jobs_lock:
+            job = _set_search_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "error"
+                job["error"] = str(e)
+
+
+@app.post("/api/sets/search/start")
+async def api_sets_search_start(prefix: str):
+    set_filter = prefix.strip().lower().replace(" ", "_")
+
+    needs_fetch = set_filter not in _set_search_cache
+    if not needs_fetch:
+        last_sync = date.fromisoformat(_set_search_cache[set_filter])
+        needs_fetch = (date.today() - last_sync).days > UPDATE_THRESHOLD
+
+    if not needs_fetch:
+        # Local data is fresh enough — no job needed, frontend can fetch results immediately
+        return JSONResponse({"job_id": None, "cached": True})
+
+    _set_search_cache[set_filter] = date.today().isoformat()
+
+    job_id = uuid.uuid4().hex
+    with _set_search_jobs_lock:
+        _set_search_jobs[job_id] = {
+            "status": "running",
+            "done": 0,
+            "total": 0,
+            "current_card": None,
+            "error": None,
+            "set_prefix": prefix.strip().upper()
+        }
+
+    thread = threading.Thread(
+        target=_run_set_search_job,
+        args=(job_id, prefix.strip().upper()),
+        daemon=True
+    )
+    thread.start()
+
+    return JSONResponse({"job_id": job_id, "cached": False})
+
+
+@app.get("/api/sets/search/status/{job_id}")
+async def api_sets_search_status(job_id: str):
+    with _set_search_jobs_lock:
+        job = _set_search_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        snapshot = dict(job)
+
+    if snapshot["status"] in ("done", "error"):
+        with _set_search_jobs_lock:
+            _set_search_jobs.pop(job_id, None)
+
+    return JSONResponse(snapshot)
+
+
 @app.get("/api/sets/search")
 async def api_sets_search(prefix: str):
     set_filter = prefix.strip().lower().replace(" ", "_")
     set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
-
-    if set_filter not in _set_search_cache:
-        _set_search_cache[set_filter] = date.today().isoformat()
-        set_search(prefix.strip().upper(), False)
-    else:
-        last_sync = date.fromisoformat(_set_search_cache[set_filter])
-        if (date.today() - last_sync).days > UPDATE_THRESHOLD:
-            _set_search_cache[set_filter] = date.today().isoformat()
-            set_search(prefix.strip().upper(), False)
 
     if not os.path.exists(set_file_path):
         return JSONResponse({"cards": []})
@@ -721,32 +794,16 @@ def toFoilLabel(s: str) -> str:
     return s.lower().replace("_", " ").title() if s else ""
 
 
-@app.post("/api/inventory/bins/{bin_name}/import")
-async def api_bin_import(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+import re as _re
 
-    body = await request.json()
-    lines = body.get("lines", [])
+_BIN_IMPORT_LINE_RE = _re.compile(
+    r'^(\d+)[xX]\s+(.+?)\s+\(([^)]+)\)(?:\s+#(\S+))?\s*(.*)?$'
+)
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
 
-    info_file = new_json(JSON_INFO)
-    slug_file = new_json(JSON_SLUGS)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-
-    # Build name → card_id map using the same slug normalization as card search
-
-    # Build edition_id → collector_number and reverse maps per set
+def _bin_import_build_set_collector_map() -> dict:
+    """set_prefix → { collector_number → [edition_id] }"""
     sets_dir = "DATA_GA/SETS_GA"
-    # set_prefix → { collector_number → [edition_id] }
     set_collector_map = {}
     if os.path.exists(sets_dir):
         for f in os.scandir(sets_dir):
@@ -760,110 +817,219 @@ async def api_bin_import(bin_name: str, request: Request):
                 if isinstance(eids, str):
                     eids = [eids]
                 set_collector_map[prefix][num] = eids
+    return set_collector_map
 
-    results = []
-    cards = inv[bin_name]["cards"]
 
-    import re as _re
+def _bin_import_resolve_line(raw_line: str, info_data: dict, slug_data: dict, set_collector_map: dict) -> dict:
+    """
+    Attempt to resolve a single bin-import line against already-loaded local data.
+    Returns a dict describing either a resolved insert (card_id/edition_id/foil_id/quantity)
+    or a failure (error), or a "needs_lookup" case where the card name isn't known locally yet.
+    """
+    line = raw_line.strip()
+    if not line:
+        return {"line": raw_line, "ok": False, "error": "Empty line"}
+
+    m = _BIN_IMPORT_LINE_RE.match(line)
+    if not m:
+        return {"line": raw_line, "ok": False, "error": "Could not parse line"}
+
+    qty_str, card_name, set_prefix, collector_number, foil_kind_raw = m.groups()
+    quantity = int(qty_str)
+    card_name = card_name.strip()
+    set_prefix = set_prefix.strip().upper()
+    foil_kind_raw = (foil_kind_raw or "").strip().lower()
+    if not foil_kind_raw:
+        foil_kind_raw = "nonfoil"
+
+    slug = _format_search(card_name)
+    card_id = slug_data[slug]["card_id"] if slug in slug_data else None
+    if not card_id:
+        return {
+            "line": raw_line, "ok": False, "needs_lookup": True,
+            "name": card_name, "slug": slug, "quantity": quantity,
+            "set_prefix": set_prefix, "collector_number": collector_number,
+            "foil_kind_raw": foil_kind_raw
+        }
+
+    card_info = info_data.get(card_id, {})
+    all_editions = card_info.get("editions", {})
+
+    # Resolve edition_id
+    edition_id = None
+    if collector_number and set_prefix in set_collector_map:
+        eids = set_collector_map[set_prefix].get(collector_number, [])
+        for eid in eids:
+            if eid in all_editions:
+                edition_id = eid
+                break
+
+    if not edition_id:
+        for eid, einfo in all_editions.items():
+            if einfo.get("set_prefix", "").upper() == set_prefix:
+                edition_id = eid
+                break
+
+    if not edition_id:
+        return {"line": raw_line, "ok": False, "error": f"Edition not found: {set_prefix}"}
+
+    # Resolve foil_id
+    edition_foils = all_editions[edition_id].get("foils", {})
+    foil_id = None
+
+    for fid, finfo in edition_foils.items():
+        kind = finfo.get("kind", "").lower()
+        if foil_kind_raw in ("nonfoil", "normal") and kind in ("nonfoil", "normal"):
+            foil_id = fid
+            break
+        if kind == foil_kind_raw:
+            foil_id = fid
+            break
+        for vid, vinfo in finfo.get("variants", {}).items():
+            if vinfo.get("kind", "").lower() == foil_kind_raw:
+                foil_id = vid
+                break
+        if foil_id:
+            break
+
+    if not foil_id and edition_foils:
+        def foil_priority(item):
+            k = item[1].get("kind", "").lower()
+            if k in ("nonfoil", "normal"):
+                return 0
+            if k == "foil":
+                return 1
+            return 2
+
+        foil_id = sorted(edition_foils.items(), key=foil_priority)[0][0]
+
+    if not foil_id:
+        return {"line": raw_line, "ok": False, "error": "No foil type found"}
+
+    return {
+        "line": raw_line, "ok": True,
+        "card_id": card_id, "edition_id": edition_id, "foil_id": foil_id,
+        "quantity": quantity
+    }
+
+
+@app.post("/api/inventory/bins/{bin_name}/import/parse")
+async def api_bin_import_parse(bin_name: str, request: Request):
+    """Parse import text. Returns resolved inserts (local match) and unresolved (need API lookup)."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    lines = body.get("lines", [])
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    info_file = new_json(JSON_INFO)
+    slug_file = new_json(JSON_SLUGS)
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
+    set_collector_map = _bin_import_build_set_collector_map()
+
+    resolved = []
+    unresolved = []
+    failed = []
 
     for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
+        if not raw_line.strip():
             continue
+        result = _bin_import_resolve_line(raw_line, info_data, slug_data, set_collector_map)
+        if result.get("ok"):
+            resolved.append(result)
+        elif result.get("needs_lookup"):
+            unresolved.append(result)
+        else:
+            failed.append(result)
 
-        # Parse: {qty}x {name} ({set}) [#{collector}] {foil_kind}
-        m = _re.match(
-            r'^(\d+)[xX]\s+(.+?)\s+\(([^)]+)\)(?:\s+#(\S+))?\s*(.*)?$',
-            line
-        )
-        if not m:
-            results.append({"line": raw_line, "ok": False, "error": "Could not parse line"})
+    return JSONResponse({"resolved": resolved, "unresolved": unresolved, "failed": failed})
+
+
+@app.post("/api/inventory/bins/{bin_name}/import/commit")
+async def api_bin_import_commit(bin_name: str, request: Request):
+    """Add a batch of already-resolved inserts to the bin."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    inserts = body.get("inserts", [])  # [{card_id, edition_id, foil_id, quantity}]
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    cards = inv[bin_name]["cards"]
+
+    for item in inserts:
+        card_id = item.get("card_id")
+        edition_id = item.get("edition_id")
+        foil_id = item.get("foil_id")
+        quantity = int(item.get("quantity", 1))
+        if not card_id or not edition_id or not foil_id:
             continue
-
-        qty_str, card_name, set_prefix, collector_number, foil_kind_raw = m.groups()
-        quantity = int(qty_str)
-        card_name = card_name.strip()
-        set_prefix = set_prefix.strip().upper()
-        foil_kind_raw = (foil_kind_raw or "").strip().lower()
-        if not foil_kind_raw:
-            foil_kind_raw = "nonfoil"
-
-        # Resolve card_id
-        slug = _format_search(card_name)
-        card_id = slug_data[slug]["card_id"] if slug in slug_data else None
-        if not card_id:
-            results.append({"line": raw_line, "ok": False, "error": f"Card not found: {card_name}"})
-            continue
-
-        card_info = info_data.get(card_id, {})
-        all_editions = card_info.get("editions", {})
-
-        # Resolve edition_id
-        edition_id = None
-        set_prefix_key = set_prefix.upper()
-
-        if collector_number and set_prefix_key in set_collector_map:
-            eids = set_collector_map[set_prefix_key].get(collector_number, [])
-            for eid in eids:
-                if eid in all_editions:
-                    edition_id = eid
-                    break
-
-        # Fallback: find any edition matching set_prefix
-        if not edition_id:
-            for eid, einfo in all_editions.items():
-                if einfo.get("set_prefix", "").upper() == set_prefix_key:
-                    edition_id = eid
-                    break
-
-        if not edition_id:
-            results.append({"line": raw_line, "ok": False, "error": f"Edition not found: {set_prefix}"})
-            continue
-
-        # Resolve foil_id
-        edition_foils = all_editions[edition_id].get("foils", {})
-        foil_id = None
-
-        for fid, finfo in edition_foils.items():
-            kind = finfo.get("kind", "").lower()
-            if foil_kind_raw in ("nonfoil", "normal") and kind in ("nonfoil", "normal"):
-                foil_id = fid
-                break
-            if kind == foil_kind_raw:
-                foil_id = fid
-                break
-            # Check variants
-            for vid, vinfo in finfo.get("variants", {}).items():
-                if vinfo.get("kind", "").lower() == foil_kind_raw:
-                    foil_id = vid
-                    break
-            if foil_id:
-                break
-
-        # Fallback: pick default foil
-        if not foil_id and edition_foils:
-            def foil_priority(item):
-                k = item[1].get("kind", "").lower()
-                if k in ("nonfoil", "normal"):
-                    return 0
-                if k == "foil":
-                    return 1
-                return 2
-
-            foil_id = sorted(edition_foils.items(), key=foil_priority)[0][0]
-
-        if not foil_id:
-            results.append({"line": raw_line, "ok": False, "error": "No foil type found"})
-            continue
-
-        # Insert into bin
         cards.setdefault(card_id, {}).setdefault(edition_id, {})
         existing = cards[card_id][edition_id].get(foil_id, 0)
         cards[card_id][edition_id][foil_id] = existing + quantity
-        results.append({"line": raw_line, "ok": True, "added": quantity})
 
     _inv_save(user, inv)
-    return JSONResponse({"results": results})
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/inventory/bins/{bin_name}/import/resolve")
+async def api_bin_import_resolve(bin_name: str, request: Request):
+    """Resolve a single unrecognized card name via API search, then re-attempt full line resolution."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    raw_line = body.get("line", "")
+    slug = body.get("slug", "").strip()
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    if not slug:
+        return JSONResponse({"ok": False, "found": False, "line": raw_line, "error": "Missing slug"})
+
+    api_result = _api_search(slug)
+
+    info_file = new_json(JSON_INFO)
+    slug_file = new_json(JSON_SLUGS)
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
+    if not api_result or slug not in slug_data:
+        return JSONResponse({"ok": False, "found": False, "line": raw_line, "error": f"Card not found: {raw_line}"})
+
+    set_collector_map = _bin_import_build_set_collector_map()
+    result = _bin_import_resolve_line(raw_line, info_data, slug_data, set_collector_map)
+
+    if not result.get("ok"):
+        return JSONResponse(
+            {"ok": False, "found": True, "line": raw_line, "error": result.get("error", "Resolution failed")})
+
+    # Commit immediately, same as a single-item resolve
+    cards = inv[bin_name]["cards"]
+    cards.setdefault(result["card_id"], {}).setdefault(result["edition_id"], {})
+    existing = cards[result["card_id"]][result["edition_id"]].get(result["foil_id"], 0)
+    cards[result["card_id"]][result["edition_id"]][result["foil_id"]] = existing + result["quantity"]
+    _inv_save(user, inv)
+
+    return JSONResponse({"ok": True, "found": True, "line": raw_line})
 
 
 # ── Bin CRUD ──

@@ -1875,6 +1875,56 @@
     opacity: 0.7;
 }
 
+/* ── Import progress bar ── */
+.inv-progress-wrap {
+    padding: 10px 0 4px;
+}
+
+.inv-progress-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.inv-progress-track {
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.inv-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
+/* ── Import footer — button + progress/results side by side ── */
+.inv-import-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+}
+
+.inv-import-footer .inv-import-results {
+    flex: 1;
+    margin-top: 0;
+    max-height: none;
+}
+
+.inv-import-footer .inv-modal-submit {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+
 .inv-settings-import-export-btn {
     width: 100%;
     font-family: 'DM Mono', monospace;

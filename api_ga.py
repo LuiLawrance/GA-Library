@@ -733,13 +733,20 @@ def card_search(card_names: list[str], debug: bool = False) -> dict[str, dict]:
     return results
 
 
-def set_search(set_prefix: str, debug: bool = False) -> dict:
+def set_search(set_prefix: str, debug: bool = False, progress_callback=None) -> dict:
+    """
+    progress_callback, if provided, is called as progress_callback(done, total, card_name)
+    after each card is processed (or fails), so callers can report live progress
+    (e.g. a background job polled by a web frontend) without duplicating this logic.
+    """
     results = {}
 
     page = 1
     total_pages = 1
 
     progress = None
+    done = 0
+    total = 0
 
     while page <= total_pages:
         response = requests.get(
@@ -758,14 +765,14 @@ def set_search(set_prefix: str, debug: bool = False) -> dict:
         total_pages = search_data.get("total_pages", 1)
 
         if progress is None:
+            total = search_data.get("total_cards", 0)
             progress = tqdm(
-                total=search_data.get(
-                    "total_cards",
-                    0
-                ),
+                total=total,
                 desc=set_prefix.upper(),
                 unit="card"
             )
+            if progress_callback:
+                progress_callback(done, total, None)
 
         cards = (
                 search_data.get("data")
@@ -787,8 +794,9 @@ def set_search(set_prefix: str, debug: bool = False) -> dict:
             )
 
         for card_data in cards:
+            card_name = card_data.get("name", "unknown")
+
             try:
-                card_name = card_data["name"]
                 slug = _format_search(card_name, debug)
 
                 if _check_local(slug, debug):
@@ -822,6 +830,9 @@ def set_search(set_prefix: str, debug: bool = False) -> dict:
 
             finally:
                 progress.update(1)
+                done += 1
+                if progress_callback:
+                    progress_callback(done, total, card_name)
 
         page += 1
 

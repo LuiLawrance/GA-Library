@@ -19,7 +19,8 @@
             </div>
         </div>
         <div class="autocomplete-wrap">
-            <input autocomplete="off" id="card-search" oninput="fetchSuggestions(this.value)" onkeydown="handleCardKeydown(event)"
+            <input autocomplete="off" id="card-search" oninput="fetchSuggestions(this.value)"
+                   onkeydown="handleCardKeydown(event)"
                    placeholder="Search cards..."
                    type="text">
             <div class="autocomplete-list hidden" id="autocomplete-list"></div>
@@ -48,6 +49,8 @@
         </div>
     </div>
 </div>
+
+<div class="cards-set-progress-wrap hidden" id="cards-set-progress-wrap"></div>
 
 <div class="cards-body">
     <div class="inv-qty-confirm-bar hidden" id="cards-qty-confirm-bar">

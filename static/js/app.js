@@ -336,9 +336,11 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
         if (document.getElementById('username')) {
             handleSubmit();
-        } else if (document.getElementById('card-search')) {
-            searchCards();
         }
+        // Note: card search Enter-key handling lives in cards.js's handleCardKeydown,
+        // bound directly on #card-search via onkeydown. Do not duplicate it here —
+        // this listener firing alongside handleCardKeydown caused searchCards() to
+        // run twice per Enter press.
     }
 });
 
