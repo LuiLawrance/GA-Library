@@ -607,11 +607,15 @@ const dgaDeckEditMode = new TileEditMode('dga-qty-confirm-bar', async (changes) 
 
     // Re-render to remove deleted tiles
     const anyDeleted = changes.some(c => c.quantity <= 0);
-    if (anyDeleted) renderDeckSections(activeDeckData);
-    else updateDeckCounts(
-        Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0),
-        Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0)
-    );
+    const totalQty = Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0);
+    const totalUnique = Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0);
+
+    // Keep the list-view's in-memory card_count in sync so it's correct immediately on back/browser-back,
+    // without requiring a full re-fetch of /api/decks
+    if (activeDeck && gaDecks[activeDeck]) gaDecks[activeDeck].card_count = totalQty;
+
+    if (anyDeleted) renderDeckSections(activeDeckData); // internally calls updateDeckCounts with the same totals
+    else updateDeckCounts(totalUnique, totalQty);
 });
 
 // Override indicator helpers to find .dga-card-tile instead of .inv-card-tile
@@ -705,6 +709,11 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
                     Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0),
                     Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0)
                 );
+            }
+            // Keep list-view's in-memory card_count in sync
+            if (activeDeck && gaDecks[activeDeck]) {
+                gaDecks[activeDeck].card_count = Object.values(activeDeckData?.sections || {})
+                    .reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0);
             }
         } catch {
             console.error('Failed to update deck card');
@@ -1048,6 +1057,10 @@ async function submitDeleteSection(sectionName) {
         delete activeDeckData.sections[sectionName];
         renderSectionList();
         renderDeckSections(activeDeckData);
+        if (activeDeck && gaDecks[activeDeck]) {
+            gaDecks[activeDeck].card_count = Object.values(activeDeckData?.sections || {})
+                .reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0);
+        }
     } catch {
         console.error('Failed to delete section');
     }
