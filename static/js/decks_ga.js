@@ -271,6 +271,165 @@ function buildDeckTile(name, entry, index, total) {
 // DECK DETAIL
 // ═══════════════════════════════════════
 
+const DGA_DESC_PLACEHOLDER = 'Add a description...';
+
+function dgaRenderDetailName(name) {
+    const el = document.getElementById('dga-detail-name');
+    if (el) el.textContent = name;
+}
+
+function dgaRenderDetailDesc(desc) {
+    const el = document.getElementById('dga-detail-desc');
+    if (!el) return;
+    if (desc) {
+        el.textContent = desc;
+        el.classList.remove('dga-detail-meta-placeholder');
+    } else {
+        el.textContent = DGA_DESC_PLACEHOLDER;
+        el.classList.add('dga-detail-meta-placeholder');
+    }
+}
+
+function dgaWireDetailInlineEdit() {
+    const nameEl = document.getElementById('dga-detail-name');
+    const nameIcon = document.getElementById('dga-detail-name-edit-icon');
+    const descEl = document.getElementById('dga-detail-desc');
+    const descIcon = document.getElementById('dga-detail-desc-edit-icon');
+
+    if (nameEl) {
+        nameEl.onclick = () => dgaStartDetailInlineEdit('name');
+        if (nameIcon) nameIcon.onclick = () => dgaStartDetailInlineEdit('name');
+    }
+    if (descEl) {
+        descEl.onclick = () => dgaStartDetailInlineEdit('desc');
+        if (descIcon) descIcon.onclick = () => dgaStartDetailInlineEdit('desc');
+    }
+}
+
+function dgaStartDetailInlineEdit(field) {
+    const isName = field === 'name';
+    const labelEl = document.getElementById(isName ? 'dga-detail-name' : 'dga-detail-desc');
+    if (!labelEl || labelEl.isContentEditable || !activeDeck) return;
+
+    const entry = gaDecks[activeDeck] || {};
+    const originalName = activeDeck;
+    const originalDesc = entry.desc || '';
+
+    // Use the raw value (not the placeholder) as the starting edit content
+    if (isName) {
+        labelEl.textContent = originalName;
+    } else {
+        labelEl.textContent = originalDesc;
+        labelEl.classList.remove('dga-detail-meta-placeholder');
+    }
+
+    labelEl.contentEditable = 'true';
+    labelEl.classList.add('editing');
+    labelEl.focus();
+
+    // Place cursor at end
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(labelEl);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // Description has a 100-char cap, matching every other desc input in the app (bins included)
+    const DGA_DESC_MAXLENGTH = 100;
+
+    function enforceDescLimit() {
+        if (labelEl.textContent.length <= DGA_DESC_MAXLENGTH) return;
+        labelEl.textContent = labelEl.textContent.slice(0, DGA_DESC_MAXLENGTH);
+        const r = document.createRange();
+        const s = window.getSelection();
+        r.selectNodeContents(labelEl);
+        r.collapse(false);
+        s.removeAllRanges();
+        s.addRange(r);
+    }
+
+    if (!isName) labelEl.addEventListener('input', enforceDescLimit);
+
+    async function commit() {
+        labelEl.contentEditable = 'false';
+        labelEl.classList.remove('editing');
+        let newValue = labelEl.textContent.trim();
+        if (!isName && newValue.length > DGA_DESC_MAXLENGTH) newValue = newValue.slice(0, DGA_DESC_MAXLENGTH);
+
+        if (isName) {
+            if (!newValue || newValue === originalName) {
+                dgaRenderDetailName(originalName);
+                return;
+            }
+            if (gaDecks[newValue]) {
+                dgaRenderDetailName(originalName);
+                return;
+            }
+        } else {
+            if (newValue === originalDesc) {
+                dgaRenderDetailDesc(originalDesc);
+                return;
+            }
+        }
+
+        const payload = {
+            name: isName ? newValue : activeDeck,
+            format: entry.format || '',
+            desc: isName ? originalDesc : newValue
+        };
+
+        try {
+            const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                if (isName) dgaRenderDetailName(originalName);
+                else dgaRenderDetailDesc(originalDesc);
+                return;
+            }
+
+            if (isName) {
+                const existing = gaDecks[originalName];
+                delete gaDecks[originalName];
+                gaDecks[newValue] = {...existing, format: entry.format || '', desc: originalDesc};
+                activeDeck = newValue;
+                dgaRenderDetailName(newValue);
+                window.history.replaceState({}, '', `/decks_ga?deck=${encodeURIComponent(newValue)}`);
+                dgaWireDetailInlineEdit();
+            } else {
+                if (gaDecks[activeDeck]) gaDecks[activeDeck].desc = newValue;
+                dgaRenderDetailDesc(newValue);
+            }
+        } catch {
+            if (isName) dgaRenderDetailName(originalName);
+            else dgaRenderDetailDesc(originalDesc);
+        }
+    }
+
+    labelEl.addEventListener('blur', commit, {once: true});
+    labelEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && isName) {
+            e.preventDefault();
+            labelEl.blur();
+        }
+        if (e.key === 'Enter' && e.shiftKey === false && !isName) {
+            // Allow single-line commit on Enter for description too, for consistency with section rename
+            e.preventDefault();
+            labelEl.blur();
+        }
+        if (e.key === 'Escape') {
+            labelEl.removeEventListener('blur', commit);
+            labelEl.contentEditable = 'false';
+            labelEl.classList.remove('editing');
+            if (isName) dgaRenderDetailName(originalName);
+            else dgaRenderDetailDesc(originalDesc);
+        }
+    });
+}
+
 async function openDeckDetail(deckName, pushUrl = true) {
     activeDeck = deckName;
     activeDeckData = null;
@@ -279,9 +438,10 @@ async function openDeckDetail(deckName, pushUrl = true) {
     document.getElementById('dga-detail-view').classList.remove('hidden');
 
     const entry = gaDecks[deckName] || {};
-    document.getElementById('dga-detail-name').textContent = deckName;
     document.getElementById('dga-detail-format').textContent = entry.format ? `[${entry.format}]` : '';
-    document.getElementById('dga-detail-desc').textContent = entry.desc || '';
+    dgaRenderDetailName(deckName);
+    dgaRenderDetailDesc(entry.desc || '');
+    dgaWireDetailInlineEdit();
 
     const grid = document.getElementById('dga-card-grid');
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
@@ -928,9 +1088,10 @@ async function submitDeckSettings() {
         const oldName = activeDeck;
         activeDeck = newName;
 
-        document.getElementById('dga-detail-name').textContent = newName;
         document.getElementById('dga-detail-format').textContent = format ? `[${format}]` : '';
-        document.getElementById('dga-detail-desc').textContent = desc;
+        dgaRenderDetailName(newName);
+        dgaRenderDetailDesc(desc);
+        dgaWireDetailInlineEdit();
 
         if (oldName !== newName)
             window.history.replaceState({}, '', `/decks_ga?deck=${encodeURIComponent(newName)}`);

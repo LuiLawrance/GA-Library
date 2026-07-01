@@ -23,7 +23,8 @@
             </div>
             <div class="inv-field-group">
                 <label class="inv-field-label">Name</label>
-                <input class="inv-text-input" id="dga-rename-input" onkeydown="if(event.key==='Enter') dgaSubmitRename(); if(event.key==='Escape') dgaCloseRenameModal();"
+                <input class="inv-text-input" id="dga-rename-input"
+                       onkeydown="if(event.key==='Enter') dgaSubmitRename(); if(event.key==='Escape') dgaCloseRenameModal();"
                        type="text">
             </div>
             <div class="inv-modal-error hidden" id="dga-rename-error"></div>
@@ -40,7 +41,9 @@
             </div>
             <div class="inv-field-group">
                 <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
-                <input class="inv-text-input" id="dga-desc-input" maxlength="100" onkeydown="if(event.key==='Enter') dgaSubmitDesc(); if(event.key==='Escape') dgaCloseDescModal();" placeholder="..."
+                <input class="inv-text-input" id="dga-desc-input" maxlength="100"
+                       onkeydown="if(event.key==='Enter') dgaSubmitDesc(); if(event.key==='Escape') dgaCloseDescModal();"
+                       placeholder="..."
                        type="text">
             </div>
             <div class="inv-modal-error hidden" id="dga-desc-error"></div>
@@ -70,10 +73,19 @@
             <div class="dga-detail-title-row">
                 <div>
                     <div class="dga-detail-title-wrap">
-                        <span class="dga-detail-name" id="dga-detail-name"></span>
+                        <span class="dga-detail-name-group">
+                            <span class="dga-detail-name dga-detail-name-editable" id="dga-detail-name"
+                                  title="Click to rename"></span><span class="dga-detail-edit-icon"
+                                                                       id="dga-detail-name-edit-icon">✎</span>
+                        </span>
                         <span class="dga-detail-format" id="dga-detail-format"></span>
                     </div>
-                    <div class="dga-detail-meta" id="dga-detail-desc"></div>
+                    <div class="dga-detail-meta-group">
+                        <span class="dga-detail-meta dga-detail-meta-editable" id="dga-detail-desc"
+                              title="Click to edit description"></span><span
+                            class="dga-detail-edit-icon dga-detail-edit-icon--desc"
+                            id="dga-detail-desc-edit-icon">✎</span>
+                    </div>
                 </div>
                 <div class="dga-detail-header-right">
                     <div class="dga-detail-counts" id="dga-detail-counts"></div>
@@ -129,13 +141,15 @@
             <div class="inv-modal-fields">
                 <div class="inv-field-group">
                     <label class="inv-field-label">Name</label>
-                    <input class="inv-text-input" id="dga-create-name" onkeydown="if(event.key==='Enter') submitCreateDeck()" placeholder="Deck name"
+                    <input class="inv-text-input" id="dga-create-name"
+                           onkeydown="if(event.key==='Enter') submitCreateDeck()" placeholder="Deck name"
                            type="text">
                 </div>
                 <div class="inv-field-group">
                     <label class="inv-field-label">Format</label>
                     <div class="dga-fmt-dropdown-wrap">
-                        <button class="dga-fmt-dropdown-btn" id="dga-create-format-btn" onclick="toggleDgaFormatDropdown('create')"
+                        <button class="dga-fmt-dropdown-btn" id="dga-create-format-btn"
+                                onclick="toggleDgaFormatDropdown('create')"
                                 type="button">
                             <span id="dga-create-format-label">None</span>
                             <span class="dga-fmt-dropdown-arrow">&#8249;</span>
@@ -174,7 +188,8 @@
                 <div class="inv-field-group">
                     <label class="inv-field-label">Format</label>
                     <div class="dga-fmt-dropdown-wrap">
-                        <button class="dga-fmt-dropdown-btn" id="dga-settings-format-btn" onclick="toggleDgaFormatDropdown('settings')"
+                        <button class="dga-fmt-dropdown-btn" id="dga-settings-format-btn"
+                                onclick="toggleDgaFormatDropdown('settings')"
                                 type="button">
                             <span id="dga-settings-format-label">None</span>
                             <span class="dga-fmt-dropdown-arrow">&#8249;</span>
@@ -243,7 +258,8 @@
                         <div class="inv-modal-qty-row" style="margin-top:16px">
                             <label class="inv-field-label">Section</label>
                             <div class="dga-fmt-dropdown-wrap" style="margin-top:6px">
-                                <button class="dga-fmt-dropdown-btn" id="dga-add-section-btn" onclick="toggleDgaAddSectionDropdown()"
+                                <button class="dga-fmt-dropdown-btn" id="dga-add-section-btn"
+                                        onclick="toggleDgaAddSectionDropdown()"
                                         type="button">
                                     <span id="dga-add-section-label">Main Deck</span>
                                     <span class="dga-fmt-dropdown-arrow">&#8249;</span>
@@ -324,7 +340,9 @@
             <div class="inv-modal-fields">
                 <div class="inv-field-group">
                     <label class="inv-field-label">Section Name</label>
-                    <input class="inv-text-input" id="dga-add-section-input" onkeydown="if(event.key==='Enter') submitAddSectionModal(); if(event.key==='Escape') closeAddSectionModal();" placeholder="e.g. Side Deck"
+                    <input class="inv-text-input" id="dga-add-section-input"
+                           onkeydown="if(event.key==='Enter') submitAddSectionModal(); if(event.key==='Escape') closeAddSectionModal();"
+                           placeholder="e.g. Side Deck"
                            type="text">
                 </div>
             </div>

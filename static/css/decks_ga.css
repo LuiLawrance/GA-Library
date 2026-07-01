@@ -283,6 +283,51 @@
     letter-spacing: -0.01em;
 }
 
+.dga-detail-name-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dga-detail-name-editable {
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s, color 0.15s;
+    padding-bottom: 1px;
+}
+
+.dga-detail-name-editable:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+}
+
+.dga-detail-name-editable.editing {
+    cursor: text;
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    outline: none;
+    white-space: nowrap;
+}
+
+.dga-detail-edit-icon {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s, opacity 0.15s;
+    display: inline-block;
+    transform: scaleX(-1);
+    vertical-align: middle;
+}
+
+.dga-detail-edit-icon:hover {
+    color: var(--accent);
+}
+
+.dga-detail-name-editable.editing ~ .dga-detail-edit-icon,
+.dga-detail-meta-editable.editing ~ .dga-detail-edit-icon {
+    opacity: 0;
+}
+
 .dga-detail-format {
     font-family: 'DM Mono', monospace;
     font-size: 0.72rem;
@@ -290,11 +335,41 @@
     letter-spacing: 0.05em;
 }
 
+.dga-detail-meta-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+}
+
 .dga-detail-meta {
     font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
     color: var(--text-muted);
-    margin-top: 3px;
+}
+
+.dga-detail-meta-editable {
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s, color 0.15s;
+    padding-bottom: 1px;
+}
+
+.dga-detail-meta-editable:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+}
+
+.dga-detail-meta-editable.editing {
+    cursor: text;
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    outline: none;
+}
+
+.dga-detail-meta-placeholder {
+    opacity: 0.55;
+    font-style: italic;
 }
 
 /* ── Card grid ── */
