@@ -7,10 +7,8 @@
     <list default="true" id="0ef7b4b7-70df-4e78-80a5-600fa4c2f697" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/css/decks_ga.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/css/decks_ga.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/js/decks_ga.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/decks_ga.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/js/inventory.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/inventory.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/templates/decks_ga.html" beforeDir="false" afterPath="$PROJECT_DIR$/templates/decks_ga.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/css/drawer.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/css/drawer.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/static/js/drawer.js" beforeDir="false" afterPath="$PROJECT_DIR$/static/js/drawer.js" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -121,7 +119,7 @@
     &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
     &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
     &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;user-decks&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
     &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
     &quot;last_opened_file_path&quot;: &quot;C:/Users/necro/Documents/GitHub/GA-Library&quot;,
@@ -149,7 +147,6 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="SDK_NAME" value="Python 3.14 (GA-Library)" />
       <option name="WORKING_DIRECTORY" value="" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
@@ -174,7 +171,6 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="SDK_NAME" value="Python 3.14 (GA-Library)" />
       <option name="WORKING_DIRECTORY" value="C:\Users\necro\Documents\GitHub\GA-Library" />
       <option name="IS_MODULE_SDK" value="false" />
       <option name="ADD_CONTENT_ROOTS" value="true" />

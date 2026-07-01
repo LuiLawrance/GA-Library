@@ -44,7 +44,11 @@ function buildCollectorHTML(foils) {
             : `<span class="collector-badge collector-badge--oop">Out of Print</span>`;
     }
 
-    function foilRow(foilObj, label, isVariant = false, parentPop = null) {
+    function soleFoilBadge() {
+        return `<span class="collector-badge collector-badge--sole" title="No standard foil printing exists — this special foil accounts for the entire foil population">All Foils</span>`;
+    }
+
+    function foilRow(foilObj, label, isVariant = false, parentPop = null, showSoleBadge = false) {
         const pop = foilObj.population ?? null;
         const pct = pop != null ? Math.round((pop / maxPop) * 100) : 0;
         const parentPct = (isVariant && parentPop && pop != null)
@@ -60,12 +64,13 @@ function buildCollectorHTML(foils) {
                 <div class="collector-meta">
                     ${pop != null ? `<span class="collector-pop">${pop.toLocaleString()}</span>` : '<span class="collector-pop collector-pop--unknown">—</span>'}
                     ${parentPct != null ? `<span class="collector-pct">${parentPct}%</span>` : ''}
+                    ${showSoleBadge ? soleFoilBadge() : ''}
                     ${printingBadge(foilObj.printing)}
                 </div>
             </div>`;
     }
 
-    function foilBlock(foilObj, label) {
+    function foilBlock(foilObj, label, showSoleBadge = false) {
         if (!foilObj) return '';
         const variants = Object.values(foilObj.variants || {});
         const variantPop = variants.reduce((s, v) => s + (v.population ?? 0), 0);
@@ -77,23 +82,26 @@ function buildCollectorHTML(foils) {
             if (basePop > 0) {
                 variantHTML += foilRow(
                     {population: basePop, printing: foilObj.printing},
-                    `Standard ${toFoilLabel(foilObj.kind)}`,
+                    'Standard',
                     true,
                     foilObj.population
                 );
             }
             variants.forEach(v => {
-                variantHTML += foilRow(v, toFoilLabel(v.kind), true, foilObj.population);
+                variantHTML += foilRow(v, toFoilLabel(v.kind).replace(/\s+Foil$/i, '').trim(), true, foilObj.population);
             });
         }
 
-        return foilRow(foilObj, label) + variantHTML;
+        return foilRow(foilObj, label, false, null, showSoleBadge) + variantHTML;
     }
+
+    // Edge case: no standard "Foil" kind exists — the special foil(s) ARE the entire foil population
+    const noBaseFoil = !foilEntry && specials.length > 0;
 
     const rows = [
         foilBlock(nonfoilEntry, 'Non-Foil'),
         foilBlock(foilEntry, 'Foil'),
-        ...specials.map(f => foilBlock(f, toFoilLabel(f.kind)))
+        ...specials.map(f => foilBlock(f, toFoilLabel(f.kind).replace(/\s+Foil$/i, '').trim(), noBaseFoil))
     ].join('');
 
     return `

@@ -460,7 +460,7 @@
 
 .collector-row {
     display: grid;
-    grid-template-columns: 80px 1fr auto;
+    grid-template-columns: minmax(70px, max-content) 1fr auto;
     align-items: center;
     gap: 10px;
     margin-bottom: 8px;
@@ -477,8 +477,6 @@
     font-size: 0.68rem;
     color: var(--text-muted);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .collector-row--variant .collector-kind {
@@ -553,6 +551,12 @@
     color: var(--text-muted);
     border: 1px solid var(--border);
     background: transparent;
+}
+
+.collector-badge--sole {
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .collector-illustrator {

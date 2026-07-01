@@ -742,8 +742,7 @@ async def api_bin_import(bin_name: str, request: Request):
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
 
-    # Build name (lowercased) → card_id map
-    name_to_id = {data["name"].lower(): data["card_id"] for data in slug_data.values()}
+    # Build name → card_id map using the same slug normalization as card search
 
     # Build edition_id → collector_number and reverse maps per set
     sets_dir = "DATA_GA/SETS_GA"
@@ -790,7 +789,8 @@ async def api_bin_import(bin_name: str, request: Request):
             foil_kind_raw = "nonfoil"
 
         # Resolve card_id
-        card_id = name_to_id.get(card_name.lower())
+        slug = _format_search(card_name)
+        card_id = slug_data[slug]["card_id"] if slug in slug_data else None
         if not card_id:
             results.append({"line": raw_line, "ok": False, "error": f"Card not found: {card_name}"})
             continue
@@ -1089,10 +1089,12 @@ def _make_deck_data(desc: str, fmt: str) -> dict:
 
 
 def _resolve_card_id(name: str, slug_data: dict) -> str | None:
-    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
-    if name.lower() in name_to_id:
-        return name_to_id[name.lower()]
+    # Use the same slug normalization card search uses for exact local matches
+    slug = _format_search(name)
+    if slug in slug_data:
+        return slug_data[slug]["card_id"]
     from rapidfuzz import process, fuzz
+    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
     matches = process.extract(name.lower(), list(name_to_id.keys()),
                               scorer=fuzz.WRatio, score_cutoff=70, limit=1)
     if matches:
@@ -1180,7 +1182,6 @@ async def api_deck_import_parse(deck_name: str, request: Request):
     slug_file = new_json(JSON_SLUGS)
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
-    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
 
     resolved = []  # {card_id, name, qty, section}
     unresolved = []  # {name, qty, section}
@@ -1203,7 +1204,8 @@ async def api_deck_import_parse(deck_name: str, request: Request):
             continue
         qty = int(parts[0])
         card_name = parts[1].strip()
-        card_id = name_to_id.get(card_name.lower())
+        slug = _format_search(card_name)
+        card_id = slug_data[slug]["card_id"] if slug in slug_data else None
         if card_id:
             resolved.append({"card_id": card_id, "name": card_name, "qty": qty, "section": current_section})
         else:
@@ -1260,17 +1262,16 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
     slug_file = new_json(JSON_SLUGS)
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
-    name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
 
-    card_id = name_to_id.get(card_name.lower())
+    slug = _format_search(card_name)
+    card_id = slug_data[slug]["card_id"] if slug in slug_data else None
 
     if not card_id:
-        api_result = _api_search(_format_search(card_name))
+        api_result = _api_search(slug)
         if api_result:
             with slug_file.open("r", encoding="utf-8") as f:
                 slug_data = json.load(f)
-            name_to_id = {d["name"].lower(): d["card_id"] for d in slug_data.values()}
-            card_id = name_to_id.get(card_name.lower())
+            card_id = slug_data[slug]["card_id"] if slug in slug_data else None
 
     if card_id:
         if section not in deck_data["sections"]:
