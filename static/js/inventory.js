@@ -1594,7 +1594,7 @@ async function openInvDrawer(cardId, editionId, cardName) {
                     <div class="drawer-name-row">
                         <div>
                             <div class="drawer-name">${cardName}</div>
-                            <div class="drawer-set">${selectedEdition?.set_name || ''} (${selectedEdition?.set_prefix || ''}) &mdash; #${selectedEdition?.collector_number || '?'}</div>
+                            <div class="drawer-set">${drawerSetLineHTML(selectedEdition)}</div>
                         </div>
                         ${card.element ? `<img class="drawer-element" src="/elements/${card.element}.png" alt="${card.element}">` : ''}
                     </div>
@@ -1713,7 +1713,7 @@ function selectInvDrawerEdition(editionId) {
 
     if (edition) {
         const setEl = drawer.querySelector('.drawer-set');
-        if (setEl) setEl.textContent = `${edition.set_name} (${edition.set_prefix}) — #${edition.collector_number || '?'}`;
+        if (setEl) setEl.innerHTML = drawerSetLineHTML(edition);
     }
 
     const cardInfo = drawer.querySelector('.drawer-card-info');

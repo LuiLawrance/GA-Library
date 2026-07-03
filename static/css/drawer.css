@@ -208,6 +208,19 @@
     margin-top: 4px;
 }
 
+.drawer-set-link {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.drawer-set-link:hover {
+    color: var(--text, #fff);
+    text-decoration-color: currentColor;
+}
+
 .drawer-element {
     width: 48px;
     height: 48px;

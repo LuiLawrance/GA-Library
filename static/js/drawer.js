@@ -2,6 +2,35 @@ let drawerIsOpen = false;
 let drawerCardData = null;
 let drawerActiveTab = 'info';
 
+// Build the "Set Name (PREFIX) — #NUM" line with the set portion hyperlinked
+// to a set search on the Cards page.
+function drawerSetLineHTML(edition) {
+    const setName = edition?.set_name || '';
+    const setPrefix = edition?.set_prefix || '';
+    const collectorNumber = edition?.collector_number || '?';
+    const escapedPrefix = setPrefix.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    return `<a class="drawer-set-link" title="Search this set"
+        onclick="event.stopPropagation(); drawerSearchSet('${escapedPrefix}')">${setName} (${setPrefix})</a> &mdash; #${collectorNumber}`;
+}
+
+// Close whichever drawer is open, then open the Cards page with this set
+// applied as a filter. (The `$` set-search command stays user-only.)
+function drawerSearchSet(setPrefix) {
+    if (!setPrefix) return;
+
+    if (document.getElementById('card-drawer') && typeof closeCardDrawer === 'function') {
+        closeCardDrawer();
+    }
+    if (document.getElementById('inv-card-drawer') && typeof closeInvDrawer === 'function') {
+        closeInvDrawer();
+    }
+
+    // Set filter values must match /api/sets strings (uppercase) so the
+    // set dropdown reflects the applied filter.
+    navigate(`/cards?set=${encodeURIComponent(setPrefix.toUpperCase())}`);
+}
+
 function parseEffect(text, cardName) {
     if (!text) return '';
 
@@ -357,7 +386,7 @@ async function openCardDrawer(cardId, editionId, cardName) {
                     <div class="drawer-name-row">
                         <div>
                             <div class="drawer-name">${cardName}</div>
-                            <div class="drawer-set">${selectedEdition?.set_name || ''} (${selectedEdition?.set_prefix || ''}) &mdash; #${selectedEdition?.collector_number || '?'}</div>
+                            <div class="drawer-set">${drawerSetLineHTML(selectedEdition)}</div>
                         </div>
                         ${card.element ? `<img class="drawer-element" src="/elements/${card.element}.png" alt="${card.element}">` : ''}
                     </div>
@@ -507,7 +536,7 @@ function selectDrawerEdition(editionId) {
     if (edition) {
         const setEl = document.querySelector('.drawer-set');
         if (setEl) {
-            setEl.textContent = `${edition.set_name} (${edition.set_prefix}) — #${edition.collector_number || '?'}`;
+            setEl.innerHTML = drawerSetLineHTML(edition);
         }
     }
 
