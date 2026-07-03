@@ -1,4 +1,6 @@
 /__pycache__
+/.idea
 /DATA_GA
 /DATA_GENERAL
+.DS_Store
 .env

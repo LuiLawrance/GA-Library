@@ -445,9 +445,52 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
 }
 
 // ── Scroll wheel on quantity inputs ──
+
+// Heuristic: only accept discrete mouse-wheel notches, reject trackpad gestures.
+// Per-event checks alone leak: trackpad momentum ramps up into large integer
+// deltas that mimic wheel notches. So events are grouped into "bursts" (gap of
+// less than WHEEL_BURST_GAP_MS between events) and the whole burst inherits the
+// classification of how it started. A trackpad flick's momentum tail therefore
+// stays blocked, while each spaced mouse notch opens a fresh, cleanly
+// classified burst.
+const WHEEL_BURST_GAP_MS = 200;
+let _wheelBurstLast = 0;
+let _wheelBurstIsTrackpad = false;
+
+function _looksLikeTrackpad(e) {
+    if (e.ctrlKey) return true;                    // pinch-zoom gesture
+    if (e.deltaMode !== 0) return false;           // LINE/PAGE mode = real wheel
+    if (e.deltaX !== 0) return true;               // horizontal drift = trackpad
+    if (!Number.isInteger(e.deltaY)) return true;  // fractional = trackpad
+    return Math.abs(e.deltaY) < 50;                // small steps = trackpad
+}
+
+function isMouseWheelEvent(e) {
+    const now = performance.now();
+    const inBurst = (now - _wheelBurstLast) < WHEEL_BURST_GAP_MS;
+    _wheelBurstLast = now;
+
+    if (!inBurst) {
+        // New gesture — classify from its opening event
+        _wheelBurstIsTrackpad = _looksLikeTrackpad(e);
+    } else if (!_wheelBurstIsTrackpad && _looksLikeTrackpad(e)) {
+        // Trackpad evidence mid-burst poisons the whole burst
+        _wheelBurstIsTrackpad = true;
+    }
+
+    return !_wheelBurstIsTrackpad;
+}
+
 document.addEventListener('wheel', e => {
+    // Burst tracking runs on EVERY wheel event, page-wide — otherwise a
+    // trackpad scroll that starts outside the input and drifts over it
+    // mid-momentum would open a fresh burst and misclassify as a mouse.
+    const accepted = isMouseWheelEvent(e);
+
     if (!e.target.matches('.inv-tile-qty-input')) return;
     e.preventDefault();
+
+    if (!accepted) return;
 
     const input = e.target;
     const current = parseInt(input.value) || 0;

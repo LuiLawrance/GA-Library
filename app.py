@@ -1,6 +1,6 @@
 from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, JSON_THEMA, \
     set_search, UPDATE_THRESHOLD
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -13,6 +13,7 @@ from util_file import new_json
 import json
 import os
 import random
+import re
 import threading
 import uuid
 
@@ -35,7 +36,7 @@ _set_search_jobs_lock = threading.Lock()
 
 
 def create_token(username: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
 
     payload = {
         "sub": username,
@@ -702,8 +703,8 @@ async def api_inv_slugs():
         return JSONResponse(json.load(f))
 
 
-@app.get("/api/inv/collector")
-async def api_inv_collector():
+def _build_collector_map() -> dict:
+    """edition_id → collector_number, across all set files."""
     sets_dir = "DATA_GA/SETS_GA"
     result = {}
     if os.path.exists(sets_dir):
@@ -717,7 +718,12 @@ async def api_inv_collector():
                     eids = [eids]
                 for eid in eids:
                     result[eid] = num
-    return JSONResponse(result)
+    return result
+
+
+@app.get("/api/inv/collector")
+async def api_inv_collector():
+    return JSONResponse(_build_collector_map())
 
 
 # ── Import / Export ──
@@ -741,19 +747,7 @@ async def api_bin_export(bin_name: str, request: Request):
         slug_data = json.load(f)
 
     # Build edition_id → collector_number map
-    sets_dir = "DATA_GA/SETS_GA"
-    collector_map = {}
-    if os.path.exists(sets_dir):
-        for f in os.scandir(sets_dir):
-            if not f.name.endswith(".json"):
-                continue
-            with open(f.path, "r", encoding="utf-8") as fh:
-                set_data = json.load(fh)
-            for num, eids in set_data.items():
-                if isinstance(eids, str):
-                    eids = [eids]
-                for eid in eids:
-                    collector_map[eid] = num
+    collector_map = _build_collector_map()
 
     # Build card_id → name map
     name_map = {data["card_id"]: data["name"] for data in slug_data.values()}
@@ -794,9 +788,7 @@ def toFoilLabel(s: str) -> str:
     return s.lower().replace("_", " ").title() if s else ""
 
 
-import re as _re
-
-_BIN_IMPORT_LINE_RE = _re.compile(
+_BIN_IMPORT_LINE_RE = re.compile(
     r'^(\d+)[xX]\s+(.+?)\s+\(([^)]+)\)(?:\s+#(\S+))?\s*(.*)?$'
 )
 
