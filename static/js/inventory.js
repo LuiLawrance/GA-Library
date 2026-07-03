@@ -128,6 +128,160 @@ function countBinEntries(cards) {
 // BIN DETAIL
 // ═══════════════════════════════════════
 
+// ── Bin header inline editing (mirrors deck detail title/desc editing) ──
+
+const INV_DESC_PLACEHOLDER = 'Add a description...';
+
+function invRenderDetailName(name) {
+    const el = document.getElementById('detail-bin-name');
+    if (el) el.textContent = name;
+}
+
+function invRenderDetailDesc(desc) {
+    const el = document.getElementById('detail-bin-meta');
+    if (!el) return;
+    if (desc) {
+        el.textContent = desc;
+        el.classList.remove('inv-detail-meta-placeholder');
+    } else {
+        el.textContent = INV_DESC_PLACEHOLDER;
+        el.classList.add('inv-detail-meta-placeholder');
+    }
+}
+
+function invWireDetailInlineEdit() {
+    const nameEl = document.getElementById('detail-bin-name');
+    const nameIcon = document.getElementById('detail-bin-name-edit-icon');
+    const descEl = document.getElementById('detail-bin-meta');
+    const descIcon = document.getElementById('detail-bin-meta-edit-icon');
+
+    if (nameEl) {
+        nameEl.onclick = () => invStartDetailInlineEdit('name');
+        if (nameIcon) nameIcon.onclick = () => invStartDetailInlineEdit('name');
+    }
+    if (descEl) {
+        descEl.onclick = () => invStartDetailInlineEdit('desc');
+        if (descIcon) descIcon.onclick = () => invStartDetailInlineEdit('desc');
+    }
+}
+
+function invStartDetailInlineEdit(field) {
+    const isName = field === 'name';
+    const labelEl = document.getElementById(isName ? 'detail-bin-name' : 'detail-bin-meta');
+    if (!labelEl || labelEl.isContentEditable || !activeBin) return;
+
+    const bin = invBins[activeBin] || {};
+    const originalName = activeBin;
+    const originalDesc = bin.desc || '';
+
+    // Use the raw value (not the placeholder) as the starting edit content
+    if (isName) {
+        labelEl.textContent = originalName;
+    } else {
+        labelEl.textContent = originalDesc;
+        labelEl.classList.remove('inv-detail-meta-placeholder');
+    }
+
+    labelEl.contentEditable = 'true';
+    labelEl.classList.add('editing');
+    labelEl.focus();
+
+    // Place cursor at end
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(labelEl);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    // Description has a 100-char cap, matching the bin modals' maxlength
+    const INV_DESC_MAXLENGTH = 100;
+
+    function enforceDescLimit() {
+        if (labelEl.textContent.length <= INV_DESC_MAXLENGTH) return;
+        labelEl.textContent = labelEl.textContent.slice(0, INV_DESC_MAXLENGTH);
+        const r = document.createRange();
+        const s = window.getSelection();
+        r.selectNodeContents(labelEl);
+        r.collapse(false);
+        s.removeAllRanges();
+        s.addRange(r);
+    }
+
+    if (!isName) labelEl.addEventListener('input', enforceDescLimit);
+
+    async function commit() {
+        labelEl.contentEditable = 'false';
+        labelEl.classList.remove('editing');
+        let newValue = labelEl.textContent.trim();
+        if (!isName && newValue.length > INV_DESC_MAXLENGTH) newValue = newValue.slice(0, INV_DESC_MAXLENGTH);
+
+        if (isName) {
+            if (!newValue || newValue === originalName) {
+                invRenderDetailName(originalName);
+                return;
+            }
+            if (invBins[newValue]) {
+                invRenderDetailName(originalName);
+                return;
+            }
+        } else {
+            if (newValue === originalDesc) {
+                invRenderDetailDesc(originalDesc);
+                return;
+            }
+        }
+
+        const payload = {
+            name: isName ? newValue : activeBin,
+            desc: isName ? originalDesc : newValue
+        };
+
+        try {
+            const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                if (isName) invRenderDetailName(originalName);
+                else invRenderDetailDesc(originalDesc);
+                return;
+            }
+
+            if (isName) {
+                invBins[newValue] = invBins[originalName];
+                delete invBins[originalName];
+                activeBin = newValue;
+                invRenderDetailName(newValue);
+                window.history.replaceState({}, '', `/inventory?bin=${encodeURIComponent(newValue)}`);
+                invWireDetailInlineEdit();
+            } else {
+                if (invBins[activeBin]) invBins[activeBin].desc = newValue;
+                invRenderDetailDesc(newValue);
+            }
+        } catch {
+            if (isName) invRenderDetailName(originalName);
+            else invRenderDetailDesc(originalDesc);
+        }
+    }
+
+    labelEl.addEventListener('blur', commit, {once: true});
+    labelEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            labelEl.blur();
+        }
+        if (e.key === 'Escape') {
+            labelEl.removeEventListener('blur', commit);
+            labelEl.contentEditable = 'false';
+            labelEl.classList.remove('editing');
+            if (isName) invRenderDetailName(originalName);
+            else invRenderDetailDesc(originalDesc);
+        }
+    });
+}
+
 async function openBinDetail(binName, pushUrl = true) {
     safeDiscardEditMode();
     activeBin = binName;
@@ -137,8 +291,9 @@ async function openBinDetail(binName, pushUrl = true) {
     document.getElementById('inv-bins-view').classList.add('hidden');
     document.getElementById('inv-detail-view').classList.remove('hidden');
 
-    document.getElementById('detail-bin-name').textContent = binName;
-    document.getElementById('detail-bin-meta').textContent = bin.desc || '';
+    invRenderDetailName(binName);
+    invRenderDetailDesc(bin.desc || '');
+    invWireDetailInlineEdit();
     document.getElementById('inv-card-filter').value = '';
 
     // Clear grid and reset filters when opening a new bin
@@ -1431,7 +1586,7 @@ async function settingsSetDefault() {
             for (const b of Object.keys(invBins)) invBins[b].default = (b === name);
             closeBinSettings();
             // Update header badge visibility
-            document.getElementById('detail-bin-name').textContent = name;
+            invRenderDetailName(name);
         }
     } catch {
         console.error('Failed to set default bin');
@@ -1469,8 +1624,8 @@ async function submitBinSettings() {
                 delete invBins[activeBin];
                 activeBin = newName;
             }
-            document.getElementById('detail-bin-name').textContent = activeBin;
-            document.getElementById('detail-bin-meta').textContent = desc;
+            invRenderDetailName(activeBin);
+            invRenderDetailDesc(desc);
             closeBinSettings();
         } else {
             const err = await res.json();

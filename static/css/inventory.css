@@ -286,11 +286,86 @@
     letter-spacing: -0.01em;
 }
 
+.inv-detail-name-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.inv-detail-name-editable {
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s, color 0.15s;
+    padding-bottom: 1px;
+}
+
+.inv-detail-name-editable:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+}
+
+.inv-detail-name-editable.editing {
+    cursor: text;
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    outline: none;
+    white-space: nowrap;
+}
+
+.inv-detail-edit-icon {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s, opacity 0.15s;
+    display: inline-block;
+    transform: scaleX(-1);
+    vertical-align: middle;
+}
+
+.inv-detail-edit-icon:hover {
+    color: var(--accent);
+}
+
+.inv-detail-name-editable.editing ~ .inv-detail-edit-icon,
+.inv-detail-meta-editable.editing ~ .inv-detail-edit-icon {
+    opacity: 0;
+}
+
+.inv-detail-meta-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 3px;
+}
+
 .inv-detail-meta {
     font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
     color: var(--text-muted);
-    margin-top: 3px;
+}
+
+.inv-detail-meta-editable {
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s, color 0.15s;
+    padding-bottom: 1px;
+}
+
+.inv-detail-meta-editable:hover {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+}
+
+.inv-detail-meta-editable.editing {
+    cursor: text;
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    outline: none;
+}
+
+.inv-detail-meta-placeholder {
+    font-style: italic;
+    opacity: 0.55;
 }
 
 .inv-detail-header-right {
