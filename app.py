@@ -1057,7 +1057,6 @@ async def api_bin_patch(bin_name: str, request: Request):
 
     body = await request.json()
     new_name = body.get("name", "").strip()
-    desc = body.get("desc", "").strip()
 
     inv = _inv_load(user)
     if bin_name not in inv:
@@ -1069,7 +1068,11 @@ async def api_bin_patch(bin_name: str, request: Request):
         inv[new_name] = inv.pop(bin_name)
         bin_name = new_name
 
-    inv[bin_name]["desc"] = desc
+    if "desc" in body:
+        inv[bin_name]["desc"] = body.get("desc", "").strip()
+    if "banner" in body:
+        banner = body["banner"]
+        inv[bin_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
 
@@ -1484,8 +1487,6 @@ async def api_deck_patch(deck_name: str, request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
     new_name = body.get("name", "").strip()
-    fmt = body.get("format", "").strip()
-    desc = body.get("desc", "").strip()
     index = _deck_index_load(user)
     if deck_name not in index:
         raise HTTPException(status_code=404, detail="Deck not found")
@@ -1498,16 +1499,24 @@ async def api_deck_patch(deck_name: str, request: Request):
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
         deck_name = new_name
+    if "banner" in body:
+        banner = body["banner"]
+        index[deck_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
     index[deck_name]["modified"] = date.today().isoformat()
     _deck_index_save(user, index)
-    deck_data = _deck_load(user, deck_name)
-    if deck_data is None:
-        # Deck file missing — rebuild it so format/desc aren't silently lost
-        deck_data = _make_deck_data(desc, fmt)
-    else:
-        deck_data["format"] = fmt
-        deck_data["desc"] = desc
-    _deck_save(user, deck_name, deck_data)
+    if "format" in body or "desc" in body:
+        fmt = body.get("format", "").strip()
+        desc = body.get("desc", "").strip()
+        deck_data = _deck_load(user, deck_name)
+        if deck_data is None:
+            # Deck file missing — rebuild it so format/desc aren't silently lost
+            deck_data = _make_deck_data(desc, fmt)
+        else:
+            if "format" in body:
+                deck_data["format"] = fmt
+            if "desc" in body:
+                deck_data["desc"] = desc
+        _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})
 
 

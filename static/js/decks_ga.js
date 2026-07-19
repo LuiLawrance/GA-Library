@@ -33,10 +33,55 @@ function dgaCloseContextMenu() {
 
 document.addEventListener('click', e => {
     if (!e.target.closest('#dga-context-menu')) dgaCloseContextMenu();
+    if (!e.target.closest('#dga-card-context-menu')) dgaCloseCardContextMenu();
 });
 document.addEventListener('contextmenu', e => {
     if (!e.target.closest('.dga-deck-tile')) dgaCloseContextMenu();
+    if (!e.target.closest('.dga-card-tile')) dgaCloseCardContextMenu();
 });
+
+// ── Deck card context menu (right-click a card inside a deck) ──
+
+let dgaCtxTargetEdition = null;
+
+function dgaOpenCardContextMenu(e, editionId) {
+    dgaCtxTargetEdition = editionId;
+    const isCurrent = gaDecks[activeDeck]?.banner === editionId;
+    document.getElementById('dga-ctx-banner-label').textContent =
+        isCurrent ? 'Remove Banner' : 'Set as Banner';
+    const menu = document.getElementById('dga-card-context-menu');
+    menu.classList.remove('hidden');
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 60);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+}
+
+function dgaCloseCardContextMenu() {
+    document.getElementById('dga-card-context-menu')?.classList.add('hidden');
+    dgaCtxTargetEdition = null;
+}
+
+async function dgaCtxSetBanner() {
+    if (!dgaCtxTargetEdition || !activeDeck) return;
+    const editionId = dgaCtxTargetEdition;
+    dgaCloseCardContextMenu();
+
+    // Right-clicking the current banner card removes the banner
+    const banner = gaDecks[activeDeck]?.banner === editionId ? null : editionId;
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({banner})
+        });
+        if (!res.ok) return;
+        if (gaDecks[activeDeck]) gaDecks[activeDeck].banner = banner;
+    } catch {
+        console.error('Failed to update banner');
+    }
+}
 
 function dgaCtxRename() {
     const name = dgaCtxTargetDeck;
@@ -260,6 +305,14 @@ function buildDeckTile(name, entry, index, total) {
         <div class="dga-tile-name">${name}${fmt}</div>
         <div class="dga-tile-desc">${entry.desc || ''}</div>
         <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
+
+    if (entry.banner) {
+        tile.classList.add('has-banner');
+        const bg = document.createElement('div');
+        bg.className = 'dga-tile-banner';
+        bg.style.backgroundImage = `url('/images/${encodeURIComponent(entry.banner)}.jpg')`;
+        tile.prepend(bg);
+    }
 
     tile.onclick = () => openDeckDetail(name);
     tile.addEventListener('contextmenu', e => {
@@ -683,6 +736,11 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
 
     const input = tile.querySelector('.inv-tile-qty-input');
     const badge = tile.querySelector('.dga-qty-badge');
+
+    tile.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        dgaOpenCardContextMenu(e, editionId);
+    });
 
     // Commit immediately — used by +/− buttons and direct text input
     async function commitNow(newQty) {

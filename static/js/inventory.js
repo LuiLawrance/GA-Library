@@ -107,6 +107,13 @@ function buildBinTile(name, bin, index, total = 1) {
         <div class="inv-bin-name">${name}</div>
         <div class="inv-bin-desc">${bin.desc || ''}</div>
         <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
+    if (bin.banner) {
+        tile.classList.add('has-banner');
+        const bg = document.createElement('div');
+        bg.className = 'inv-bin-banner';
+        bg.style.backgroundImage = `url('/images/${encodeURIComponent(bin.banner)}.jpg')`;
+        tile.prepend(bg);
+    }
     tile.onclick = () => openBinDetail(name);
     tile.addEventListener('contextmenu', e => {
         e.preventDefault();
@@ -1896,12 +1903,36 @@ let ctxCardRow = null;
 
 function openCardContextMenu(e, row) {
     ctxCardRow = row;
+    const isCurrent = invBins[activeBin]?.banner === row.edition_id;
+    const label = document.getElementById('inv-ctx-banner-label');
+    if (label) label.textContent = isCurrent ? 'Remove Banner' : 'Set as Banner';
     const menu = document.getElementById('inv-card-context-menu');
     menu.classList.remove('hidden');
     const x = Math.min(e.clientX, window.innerWidth - 180);
     const y = Math.min(e.clientY, window.innerHeight - 60);
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
+}
+
+async function ctxCardBanner() {
+    if (!ctxCardRow || !activeBin) return;
+    const editionId = ctxCardRow.edition_id;
+    closeCardContextMenu();
+
+    // Right-clicking the current banner card removes the banner
+    const banner = invBins[activeBin]?.banner === editionId ? null : editionId;
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({banner})
+        });
+        if (!res.ok) return;
+        if (invBins[activeBin]) invBins[activeBin].banner = banner;
+    } catch {
+        console.error('Failed to update banner');
+    }
 }
 
 function closeCardContextMenu() {
