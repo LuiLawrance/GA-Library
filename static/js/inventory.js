@@ -1542,7 +1542,7 @@ async function submitCreateBin() {
             body: JSON.stringify({name, desc})
         });
         if (res.ok) {
-            invBins[name] = {banner: null, default: false, desc, public: false, symbol: null, tags: null, cards: {}};
+            invBins[name] = {banner: null, default: false, desc, symbol: null, tags: null, cards: {}};
             closeCreateModal();
             renderBinGrid();
         } else {
@@ -2061,7 +2061,7 @@ async function ctxMoveToNewBin() {
             body: JSON.stringify({name, desc: ''})
         });
         if (!res.ok) throw new Error('Failed to create bin');
-        invBins[name] = {default: false, desc: '', public: false, cards: {}};
+        invBins[name] = {banner: null, default: false, desc: '', symbol: null, tags: null, cards: {}};
         await executeMoveCard(name);
     } catch (err) {
         document.getElementById('move-modal-error').textContent = err.message || 'Failed.';

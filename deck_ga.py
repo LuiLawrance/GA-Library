@@ -49,6 +49,13 @@ def _save_deck(username: str, deck_name: str, deck_data: dict) -> None:
     with _deck_path(username, deck_name).open("w", encoding="utf-8") as f:
         json.dump(deck_data, f, indent=4, ensure_ascii=False)
 
+    # Any deck-content write bumps the index's last-modified date
+    from datetime import date
+    index_data = _load_index(username)
+    if deck_name in index_data:
+        index_data[deck_name]["modified"] = date.today().isoformat()
+        _save_index(username, index_data)
+
 
 def _make_deck(desc: str = "", fmt: str = "") -> dict:
     return {
@@ -58,9 +65,10 @@ def _make_deck(desc: str = "", fmt: str = "") -> dict:
     }
 
 
-def _make_index_entry(desc: str = "", fmt: str = "") -> dict:
+def _make_index_entry() -> dict:
     from datetime import date
-    return {"desc": desc, "format": fmt, "created": date.today().isoformat()}
+    today = date.today().isoformat()
+    return {"banner": None, "symbol": None, "tags": None, "created": today, "modified": today}
 
 
 def _card_count(sections: dict) -> int:
@@ -80,13 +88,14 @@ def _unique_card_count(sections: dict) -> int:
     return len(seen)
 
 
-def _select_deck(index_data: dict, prompt: str = "Select deck") -> str | None:
+def _select_deck(username: str, index_data: dict, prompt: str = "Select deck") -> str | None:
     deck_names = list(index_data.keys())
     if not deck_names:
         print("No decks found.")
         return None
     for i, name in enumerate(deck_names, 1):
-        fmt = index_data[name].get("format", "")
+        deck_data = _load_deck(username, name)
+        fmt = (deck_data or {}).get("format", index_data[name].get("format", ""))
         fmt_label = f" [{fmt}]" if fmt else ""
         print(f"{i}. {name}{fmt_label}")
     choice = input(f"\n{prompt} (or 0 to cancel): ").strip()
@@ -144,7 +153,7 @@ def deck_create(username: str, debug: bool = False) -> None:
     desc = input("Description (optional): ").strip()
     fmt = input("Format (Standard/Draft/Pantheon or blank): ").strip()
 
-    index_data[name] = _make_index_entry(desc, fmt)
+    index_data[name] = _make_index_entry()
     _save_index(username, index_data)
     _save_deck(username, name, _make_deck(desc, fmt))
 
@@ -159,7 +168,7 @@ def deck_delete(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     print("\nDecks")
-    deck_name = _select_deck(index_data, "Select deck to delete")
+    deck_name = _select_deck(username, index_data, "Select deck to delete")
     if not deck_name:
         return
 
@@ -186,11 +195,9 @@ def deck_edit(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     print("\nDecks")
-    deck_name = _select_deck(index_data, "Select deck to edit")
+    deck_name = _select_deck(username, index_data, "Select deck to edit")
     if not deck_name:
         return
-
-    entry = index_data[deck_name]
 
     print(f"\nEditing: {deck_name}")
     print("0. Back")
@@ -212,7 +219,9 @@ def deck_edit(username: str, debug: bool = False) -> None:
             if new_name in index_data:
                 print(f"Deck already exists: {new_name}")
                 return
+            from datetime import date
             index_data[new_name] = index_data.pop(deck_name)
+            index_data[new_name]["modified"] = date.today().isoformat()
             _save_index(username, index_data)
             old_path = _deck_path(username, deck_name)
             new_path = _deck_path(username, new_name)
@@ -224,10 +233,9 @@ def deck_edit(username: str, debug: bool = False) -> None:
                 print(f"\nRenamed deck: {deck_name} → {new_name}")
 
         case "2":
-            new_desc = input(f"Description [{entry.get('desc', '')}]: ").strip()
-            entry["desc"] = new_desc
-            _save_index(username, index_data)
             deck_data = _load_deck(username, deck_name)
+            current_desc = deck_data.get("desc", "") if deck_data else ""
+            new_desc = input(f"Description [{current_desc}]: ").strip()
             if deck_data:
                 deck_data["desc"] = new_desc
                 _save_deck(username, deck_name, deck_data)
@@ -237,10 +245,9 @@ def deck_edit(username: str, debug: bool = False) -> None:
                 print(f"\nUpdated description for: {deck_name}")
 
         case "3":
-            new_fmt = input(f"Format [{entry.get('format', '')}]: ").strip()
-            entry["format"] = new_fmt
-            _save_index(username, index_data)
             deck_data = _load_deck(username, deck_name)
+            current_fmt = deck_data.get("format", "") if deck_data else ""
+            new_fmt = input(f"Format [{current_fmt}]: ").strip()
             if deck_data:
                 deck_data["format"] = new_fmt
                 _save_deck(username, deck_name, deck_data)
@@ -265,10 +272,10 @@ def deck_list(username: str, debug: bool = False) -> None:
     name_w = max(len(name) for name in index_data)
 
     for name, entry in index_data.items():
-        fmt = entry.get("format", "")
-        desc = entry.get("desc", "")
         created = entry.get("created", "")
         deck_data = _load_deck(username, name)
+        fmt = (deck_data or {}).get("format", entry.get("format", ""))
+        desc = (deck_data or {}).get("desc", entry.get("desc", ""))
         count = _card_count(deck_data["sections"]) if deck_data else 0
         fmt_label = f" [{fmt}]" if fmt else ""
         desc_label = f" — {desc}" if desc else ""
@@ -280,7 +287,7 @@ def deck_view(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     print("\nDecks")
-    deck_name = _select_deck(index_data, "Select deck to view")
+    deck_name = _select_deck(username, index_data, "Select deck to view")
     if not deck_name:
         return
 
@@ -288,9 +295,8 @@ def deck_view(username: str, debug: bool = False) -> None:
     if not deck_data:
         return
 
-    entry = index_data[deck_name]
-    fmt = entry.get("format", "")
-    desc = entry.get("desc", "")
+    fmt = deck_data.get("format", "")
+    desc = deck_data.get("desc", "")
 
     fmt_label = f" [{fmt}]" if fmt else ""
     desc_label = f"\n  {desc}" if desc else ""
@@ -309,7 +315,7 @@ def deck_card_add(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     print("\nDecks")
-    deck_name = _select_deck(index_data, "Select deck")
+    deck_name = _select_deck(username, index_data, "Select deck")
     if not deck_name:
         return
 
@@ -383,7 +389,7 @@ def deck_section_add(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     print("\nDecks")
-    deck_name = _select_deck(index_data, "Select deck")
+    deck_name = _select_deck(username, index_data, "Select deck")
     if not deck_name:
         return
 
@@ -410,7 +416,7 @@ def deck_section_delete(username: str, debug: bool = False) -> None:
     index_data = _load_index(username)
 
     print("\nDecks")
-    deck_name = _select_deck(index_data, "Select deck")
+    deck_name = _select_deck(username, index_data, "Select deck")
     if not deck_name:
         return
 

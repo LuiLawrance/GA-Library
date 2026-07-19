@@ -199,6 +199,8 @@ document.addEventListener('click', e => {
     }
 }, true);
 
+// Capture phase: option clicks inside modals never bubble to document
+// (.inv-modal stops propagation), so select must happen on the way down.
 document.addEventListener('click', e => {
     const opt = e.target.closest('.dga-fmt-dropdown-option');
     if (!opt) return;
@@ -206,7 +208,7 @@ document.addEventListener('click', e => {
     if (!menu) return;
     const scope = menu.id.includes('create') ? 'create' : 'settings';
     selectDgaFormat(scope, opt.dataset.value, opt.textContent);
-});
+}, true);
 
 // ═══════════════════════════════════════
 // LOAD & RENDER DECK LIST
@@ -254,7 +256,7 @@ function buildDeckTile(name, entry, index, total) {
     const count = entry.card_count || 0;
 
     tile.innerHTML = `
-        <div class="dga-tile-icon">🃏</div>
+        <div class="dga-tile-icon">⬡</div>
         <div class="dga-tile-name">${name}${fmt}</div>
         <div class="dga-tile-desc">${entry.desc || ''}</div>
         <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;

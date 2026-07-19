@@ -57,7 +57,7 @@ def _load_inv(username: str) -> dict:
 
 
 def _make_default_structure() -> dict:
-    return {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "public": False, "symbol": None, "tags": None,
+    return {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None,
                           "cards": {}}}
 
 
@@ -303,7 +303,7 @@ def bin_create(username: str, debug: bool = False) -> None:
         print(f"Bin already exists: {name}")
         return
 
-    inv_data[name] = {"banner": None, "default": False, "desc": "", "public": False, "symbol": None, "tags": None,
+    inv_data[name] = {"banner": None, "default": False, "desc": "", "symbol": None, "tags": None,
                       "cards": {}}
 
     _save_inv(username, inv_data)

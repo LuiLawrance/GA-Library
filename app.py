@@ -661,14 +661,14 @@ def _inv_load(username: str) -> dict:
 
     # Empty file → init default structure
     if not raw:
-        data = {DEFAULT_BIN: {"default": True, "desc": "", "public": False, "cards": {}}}
+        data = {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "cards": {}}}
         _inv_save(username, data)
         return data
 
     # Old flat UUID-keyed structure → migrate to default bin
     first_val = next(iter(raw.values()), {})
     if isinstance(first_val, dict) and "card_id" in first_val:
-        data = {DEFAULT_BIN: {"default": True, "desc": "", "public": False, "cards": {}}}
+        data = {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "cards": {}}}
         _inv_save(username, data)
         return data
 
@@ -1043,7 +1043,7 @@ async def api_bin_create(request: Request):
     if name in inv:
         raise HTTPException(status_code=400, detail="Bin already exists")
 
-    inv[name] = {"banner": None, "default": False, "desc": desc, "public": False, "symbol": None, "tags": None,
+    inv[name] = {"banner": None, "default": False, "desc": desc, "symbol": None, "tags": None,
                  "cards": {}}
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
@@ -1229,6 +1229,12 @@ def _deck_save(username: str, deck_name: str, data: dict) -> None:
     with open(f"{DIR_DECKS_GA}/{username}/{deck_name}.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
+    # Any deck-content write bumps the index's last-modified date
+    index = _deck_index_load(username)
+    if deck_name in index:
+        index[deck_name]["modified"] = date.today().isoformat()
+        _deck_index_save(username, index)
+
 
 def _deck_card_count(sections: dict) -> int:
     total = 0
@@ -1277,7 +1283,11 @@ async def api_decks_list(request: Request):
     for name, entry in index.items():
         deck_data = _deck_load(user, name)
         count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
-        result[name] = {**entry, "card_count": count}
+        # desc/format live in the deck file; fall back to legacy index fields
+        result[name] = {**entry,
+                        "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
+                        "format": (deck_data or {}).get("format", entry.get("format", "")),
+                        "card_count": count}
     return JSONResponse({"decks": result})
 
 
@@ -1296,7 +1306,8 @@ async def api_deck_create(request: Request):
     if name in index:
         raise HTTPException(status_code=400, detail="Deck already exists")
     created = date.today().isoformat()
-    index[name] = {"desc": desc, "format": fmt, "created": created}
+    index[name] = {"banner": None, "symbol": None, "tags": None,
+                   "created": created, "modified": created}
     _deck_index_save(user, index)
     _deck_save(user, name, _make_deck_data(desc, fmt))
     return JSONResponse({"ok": True, "created": created})
@@ -1487,14 +1498,16 @@ async def api_deck_patch(deck_name: str, request: Request):
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
         deck_name = new_name
-    index[deck_name]["format"] = fmt
-    index[deck_name]["desc"] = desc
+    index[deck_name]["modified"] = date.today().isoformat()
     _deck_index_save(user, index)
     deck_data = _deck_load(user, deck_name)
-    if deck_data:
+    if deck_data is None:
+        # Deck file missing — rebuild it so format/desc aren't silently lost
+        deck_data = _make_deck_data(desc, fmt)
+    else:
         deck_data["format"] = fmt
         deck_data["desc"] = desc
-        _deck_save(user, deck_name, deck_data)
+    _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})
 
 
