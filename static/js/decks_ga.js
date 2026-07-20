@@ -591,6 +591,7 @@ function dgaFlipMove(mutate) {
     for (const el of els) {
         if (!el.isConnected) continue;
         const f = first.get(el);
+        if (!f || (f.width === 0 && f.height === 0)) continue; // was hidden — no origin to slide from
         const l = el.getBoundingClientRect();
         const dx = f.left - l.left, dy = f.top - l.top;
         if (!dx && !dy) continue;
@@ -633,14 +634,14 @@ function dgaMovePlaceholder(grid, refNode, e) {
         // follows in proportion — exact tile dimensions, immune to page zoom
         dgaPlaceholder.style.aspectRatio = dgaDragTileAspect;
     }
-    const target = refNode || grid.querySelector('.inv-card-add-tile');
+    let target = refNode || grid.querySelector('.inv-card-add-tile');
+    // Normalize past the hidden source tile so "before it" and "after it"
+    // are the same DOM position as well as the same visual position
+    if (target === dgaDragCard.tile) target = target.nextSibling;
     if (target === dgaPlaceholder) return; // hovering just left of the gap — same position
-    if (dgaPlaceholder.parentNode === grid && dgaPlaceholder.nextSibling === target) return; // already there
-    // A gap directly beside the dragged card is a no-op position — close instead
-    if (target === dgaDragCard.tile || (target && target.previousSibling === dgaDragCard.tile)) {
-        if (dgaPlaceholder.isConnected) dgaFlipMove(() => dgaPlaceholder.remove());
-        return;
-    }
+    let effectiveNext = dgaPlaceholder.nextSibling;
+    if (effectiveNext === dgaDragCard.tile) effectiveNext = effectiveNext.nextSibling;
+    if (dgaPlaceholder.parentNode === grid && effectiveNext === target) return; // already there
     dgaFlipMove(() => grid.insertBefore(dgaPlaceholder, target));
 }
 
@@ -659,7 +660,7 @@ function dgaCommitFromPlaceholder() {
     dgaCommitCardMove(toSection, index);
 }
 
-async function dgaCommitCardMove(toSection, index) {
+function dgaCommitCardMove(toSection, index) {
     if (!dgaDragCard || !activeDeck) return;
     const {cardId, fromSection} = dgaDragCard;
 
@@ -672,29 +673,41 @@ async function dgaCommitCardMove(toSection, index) {
         if (currentIndex === index) return;
     }
 
-    try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/move`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({card_id: cardId, from_section: fromSection, to_section: toSection, index})
-        });
-        if (!res.ok) return;
-
-        // Mirror the server-side move locally, then re-render
-        if (sections[fromSection] && cardId in sections[fromSection]) {
-            let qty = sections[fromSection][cardId];
-            delete sections[fromSection][cardId];
-            if (cardId in (sections[toSection] || {})) {
-                qty += sections[toSection][cardId];
-                delete sections[toSection][cardId];
-            }
-            const items = Object.entries(sections[toSection] || {});
-            items.splice(Math.max(0, Math.min(index, items.length)), 0, [cardId, qty]);
-            sections[toSection] = Object.fromEntries(items);
+    // Optimistic: apply the move locally and render the final order NOW —
+    // synchronously, before dragend fires — so no restore animation or
+    // old-order frame ever shows. The server call runs in the background.
+    if (sections[fromSection] && cardId in sections[fromSection]) {
+        let qty = sections[fromSection][cardId];
+        delete sections[fromSection][cardId];
+        if (cardId in (sections[toSection] || {})) {
+            qty += sections[toSection][cardId];
+            delete sections[toSection][cardId];
         }
+        const items = Object.entries(sections[toSection] || {});
+        items.splice(Math.max(0, Math.min(index, items.length)), 0, [cardId, qty]);
+        sections[toSection] = Object.fromEntries(items);
+    }
+    renderDeckSections(activeDeckData, false);
+
+    fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/move`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({card_id: cardId, from_section: fromSection, to_section: toSection, index})
+    }).then(res => {
+        if (!res.ok) dgaReloadActiveDeck(); // server refused — restore truth
+    }).catch(() => dgaReloadActiveDeck());
+}
+
+// Refetch the active deck and re-render (recovery after a failed move)
+async function dgaReloadActiveDeck() {
+    if (!activeDeck) return;
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`);
+        if (!res.ok) return;
+        activeDeckData = await res.json();
         renderDeckSections(activeDeckData, false);
     } catch {
-        console.error('Failed to move card');
+        console.error('Failed to reload deck');
     }
 }
 
@@ -958,11 +971,28 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
         e.dataTransfer.setDragImage(ghost, rect.width / 2, rect.height / 2);
         dgaDragGhost = ghost;
         dgaDragTileAspect = `${rect.width} / ${rect.height}`;
+
+        // The source slot becomes the gap, in place: the placeholder has the
+        // card's exact footprint, so nothing shifts and no close animation
+        // plays at pickup. The gap only departs when the cursor moves it.
+        // (Deferred: hiding the source synchronously cancels the drag.)
+        setTimeout(() => {
+            if (dgaDragCard?.tile !== tile) return;
+            dgaPlaceholder = document.createElement('div');
+            dgaPlaceholder.className = 'dga-drop-placeholder';
+            dgaPlaceholder.style.aspectRatio = dgaDragTileAspect;
+            tile.parentNode.insertBefore(dgaPlaceholder, tile);
+            tile.classList.add('dga-drag-collapsed');
+        }, 0);
     });
 
     tile.addEventListener('dragend', () => {
-        // Close the gap (successful drops re-render right after)
-        dgaFlipMove(() => dgaPlaceholder?.remove());
+        // Close the gap and restore the source slot (successful drops
+        // re-render right after; cancelled drags animate the card back)
+        dgaFlipMove(() => {
+            dgaPlaceholder?.remove();
+            tile.classList.remove('dga-drag-collapsed');
+        });
         dgaPlaceholder = null;
         tile.classList.remove('dga-dragging');
         document.body.classList.remove('dga-drag-active');

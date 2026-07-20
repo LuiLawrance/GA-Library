@@ -939,7 +939,11 @@
 
 .dga-card-tile.dga-dragging {
     cursor: grabbing;
-    opacity: 0.45;
+}
+
+/* Source slot closes while its card rides the cursor */
+.dga-card-tile.dga-drag-collapsed {
+    display: none;
 }
 
 .dga-drop-placeholder {
