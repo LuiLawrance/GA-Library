@@ -2097,3 +2097,19 @@
     animation: none;
     opacity: 1;
 }
+
+/* Move modal: selected bin/section highlighting + disabled source section */
+.inv-move-bin-option.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.inv-move-bin-option:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.inv-move-section-block .inv-field-label {
+    display: block;
+    margin-bottom: 6px;
+}

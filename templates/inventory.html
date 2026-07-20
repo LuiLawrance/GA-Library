@@ -130,7 +130,7 @@
 <!-- ── Card context menu ── -->
 <div id="inv-card-context-menu" class="inv-context-menu hidden">
     <button class="inv-context-item" onclick="ctxCardMove()">
-        <span class="inv-context-icon">⇄</span> Move to Bin
+        <span class="inv-context-icon">⇄</span> Move
     </button>
     <button class="inv-context-item" onclick="ctxCardBanner()">
         <span class="inv-context-icon">🖼</span> <span id="inv-ctx-banner-label">Set as Banner</span>
@@ -141,7 +141,7 @@
 <div id="inv-move-modal" class="inv-modal-overlay hidden" onclick="closeMoveModal()">
     <div class="inv-modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
-            <span class="inv-modal-title">Move to Bin</span>
+            <span class="inv-modal-title">Move</span>
             <button class="inv-modal-close" onclick="closeMoveModal()">✕</button>
         </div>
         <div class="inv-move-card-info" id="move-card-info"></div>
@@ -154,6 +154,11 @@
             </div>
         </div>
         <div class="inv-move-bin-list" id="move-bin-list"></div>
+        <div class="inv-move-section-block hidden" id="move-section-block">
+            <label class="inv-field-label">Into section</label>
+            <div class="inv-move-bin-list" id="move-section-list"></div>
+        </div>
+        <button class="inv-modal-submit hidden" id="move-confirm-btn" onclick="confirmMoveCard()">Move</button>
         <div class="inv-move-divider"></div>
         <button class="inv-move-new-bin-btn" onclick="ctxMoveToNewBin()">
             <span>+</span> Create new bin &amp; move
@@ -301,7 +306,7 @@
                                     <span id="inv-add-section-label">Unsorted</span>
                                     <span class="dga-fmt-dropdown-arrow">&#8249;</span>
                                 </button>
-                                <div class="dga-fmt-dropdown-menu hidden" id="inv-add-section-menu"></div>
+                                <div class="dga-fmt-dropdown-menu drop-up hidden" id="inv-add-section-menu"></div>
                                 <input id="inv-add-section" type="hidden" value="Unsorted">
                             </div>
                         </div>

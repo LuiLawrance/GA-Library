@@ -2332,25 +2332,66 @@ function openMoveModal(row) {
     // Build bin list — exclude current bin
     const list = document.getElementById('move-bin-list');
     list.innerHTML = '';
+    moveTargetBin = null;
+    moveTargetSection = null;
+    document.getElementById('move-section-block').classList.add('hidden');
+    document.getElementById('move-confirm-btn').classList.add('hidden');
 
-    const otherBins = Object.entries(invBins).filter(([name]) => name !== activeBin);
-
-    if (otherBins.length === 0) {
-        list.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);opacity:0.6;padding:8px 2px;">No other bins. Create one below.</div>';
-    } else {
-        otherBins.forEach(([name, bin]) => {
-            const count = countBinEntries(bin.sections || {});
-            const btn = document.createElement('button');
-            btn.className = 'inv-move-bin-option';
-            btn.innerHTML = `
-                <span>${name}${bin.default ? ' <span style="color:var(--accent);font-size:0.65rem">(default)</span>' : ''}</span>
-                <span class="inv-move-bin-option-meta">${count} card${count !== 1 ? 's' : ''}</span>`;
-            btn.onclick = () => executeMoveCard(name);
-            list.appendChild(btn);
-        });
-    }
+    // The current bin is included — section-to-section moves within a bin
+    Object.entries(invBins).forEach(([name, bin]) => {
+        const count = countBinEntries(bin.sections || {});
+        const isCurrent = name === activeBin;
+        const btn = document.createElement('button');
+        btn.className = 'inv-move-bin-option';
+        btn.dataset.bin = name;
+        btn.innerHTML = `
+            <span>${name}${bin.default ? ' <span style="color:var(--accent);font-size:0.65rem">(default)</span>' : ''}${isCurrent ? ' <span style="color:var(--text-muted);font-size:0.65rem">(this bin)</span>' : ''}</span>
+            <span class="inv-move-bin-option-meta">${count} card${count !== 1 ? 's' : ''}</span>`;
+        btn.onclick = () => moveSelectBin(name);
+        list.appendChild(btn);
+    });
 
     document.getElementById('inv-move-modal').classList.remove('hidden');
+}
+
+let moveTargetBin = null;
+let moveTargetSection = null;
+
+function moveSelectBin(binName) {
+    moveTargetBin = binName;
+    moveTargetSection = null;
+    document.querySelectorAll('#move-bin-list .inv-move-bin-option')
+        .forEach(b => b.classList.toggle('active', b.dataset.bin === binName));
+
+    // Build the section list for the chosen bin
+    const sections = Object.keys(invBins[binName]?.sections || {});
+    const options = sections.length ? sections : ['Unsorted'];
+    const secList = document.getElementById('move-section-list');
+    secList.innerHTML = '';
+    options.forEach(sec => {
+        const isSource = binName === activeBin && sec === moveRow?.section;
+        const btn = document.createElement('button');
+        btn.className = 'inv-move-bin-option';
+        btn.dataset.section = sec;
+        btn.disabled = isSource;
+        btn.innerHTML = `<span>${sec}${isSource ? ' <span style="color:var(--text-muted);font-size:0.65rem">(current)</span>' : ''}</span>`;
+        if (!isSource) btn.onclick = () => moveSelectSection(sec);
+        secList.appendChild(btn);
+    });
+    document.getElementById('move-section-block').classList.remove('hidden');
+    document.getElementById('move-confirm-btn').classList.add('hidden');
+}
+
+function moveSelectSection(sectionName) {
+    moveTargetSection = sectionName;
+    document.querySelectorAll('#move-section-list .inv-move-bin-option')
+        .forEach(b => b.classList.toggle('active', b.dataset.section === sectionName));
+    document.getElementById('move-confirm-btn').classList.remove('hidden');
+}
+
+function confirmMoveCard() {
+    if (!moveTargetBin || !moveTargetSection) return;
+    executeMoveCard(moveTargetBin, moveTargetSection);
 }
 
 function closeMoveModal() {
@@ -2358,9 +2399,11 @@ function closeMoveModal() {
     moveRow = null;
 }
 
-async function executeMoveCard(targetBin) {
+async function executeMoveCard(targetBin, targetSection = null) {
     if (!moveRow || !activeBin) return;
     const {card_id, edition_id, foil_id, section} = moveRow;
+    targetSection = targetSection || section; // legacy path: same-named section
+    if (targetBin === activeBin && targetSection === section) return; // true no-op
     const maxQty = moveRow.quantity;
     const inputVal = parseInt(document.getElementById('move-qty')?.value);
     const quantity = (!inputVal || inputVal >= maxQty) ? maxQty : Math.max(1, inputVal);
@@ -2373,7 +2416,7 @@ async function executeMoveCard(targetBin) {
         const addRes = await fetch('/api/inventory/card', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({bin: targetBin, section, card_id, edition_id, foil_id, quantity})
+            body: JSON.stringify({bin: targetBin, section: targetSection, card_id, edition_id, foil_id, quantity})
         });
 
         if (!addRes.ok) throw new Error('Failed to add to target bin');
@@ -2413,7 +2456,7 @@ async function executeMoveCard(targetBin) {
 
         const tgt = invBins[targetBin];
         tgt.sections ??= {};
-        const tgtCards = tgt.sections[section] ??= {};
+        const tgtCards = tgt.sections[targetSection] ??= {};
         if (!tgtCards[card_id]) tgtCards[card_id] = {};
         if (!tgtCards[card_id][edition_id]) tgtCards[card_id][edition_id] = {};
         const existing = tgtCards[card_id][edition_id][foil_id] || 0;
@@ -2422,7 +2465,12 @@ async function executeMoveCard(targetBin) {
         if (!partial) binCardRows = binCardRows.filter(r => !(r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id && r.section === section));
 
         closeMoveModal();
-        renderBinCards();
+        if (targetBin === activeBin) {
+            // Same-bin section move: rebuild rows so the card appears in its new section
+            await enrichAndRenderBinCards(invBins[activeBin]);
+        } else {
+            renderBinCards();
+        }
         populateFilterMenus();
 
     } catch (err) {
