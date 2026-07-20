@@ -4,6 +4,15 @@
     padding: 0;
 }
 
+/* The UI was designed on a 2K (2560px) monitor. On smaller viewports,
+   scale everything down to 90% — equivalent to the browser's own 90% zoom —
+   so 1080p displays match the intended proportions automatically. */
+@media (max-width: 2100px) {
+    html {
+        zoom: 0.9;
+    }
+}
+
 :root {
     --bg: #1a1a1a;
     --bg-card: #222222;
