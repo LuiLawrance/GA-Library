@@ -2074,6 +2074,8 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, 255px);
     gap: 14px;
+    align-content: start;
+    justify-content: center;
 }
 
 .inv-section-grid.inv-drop-target {
@@ -2087,4 +2089,11 @@
     color: var(--text);
     text-align: center;
     outline: none;
+}
+
+/* Drag-triggered re-renders skip the tile fan reveal */
+.inv-no-anim .inv-card-tile,
+.inv-no-anim .inv-card-add-tile {
+    animation: none;
+    opacity: 1;
 }

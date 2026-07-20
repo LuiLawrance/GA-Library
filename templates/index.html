@@ -50,6 +50,27 @@
     A Lawrance Lui project
 </footer>
 
+<!-- Global delete-confirmation modal -->
+<div id="app-confirm-modal" class="inv-modal-overlay hidden" onclick="appConfirmResolve(false)">
+    <div class="inv-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title" id="app-confirm-title">Confirm</span>
+            <button class="inv-modal-close" onclick="appConfirmResolve(false)">✕</button>
+        </div>
+        <div class="inv-move-card-info" id="app-confirm-message"></div>
+        <div class="inv-modal-field">
+            <label class="inv-field-label" for="app-confirm-input">Type <b>confirm</b> to proceed</label>
+            <input type="text" class="inv-modal-input" id="app-confirm-input"
+                   placeholder="confirm" autocomplete="off"
+                   oninput="appConfirmValidate()" onkeydown="appConfirmKeydown(event)">
+        </div>
+        <div class="inv-modal-actions">
+            <button class="inv-modal-danger" id="app-confirm-btn" onclick="appConfirmResolve(true)" disabled>Delete
+            </button>
+        </div>
+    </div>
+</div>
+
 <script src="/static/js/drawer.js"></script>
 <script src="/static/js/login.js"></script>
 <script src="/static/js/tiles.js"></script>

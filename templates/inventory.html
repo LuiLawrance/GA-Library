@@ -365,10 +365,12 @@
         </div>
         <div id="import-panel">
             <div class="inv-label" style="margin-bottom:6px;">Paste your list below</div>
-            <div class="inv-import-format-hint">Format: <code>4x Card Name (SET) #42 Foil Kind</code></div>
+            <div class="inv-import-format-hint">Format: <code>4x Card Name (SET) #42 Foil Kind</code> — group into
+                sections with <code># Section Name</code> headers (headerless lines land in "Imported")
+            </div>
             <div class="inv-textarea-wrap">
                 <textarea id="import-textarea" class="inv-import-textarea"
-                          placeholder="4x Merlin, Unbound Sage (DOA) #42 Nonfoil&#10;1x Silvie, Loved by All (DOA) #1 Foil"></textarea>
+                          placeholder="# Binder&#10;4x Merlin, Unbound Sage (DOA) #42 Nonfoil&#10;&#10;# Trades&#10;1x Silvie, Loved by All (DOA) #1 Foil"></textarea>
             </div>
             <div class="inv-import-footer">
                 <button class="inv-modal-submit" id="import-submit-btn" onclick="submitImport()">Import</button>

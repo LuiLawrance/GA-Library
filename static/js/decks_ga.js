@@ -216,7 +216,7 @@ async function dgaCtxDelete() {
     const name = dgaCtxTargetDeck;
     dgaCloseContextMenu();
     if (!name) return;
-    if (!confirm(`Delete deck "${name}"? Cards inside will be removed.`)) return;
+    if (!await appConfirm(`Delete deck "${name}"? Cards inside will be removed.`, {title: 'Delete Deck'})) return;
 
     try {
         const res = await fetch(`/api/decks/${encodeURIComponent(name)}`, {method: 'DELETE'});
@@ -1401,7 +1401,7 @@ async function submitAddSection() {
 
 async function submitDeleteSection(sectionName) {
     if (!activeDeck) return;
-    if (!confirm(`Delete section "${sectionName}" and all its cards?`)) return;
+    if (!await appConfirm(`Delete section "${sectionName}" and all its cards?`, {title: 'Delete Section'})) return;
 
     try {
         const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}`, {method: 'DELETE'});
@@ -1470,7 +1470,7 @@ async function submitDeckSettings() {
 
 async function submitDeleteDeck() {
     if (!activeDeck) return;
-    if (!confirm(`Delete deck "${activeDeck}"? Cards inside will be removed.`)) return;
+    if (!await appConfirm(`Delete deck "${activeDeck}"? Cards inside will be removed.`, {title: 'Delete Deck'})) return;
 
     try {
         const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {method: 'DELETE'});

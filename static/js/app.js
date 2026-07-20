@@ -349,3 +349,44 @@ document.addEventListener('keydown', e => {
     await checkAuth();
     await navigate(window.location.pathname + window.location.search, false);
 })();
+// ── Global confirmation modal (replaces browser confirm()) ──
+let _appConfirmResolver = null;
+
+function appConfirm(message, {title = 'Confirm Delete', confirmLabel = 'Delete'} = {}) {
+    document.getElementById('app-confirm-title').textContent = title;
+    document.getElementById('app-confirm-message').textContent = message;
+    document.getElementById('app-confirm-btn').textContent = confirmLabel;
+    // Type-to-confirm gate: reset on every open
+    const input = document.getElementById('app-confirm-input');
+    input.value = '';
+    document.getElementById('app-confirm-btn').disabled = true;
+    document.getElementById('app-confirm-modal').classList.remove('hidden');
+    setTimeout(() => input.focus(), 60);
+    return new Promise(resolve => {
+        _appConfirmResolver = resolve;
+    });
+}
+
+function appConfirmValidate() {
+    const ok = document.getElementById('app-confirm-input').value.trim().toLowerCase() === 'confirm';
+    document.getElementById('app-confirm-btn').disabled = !ok;
+    return ok;
+}
+
+function appConfirmKeydown(e) {
+    if (e.key === 'Enter' && appConfirmValidate()) appConfirmResolve(true);
+}
+
+function appConfirmResolve(result) {
+    // The gate is the last line of defense — never resolve true without it
+    if (result && !appConfirmValidate()) return;
+    document.getElementById('app-confirm-modal').classList.add('hidden');
+    _appConfirmResolver?.(result);
+    _appConfirmResolver = null;
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !document.getElementById('app-confirm-modal')?.classList.contains('hidden')) {
+        appConfirmResolve(false);
+    }
+});

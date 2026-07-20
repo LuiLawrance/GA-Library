@@ -1,4 +1,4 @@
-from api_ga import _api_search, _format_search, _sort_collector_number, JSON_INFO, JSON_SLUGS, JSON_THEMA, \
+from api_ga import _api_search, _format_search, _sort_collector_number, _update_slug, JSON_INFO, JSON_SLUGS, JSON_THEMA, \
     set_search, UPDATE_THRESHOLD
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -167,7 +167,7 @@ async def api_cards_search(request: Request, q: str = ""):
 
         # ── Step 1: API call ──
         already_found = {c["card_id"] for c in cards}
-        card_data = _api_search(_format_search(q))
+        card_data = _api_search_variants(q)
 
         if card_data:
             with slug_file.open("r", encoding="utf-8") as f:
@@ -712,6 +712,29 @@ async def api_inv_slugs():
         return JSONResponse(json.load(f))
 
 
+def _api_search_variants(card_name: str):
+    """Live API lookup trying slug variants. Our slugs keep intra-word
+    hyphens (throne-keeper-bullfrog) but some official GATCG slugs drop
+    them (thronekeeper-bullfrog), so retry with hyphens stripped from
+    the name before formatting.
+
+    When an alternate slug hits, the card must ALSO be registered under
+    our canonical slug — api_ga stores whichever slug the fetch used, and
+    every local lookup afterward searches by the canonical one."""
+    canonical = _format_search(card_name)
+    candidates = [canonical]
+    dehyphenated = _format_search(card_name.replace("-", ""))
+    if dehyphenated not in candidates:
+        candidates.append(dehyphenated)
+    for slug in candidates:
+        result = _api_search(slug)
+        if result:
+            if slug != canonical:
+                _update_slug(canonical, result)
+            return result
+    return None
+
+
 def _build_collector_map() -> dict:
     """edition_id → collector_number, across all set files."""
     sets_dir = "DATA_GA/SETS_GA"
@@ -884,20 +907,25 @@ def _bin_import_resolve_line(raw_line: str, info_data: dict, slug_data: dict, se
     if not edition_id:
         return {"line": raw_line, "ok": False, "error": f"Edition not found: {set_prefix}"}
 
-    # Resolve foil_id
+    # Resolve foil_id — normalize underscores/spaces so kinds like
+    # "ghost_foil" match their exported "Ghost Foil" label round-trip
+    def _norm_kind(s):
+        return (s or "").strip().lower().replace("_", " ")
+
+    foil_kind_norm = _norm_kind(foil_kind_raw)
     edition_foils = all_editions[edition_id].get("foils", {})
     foil_id = None
 
     for fid, finfo in edition_foils.items():
-        kind = finfo.get("kind", "").lower()
-        if foil_kind_raw in ("nonfoil", "normal") and kind in ("nonfoil", "normal"):
+        kind = _norm_kind(finfo.get("kind"))
+        if foil_kind_norm in ("nonfoil", "normal") and kind in ("nonfoil", "normal"):
             foil_id = fid
             break
-        if kind == foil_kind_raw:
+        if kind == foil_kind_norm:
             foil_id = fid
             break
         for vid, vinfo in finfo.get("variants", {}).items():
-            if vinfo.get("kind", "").lower() == foil_kind_raw:
+            if _norm_kind(vinfo.get("kind")) == foil_kind_norm:
                 foil_id = vid
                 break
         if foil_id:
@@ -1022,7 +1050,11 @@ async def api_bin_import_resolve(bin_name: str, request: Request):
     if not slug:
         return JSONResponse({"ok": False, "found": False, "line": raw_line, "error": "Missing slug"})
 
-    api_result = _api_search(slug)
+    # Look up by name (with slug variants) — the local store still keys the
+    # card under OUR canonical slug regardless of which variant the API needed
+    line_match = _BIN_IMPORT_LINE_RE.match(raw_line.strip())
+    lookup_name = line_match.group(2).strip() if line_match else slug
+    api_result = _api_search_variants(lookup_name)
 
     info_file = new_json(JSON_INFO)
     slug_file = new_json(JSON_SLUGS)
@@ -1570,7 +1602,7 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
     card_id = slug_data[slug]["card_id"] if slug in slug_data else None
 
     if not card_id:
-        api_result = _api_search(slug)
+        api_result = _api_search_variants(card_name)
         if api_result:
             with slug_file.open("r", encoding="utf-8") as f:
                 slug_data = json.load(f)

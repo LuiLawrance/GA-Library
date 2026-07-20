@@ -401,9 +401,10 @@ async function enrichAndRenderBinCards(bin) {
     renderBinCards();
 }
 
-function renderBinCards() {
+function renderBinCards(animate = true) {
     const grid = document.getElementById('inv-card-grid');
     if (!grid) return;
+    grid.classList.toggle('inv-no-anim', !animate);
 
     const filter = document.getElementById('inv-card-filter')?.value?.toLowerCase() || '';
     const sort = binFilters.sort || 'collector';
@@ -1010,7 +1011,7 @@ function invStartSectionRename(labelEl, sectionName) {
 async function invDeleteSection(sectionName) {
     if (!activeBin) return;
     const count = binCardRows.filter(r => r.section === sectionName).length;
-    if (count > 0 && !confirm(`Delete section "${sectionName}" and its ${count} card entr${count !== 1 ? 'ies' : 'y'}?`)) return;
+    if (count > 0 && !await appConfirm(`Delete section "${sectionName}" and its ${count} card entr${count !== 1 ? 'ies' : 'y'}?`, {title: 'Delete Section'})) return;
     try {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}`, {
             method: 'DELETE'
@@ -1118,7 +1119,7 @@ function invCommitSectionMove(row, toSection) {
     } else {
         row.section = toSection;
     }
-    renderBinCards();
+    renderBinCards(false);
 
     fetch('/api/inventory/card/move', {
         method: 'POST',
@@ -1765,7 +1766,7 @@ async function ctxDelete() {
     closeBinContextMenu();
 
     if (invBins[name]?.default) return;
-    if (!confirm(`Delete bin "${name}"? All cards inside will be removed.`)) return;
+    if (!await appConfirm(`Delete bin "${name}"? All cards inside will be removed.`, {title: 'Delete Bin'})) return;
 
     try {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(name)}`, {method: 'DELETE'});
@@ -1955,7 +1956,7 @@ async function submitBinSettings() {
 
 async function deleteBin() {
     if (invBins[activeBin]?.default) return;
-    if (!confirm(`Delete bin "${activeBin}"? Cards inside will be removed.`)) return;
+    if (!await appConfirm(`Delete bin "${activeBin}"? Cards inside will be removed.`, {title: 'Delete Bin'})) return;
     try {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {method: 'DELETE'});
         if (res.ok) {

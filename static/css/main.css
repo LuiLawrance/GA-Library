@@ -197,3 +197,22 @@ body {
     opacity: 0;
     padding: 0 32px;
 }
+
+/* ── Global confirm modal ── */
+
+#app-confirm-modal .inv-modal-actions {
+    display: block;
+}
+
+#app-confirm-btn {
+    width: 100%;
+    transition: opacity 0.2s ease, filter 0.2s ease, border-color 0.2s, background 0.2s;
+}
+
+/* Darkened/inert until "confirm" is typed */
+#app-confirm-btn:disabled {
+    opacity: 0.35;
+    filter: grayscale(0.6) brightness(0.7);
+    cursor: not-allowed;
+    pointer-events: none;
+}
