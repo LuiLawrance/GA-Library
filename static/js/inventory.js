@@ -93,7 +93,7 @@ function renderBinGrid() {
 }
 
 function buildBinTile(name, bin, index, total = 1) {
-    const count = countBinEntries(bin.cards || {});
+    const count = countBinEntries(bin.sections || {});
     const tile = document.createElement('div');
     tile.className = `inv-bin-tile${bin.default ? ' default-bin' : ''}`;
     const maxDelay = 400;
@@ -122,12 +122,13 @@ function buildBinTile(name, bin, index, total = 1) {
     return tile;
 }
 
-function countBinEntries(cards) {
+function countBinEntries(sections) {
     let total = 0;
-    for (const editions of Object.values(cards))
-        for (const foils of Object.values(editions))
-            for (const qty of Object.values(foils))
-                total += qty;
+    for (const cards of Object.values(sections))
+        for (const editions of Object.values(cards))
+            for (const foils of Object.values(editions))
+                for (const qty of Object.values(foils))
+                    total += qty;
     return total;
 }
 
@@ -333,10 +334,10 @@ function closeBinDetail() {
 }
 
 async function enrichAndRenderBinCards(bin) {
-    const cards = bin.cards || {};
+    const sections = bin.sections || {};
     const rows = [];
 
-    if (Object.keys(cards).length === 0) {
+    if (Object.keys(sections).length === 0) {
         binCardRows = [];
         renderBinCards();
         return;
@@ -352,43 +353,45 @@ async function enrichAndRenderBinCards(bin) {
         const slugData = slugRes.ok ? await slugRes.json() : {};
         const collectorData = collectorRes.ok ? await collectorRes.json() : {};
 
-        for (const [card_id, editions] of Object.entries(cards)) {
-            const cardInfo = infoData[card_id] || {};
-            const slugEntry = Object.values(slugData).find(v => v.card_id === card_id);
-            const cardName = slugEntry?.name || card_id;
+        for (const [sectionName, cards] of Object.entries(sections))
+            for (const [card_id, editions] of Object.entries(cards)) {
+                const cardInfo = infoData[card_id] || {};
+                const slugEntry = Object.values(slugData).find(v => v.card_id === card_id);
+                const cardName = slugEntry?.name || card_id;
 
-            for (const [edition_id, foils] of Object.entries(editions)) {
-                const editionInfo = cardInfo.editions?.[edition_id] || {};
-                const foilsData = editionInfo.foils || {};
+                for (const [edition_id, foils] of Object.entries(editions)) {
+                    const editionInfo = cardInfo.editions?.[edition_id] || {};
+                    const foilsData = editionInfo.foils || {};
 
-                for (const [foil_id, quantity] of Object.entries(foils)) {
-                    let foilKind = 'Standard';
-                    let foilKindRaw = '';
-                    if (foilsData[foil_id]) {
-                        foilKindRaw = foilsData[foil_id].kind || '';
-                        foilKind = toFoilLabel(foilKindRaw) || 'Standard';
-                    } else {
-                        for (const finfo of Object.values(foilsData)) {
-                            if (finfo.variants?.[foil_id]) {
-                                foilKindRaw = finfo.variants[foil_id].kind || '';
-                                foilKind = toFoilLabel(foilKindRaw) || 'Variant';
-                                break;
+                    for (const [foil_id, quantity] of Object.entries(foils)) {
+                        let foilKind = 'Standard';
+                        let foilKindRaw = '';
+                        if (foilsData[foil_id]) {
+                            foilKindRaw = foilsData[foil_id].kind || '';
+                            foilKind = toFoilLabel(foilKindRaw) || 'Standard';
+                        } else {
+                            for (const finfo of Object.values(foilsData)) {
+                                if (finfo.variants?.[foil_id]) {
+                                    foilKindRaw = finfo.variants[foil_id].kind || '';
+                                    foilKind = toFoilLabel(foilKindRaw) || 'Variant';
+                                    break;
+                                }
                             }
                         }
+                        rows.push({
+                            card_id, edition_id, foil_id, quantity,
+                            section: sectionName,
+                            cardName,
+                            setPrefix: editionInfo.set_prefix || '',
+                            rarity: editionInfo.rarity,
+                            foilKind,
+                            foilKindRaw: foilKindRaw.toLowerCase(),
+                            element: cardInfo.element || '',
+                            collectorNumber: collectorData[edition_id] || ''
+                        });
                     }
-                    rows.push({
-                        card_id, edition_id, foil_id, quantity,
-                        cardName,
-                        setPrefix: editionInfo.set_prefix || '',
-                        rarity: editionInfo.rarity,
-                        foilKind,
-                        foilKindRaw: foilKindRaw.toLowerCase(),
-                        element: cardInfo.element || '',
-                        collectorNumber: collectorData[edition_id] || ''
-                    });
                 }
             }
-        }
     } catch {
         console.error('Failed to enrich bin cards');
     }
@@ -443,33 +446,69 @@ function renderBinCards() {
 
     grid.innerHTML = '';
 
-    if (rows.length === 0 && !filter) {
-        // Empty state + add tile
+    const sectionNames = Object.keys(invBins[activeBin]?.sections || {});
+    const anyFilterActive = !!(filter || binFilters.set || binFilters.element || binFilters.rarity || binFilters.foil);
+
+    if (sectionNames.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'inv-empty-grid';
-        empty.innerHTML = `<span class="inv-empty-icon">⬡</span><p>No cards in this bin.</p><p class="inv-empty-sub">Click the + tile to add cards.</p>`;
+        empty.innerHTML = `<span class="inv-empty-icon">⬡</span><p>No sections yet.</p><p class="inv-empty-sub">Add a section to get started.</p>`;
         grid.appendChild(empty);
     } else {
-        rows.forEach((row, i) => {
-            const tile = buildInvCardTile(row, i, rows.length);
-            const input = tile.querySelector('.inv-tile-qty-input');
-            if (input) scaleQtyFont(input);
-            grid.appendChild(tile);
-        });
+        for (const sectionName of sectionNames) {
+            const sectionRows = rows.filter(r => r.section === sectionName);
+            if (anyFilterActive && sectionRows.length === 0) continue;
+
+            const block = document.createElement('div');
+            block.className = 'dga-section-block';
+
+            const sectionQty = sectionRows.reduce((s, r) => s + r.quantity, 0);
+            const header = document.createElement('div');
+            header.className = 'dga-section-header';
+            header.innerHTML = `
+                <span class="dga-section-label-group">
+                    <span class="dga-section-label dga-section-label-editable" title="Click to rename">${sectionName}</span><span class="dga-section-edit-icon">✎</span>
+                </span>
+                <span class="dga-section-count">${sectionQty} card${sectionQty !== 1 ? 's' : ''}</span>
+                <div class="dga-section-header-actions">
+                    <button class="dga-section-action-btn dga-section-action-delete" title="Delete section">✕</button>
+                </div>`;
+            const label = header.querySelector('.dga-section-label-editable');
+            const pencil = header.querySelector('.dga-section-edit-icon');
+            label.onclick = () => invStartSectionRename(label, sectionName);
+            pencil.onclick = () => invStartSectionRename(label, sectionName);
+            header.querySelector('.dga-section-action-delete').onclick = () => invDeleteSection(sectionName);
+            block.appendChild(header);
+
+            const sectionGrid = document.createElement('div');
+            sectionGrid.className = 'inv-section-grid';
+            sectionGrid.dataset.section = sectionName;
+            invWireSectionDrop(sectionGrid);
+
+            sectionRows.forEach((row, i) => {
+                const tile = buildInvCardTile(row, i, sectionRows.length);
+                const input = tile.querySelector('.inv-tile-qty-input');
+                if (input) scaleQtyFont(input);
+                sectionGrid.appendChild(tile);
+            });
+
+            const addTile = document.createElement('div');
+            addTile.className = 'inv-card-add-tile';
+            addTile.style.animationDelay = `${Math.min(sectionRows.length * 40, 640)}ms`;
+            addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
+            addTile.onclick = () => openAddModal(sectionName);
+            sectionGrid.appendChild(addTile);
+
+            block.appendChild(sectionGrid);
+            grid.appendChild(block);
+        }
     }
 
-    // Observe grid for new tiles and watch existing indicators
-    _gridObserver.disconnect();
-    _gridObserver.observe(grid, {childList: true});
-    _observeIndicators();
+    grid.appendChild(invBuildAddSectionButton());
 
-    // Add card tile always at end
-    const addTile = document.createElement('div');
-    addTile.className = 'inv-card-add-tile';
-    addTile.style.animationDelay = `${Math.min(rows.length * 40, 640)}ms`;
-    addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
-    addTile.onclick = openAddModal;
-    grid.appendChild(addTile);
+    _gridObserver.disconnect();
+    _gridObserver.observe(grid, {childList: true, subtree: true});
+    _observeIndicators();
 }
 
 // ── Bin filter state ──
@@ -616,7 +655,8 @@ async function tileQtySet(input) {
         const cardId = input.dataset.cardId;
         const editionId = input.dataset.editionId;
         const foilId = input.dataset.foilId;
-        const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId);
+        const section = input.dataset.section;
+        const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId && r.section === section);
         const trueOriginal = pendingQtyChanges.has(input)
             ? pendingQtyChanges.get(input)
             : (row?.quantity ?? val);
@@ -728,20 +768,21 @@ async function applyQtyChange() {
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     bin: activeBin,
+                    section: c.section,
                     card_id: c.cardId,
                     edition_id: c.editionId,
                     foil_id: c.foilId,
                     quantity: c.quantity
                 })
             });
-            if (invBins[activeBin]?.cards?.[c.cardId]?.[c.editionId]) {
-                invBins[activeBin].cards[c.cardId][c.editionId][c.foilId] = c.quantity;
+            if (invBins[activeBin]?.sections?.[c.section]?.[c.cardId]?.[c.editionId]) {
+                invBins[activeBin].sections[c.section][c.cardId][c.editionId][c.foilId] = c.quantity;
             }
-            const row = binCardRows.find(r => r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId);
+            const row = binCardRows.find(r => r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId && r.section === c.section);
             if (row) row.quantity = c.quantity;
             // Update badge on the existing tile
             const tile = document.querySelector(
-                `.inv-card-tile[data-card-id="${c.cardId}"][data-edition-id="${c.editionId}"][data-foil-id="${c.foilId}"]`
+                `.inv-card-tile[data-card-id="${c.cardId}"][data-edition-id="${c.editionId}"][data-foil-id="${c.foilId}"][data-section="${c.section}"]`
             );
             const badge = tile?.querySelector('.inv-qty-badge');
             if (badge) badge.textContent = `x${c.quantity}`;
@@ -755,13 +796,19 @@ async function applyQtyChange() {
             await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, card_id: c.cardId, edition_id: c.editionId, foil_id: c.foilId})
+                body: JSON.stringify({
+                    bin: activeBin,
+                    section: c.section,
+                    card_id: c.cardId,
+                    edition_id: c.editionId,
+                    foil_id: c.foilId
+                })
             });
-            const bin = invBins[activeBin];
-            delete bin.cards[c.cardId]?.[c.editionId]?.[c.foilId];
-            if (bin.cards[c.cardId]?.[c.editionId] && !Object.keys(bin.cards[c.cardId][c.editionId]).length) delete bin.cards[c.cardId][c.editionId];
-            if (bin.cards[c.cardId] && !Object.keys(bin.cards[c.cardId]).length) delete bin.cards[c.cardId];
-            binCardRows = binCardRows.filter(r => !(r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId));
+            const cards = invBins[activeBin].sections?.[c.section] || {};
+            delete cards[c.cardId]?.[c.editionId]?.[c.foilId];
+            if (cards[c.cardId]?.[c.editionId] && !Object.keys(cards[c.cardId][c.editionId]).length) delete cards[c.cardId][c.editionId];
+            if (cards[c.cardId] && !Object.keys(cards[c.cardId]).length) delete cards[c.cardId];
+            binCardRows = binCardRows.filter(r => !(r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId && r.section === c.section));
         } catch {
             console.error('Failed to remove card');
         }
@@ -798,6 +845,7 @@ async function _commitQtyImmediate(input, staged = false) {
     const cardId = input.dataset.cardId;
     const editionId = input.dataset.editionId;
     const foilId = input.dataset.foilId;
+    const section = input.dataset.section;
 
     // Update qty badge immediately
     const tile = input.closest('.inv-card-tile');
@@ -812,13 +860,13 @@ async function _commitQtyImmediate(input, staged = false) {
             await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, card_id: cardId, edition_id: editionId, foil_id: foilId})
+                body: JSON.stringify({bin: activeBin, section, card_id: cardId, edition_id: editionId, foil_id: foilId})
             });
-            const bin = invBins[activeBin];
-            delete bin.cards[cardId]?.[editionId]?.[foilId];
-            if (bin.cards[cardId]?.[editionId] && !Object.keys(bin.cards[cardId][editionId]).length) delete bin.cards[cardId][editionId];
-            if (bin.cards[cardId] && !Object.keys(bin.cards[cardId]).length) delete bin.cards[cardId];
-            binCardRows = binCardRows.filter(r => !(r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId));
+            const cards = invBins[activeBin].sections?.[section] || {};
+            delete cards[cardId]?.[editionId]?.[foilId];
+            if (cards[cardId]?.[editionId] && !Object.keys(cards[cardId][editionId]).length) delete cards[cardId][editionId];
+            if (cards[cardId] && !Object.keys(cards[cardId]).length) delete cards[cardId];
+            binCardRows = binCardRows.filter(r => !(r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId && r.section === section));
             tile?.remove();
             renderBinCards();
         } catch {
@@ -831,12 +879,19 @@ async function _commitQtyImmediate(input, staged = false) {
         await fetch('/api/inventory/card', {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({bin: activeBin, card_id: cardId, edition_id: editionId, foil_id: foilId, quantity})
+            body: JSON.stringify({
+                bin: activeBin,
+                section,
+                card_id: cardId,
+                edition_id: editionId,
+                foil_id: foilId,
+                quantity
+            })
         });
-        if (invBins[activeBin]?.cards?.[cardId]?.[editionId]) {
-            invBins[activeBin].cards[cardId][editionId][foilId] = quantity;
+        if (invBins[activeBin]?.sections?.[section]?.[cardId]?.[editionId]) {
+            invBins[activeBin].sections[section][cardId][editionId][foilId] = quantity;
         }
-        const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId);
+        const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId && r.section === section);
         if (row) row.quantity = quantity;
         updateInvCounts();
     } catch {
@@ -854,6 +909,229 @@ function updateInvCounts() {
     if (countEl) countEl.textContent = `${binCardRows.length} card${binCardRows.length !== 1 ? 's' : ''} · ${totalQty} cop${totalQty !== 1 ? 'ies' : 'y'}`;
 }
 
+// ── Section CRUD ──
+
+function invBuildAddSectionButton() {
+    const btn = document.createElement('button');
+    btn.className = 'dga-add-section-btn';
+    btn.innerHTML = '+ Add Section';
+    btn.onclick = () => {
+        const input = document.createElement('input');
+        input.className = 'dga-add-section-btn inv-add-section-input';
+        input.placeholder = 'Section name...';
+        input.maxLength = 50;
+        btn.replaceWith(input);
+        input.focus();
+        const cancel = () => input.replaceWith(invBuildAddSectionButton());
+        input.addEventListener('keydown', async e => {
+            if (e.key === 'Escape') cancel();
+            if (e.key !== 'Enter') return;
+            const name = input.value.trim();
+            if (!name) return cancel();
+            try {
+                const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({section: name})
+                });
+                if (!res.ok) return cancel();
+                invBins[activeBin].sections[name] = {};
+                renderBinCards();
+            } catch {
+                cancel();
+            }
+        });
+        input.addEventListener('blur', cancel);
+    };
+    return btn;
+}
+
+function invStartSectionRename(labelEl, sectionName) {
+    if (labelEl.isContentEditable) return;
+    labelEl.contentEditable = 'true';
+    labelEl.classList.add('editing');
+    labelEl.focus();
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(labelEl);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    async function commit() {
+        labelEl.contentEditable = 'false';
+        labelEl.classList.remove('editing');
+        const newName = labelEl.textContent.trim();
+        if (!newName || newName === sectionName) {
+            labelEl.textContent = sectionName;
+            return;
+        }
+        if (invBins[activeBin]?.sections?.[newName] !== undefined) {
+            labelEl.textContent = sectionName;
+            return;
+        }
+        try {
+            const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}/rename`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: newName})
+            });
+            if (!res.ok) {
+                labelEl.textContent = sectionName;
+                return;
+            }
+            const bin = invBins[activeBin];
+            bin.sections = Object.fromEntries(
+                Object.entries(bin.sections).map(([k, v]) => [k === sectionName ? newName : k, v]));
+            binCardRows.forEach(r => {
+                if (r.section === sectionName) r.section = newName;
+            });
+            renderBinCards();
+        } catch {
+            labelEl.textContent = sectionName;
+        }
+    }
+
+    labelEl.addEventListener('blur', commit, {once: true});
+    labelEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            labelEl.blur();
+        }
+        if (e.key === 'Escape') {
+            labelEl.removeEventListener('blur', commit);
+            labelEl.contentEditable = 'false';
+            labelEl.classList.remove('editing');
+            labelEl.textContent = sectionName;
+        }
+    });
+}
+
+async function invDeleteSection(sectionName) {
+    if (!activeBin) return;
+    const count = binCardRows.filter(r => r.section === sectionName).length;
+    if (count > 0 && !confirm(`Delete section "${sectionName}" and its ${count} card entr${count !== 1 ? 'ies' : 'y'}?`)) return;
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) return;
+        delete invBins[activeBin].sections[sectionName];
+        binCardRows = binCardRows.filter(r => r.section !== sectionName);
+        renderBinCards();
+    } catch {
+        console.error('Failed to delete section');
+    }
+}
+
+// ── Cross-section drag (move-focused: drop a card on another section) ──
+
+let invDragRow = null;
+
+function invWireTileDrag(tile, row) {
+    tile.draggable = true;
+    const qtyBox = tile.querySelector('.inv-card-tile-qty-ctrl');
+    if (qtyBox) {
+        qtyBox.addEventListener('mousedown', e => {
+            if (e.target.closest('button, input')) tile.draggable = false;
+        });
+        document.addEventListener('mouseup', () => {
+            tile.draggable = true;
+        });
+    }
+    tile.addEventListener('dragstart', e => {
+        invDragRow = row;
+        tile.classList.add('dga-dragging');
+        document.body.classList.add('dga-drag-active');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', row.card_id);
+        const rect = tile.getBoundingClientRect();
+        const ghost = tile.cloneNode(true);
+        ghost.querySelector('.inv-card-tile-overlay')?.remove();
+        ghost.querySelector('.inv-card-tile-qty-ctrl')?.remove();
+        ghost.style.cssText = `position: fixed; top: -9999px; left: -9999px;` +
+            `width: ${rect.width}px; height: ${rect.height}px;` +
+            `margin: 0; animation: none; opacity: 1; pointer-events: none;`;
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, rect.width / 2, rect.height / 2);
+        tile._invDragGhost = ghost;
+    });
+    tile.addEventListener('dragend', () => {
+        tile.classList.remove('dga-dragging');
+        document.body.classList.remove('dga-drag-active');
+        tile._invDragGhost?.remove();
+        tile._invDragGhost = null;
+        invDragRow = null;
+        document.querySelectorAll('.inv-section-grid.inv-drop-target')
+            .forEach(g => g.classList.remove('inv-drop-target'));
+    });
+}
+
+function invWireSectionDrop(sectionGrid) {
+    sectionGrid.addEventListener('dragover', e => {
+        if (!invDragRow) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const isTarget = sectionGrid.dataset.section !== invDragRow.section;
+        document.querySelectorAll('.inv-section-grid.inv-drop-target')
+            .forEach(g => {
+                if (g !== sectionGrid) g.classList.remove('inv-drop-target');
+            });
+        sectionGrid.classList.toggle('inv-drop-target', isTarget);
+    });
+    sectionGrid.addEventListener('dragleave', e => {
+        if (!sectionGrid.contains(e.relatedTarget)) sectionGrid.classList.remove('inv-drop-target');
+    });
+    sectionGrid.addEventListener('drop', e => {
+        if (!invDragRow) return;
+        e.preventDefault();
+        sectionGrid.classList.remove('inv-drop-target');
+        invCommitSectionMove(invDragRow, sectionGrid.dataset.section);
+    });
+}
+
+function invCommitSectionMove(row, toSection) {
+    if (!activeBin || !toSection || toSection === row.section) return;
+    const fromSection = row.section;
+    const {card_id, edition_id, foil_id} = row;
+
+    // Optimistic local move
+    const sections = invBins[activeBin].sections;
+    const srcCards = sections[fromSection];
+    if (srcCards?.[card_id]?.[edition_id]?.[foil_id] !== undefined) {
+        const qty = srcCards[card_id][edition_id][foil_id];
+        delete srcCards[card_id][edition_id][foil_id];
+        if (!Object.keys(srcCards[card_id][edition_id]).length) delete srcCards[card_id][edition_id];
+        if (!Object.keys(srcCards[card_id]).length) delete srcCards[card_id];
+        const dst = sections[toSection] ??= {};
+        dst[card_id] ??= {};
+        dst[card_id][edition_id] ??= {};
+        dst[card_id][edition_id][foil_id] = (dst[card_id][edition_id][foil_id] || 0) + qty;
+    }
+    // Merge rows if the same entry already exists in the target section
+    const existingRow = binCardRows.find(r =>
+        r !== row && r.section === toSection && r.card_id === card_id &&
+        r.edition_id === edition_id && r.foil_id === foil_id);
+    if (existingRow) {
+        existingRow.quantity += row.quantity;
+        binCardRows = binCardRows.filter(r => r !== row);
+    } else {
+        row.section = toSection;
+    }
+    renderBinCards();
+
+    fetch('/api/inventory/card/move', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            bin: activeBin, card_id, edition_id, foil_id,
+            from_section: fromSection, to_section: toSection
+        })
+    }).then(res => {
+        if (!res.ok) enrichAndRenderBinCards(invBins[activeBin]);
+    }).catch(() => enrichAndRenderBinCards(invBins[activeBin]));
+}
+
 function buildInvCardTile(row, index, total = 1) {
     const rarity = rarityMapInv[row.rarity] || '';
     const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
@@ -866,6 +1144,8 @@ function buildInvCardTile(row, index, total = 1) {
     tile.dataset.cardId = row.card_id;
     tile.dataset.editionId = row.edition_id;
     tile.dataset.foilId = row.foil_id;
+    tile.dataset.section = row.section;
+    invWireTileDrag(tile, row);
 
     const uid = `${row.card_id}-${row.edition_id}-${row.foil_id}`;
 
@@ -889,6 +1169,7 @@ function buildInvCardTile(row, index, total = 1) {
                 data-card-id="${row.card_id}"
                 data-edition-id="${row.edition_id}"
                 data-foil-id="${row.foil_id}"
+                data-section="${row.section}"
                 onchange="tileQtySet(this)"
                 oninput="scaleQtyFont(this)"
                 onclick="event.stopPropagation()"
@@ -1003,7 +1284,10 @@ async function removeCardModal() {
 // ADD CARD MODAL (two-step: search → foil)
 // ═══════════════════════════════════════
 
-function openAddModal() {
+let invAddTargetSection = null;
+
+function openAddModal(sectionName = null) {
+    invAddTargetSection = sectionName;
     addModalCardId = null;
     addModalCardData = null;
     addModalEditionId = null;
@@ -1207,6 +1491,7 @@ async function submitAddCard() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 bin: activeBin,
+                section: invAddTargetSection || 'Unsorted',
                 card_id: addModalCardId,
                 edition_id: addModalEditionId,
                 foil_id: addModalFoilId,
@@ -1216,10 +1501,11 @@ async function submitAddCard() {
 
         if (res.ok) {
             const bin = invBins[activeBin];
-            if (!bin.cards[addModalCardId]) bin.cards[addModalCardId] = {};
-            if (!bin.cards[addModalCardId][addModalEditionId]) bin.cards[addModalCardId][addModalEditionId] = {};
-            const existing = bin.cards[addModalCardId][addModalEditionId][addModalFoilId] || 0;
-            bin.cards[addModalCardId][addModalEditionId][addModalFoilId] = existing + quantity;
+            const sec = bin.sections[invAddTargetSection || 'Unsorted'] ??= {};
+            if (!sec[addModalCardId]) sec[addModalCardId] = {};
+            if (!sec[addModalCardId][addModalEditionId]) sec[addModalCardId][addModalEditionId] = {};
+            const existing = sec[addModalCardId][addModalEditionId][addModalFoilId] || 0;
+            sec[addModalCardId][addModalEditionId][addModalFoilId] = existing + quantity;
 
             closeAddModal();
             await enrichAndRenderBinCards(invBins[activeBin]);
@@ -2008,7 +2294,7 @@ function openMoveModal(row) {
         list.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);opacity:0.6;padding:8px 2px;">No other bins. Create one below.</div>';
     } else {
         otherBins.forEach(([name, bin]) => {
-            const count = countBinEntries(bin.cards || {});
+            const count = countBinEntries(bin.sections || {});
             const btn = document.createElement('button');
             btn.className = 'inv-move-bin-option';
             btn.innerHTML = `
@@ -2029,7 +2315,7 @@ function closeMoveModal() {
 
 async function executeMoveCard(targetBin) {
     if (!moveRow || !activeBin) return;
-    const {card_id, edition_id, foil_id} = moveRow;
+    const {card_id, edition_id, foil_id, section} = moveRow;
     const maxQty = moveRow.quantity;
     const inputVal = parseInt(document.getElementById('move-qty')?.value);
     const quantity = (!inputVal || inputVal >= maxQty) ? maxQty : Math.max(1, inputVal);
@@ -2042,7 +2328,7 @@ async function executeMoveCard(targetBin) {
         const addRes = await fetch('/api/inventory/card', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({bin: targetBin, card_id, edition_id, foil_id, quantity})
+            body: JSON.stringify({bin: targetBin, section, card_id, edition_id, foil_id, quantity})
         });
 
         if (!addRes.ok) throw new Error('Failed to add to target bin');
@@ -2054,39 +2340,41 @@ async function executeMoveCard(targetBin) {
             srcRes = await fetch('/api/inventory/card', {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, card_id, edition_id, foil_id, quantity: remaining})
+                body: JSON.stringify({bin: activeBin, section, card_id, edition_id, foil_id, quantity: remaining})
             });
         } else {
             srcRes = await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, card_id, edition_id, foil_id})
+                body: JSON.stringify({bin: activeBin, section, card_id, edition_id, foil_id})
             });
         }
 
         if (!srcRes.ok) throw new Error('Failed to update source bin');
 
-        // Update local state
-        const srcBin = invBins[activeBin];
+        // Update local state — target lands in a same-named section (server auto-creates)
+        const srcCards = invBins[activeBin].sections?.[section] || {};
         if (partial) {
-            srcBin.cards[card_id][edition_id][foil_id] = remaining;
-            const srcRow = binCardRows.find(r => r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id);
+            if (srcCards[card_id]?.[edition_id]) srcCards[card_id][edition_id][foil_id] = remaining;
+            const srcRow = binCardRows.find(r => r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id && r.section === section);
             if (srcRow) srcRow.quantity = remaining;
         } else {
-            delete srcBin.cards[card_id]?.[edition_id]?.[foil_id];
-            if (srcBin.cards[card_id]?.[edition_id] && !Object.keys(srcBin.cards[card_id][edition_id]).length)
-                delete srcBin.cards[card_id][edition_id];
-            if (srcBin.cards[card_id] && !Object.keys(srcBin.cards[card_id]).length)
-                delete srcBin.cards[card_id];
+            delete srcCards[card_id]?.[edition_id]?.[foil_id];
+            if (srcCards[card_id]?.[edition_id] && !Object.keys(srcCards[card_id][edition_id]).length)
+                delete srcCards[card_id][edition_id];
+            if (srcCards[card_id] && !Object.keys(srcCards[card_id]).length)
+                delete srcCards[card_id];
         }
 
         const tgt = invBins[targetBin];
-        if (!tgt.cards[card_id]) tgt.cards[card_id] = {};
-        if (!tgt.cards[card_id][edition_id]) tgt.cards[card_id][edition_id] = {};
-        const existing = tgt.cards[card_id][edition_id][foil_id] || 0;
-        tgt.cards[card_id][edition_id][foil_id] = existing + quantity;
+        tgt.sections ??= {};
+        const tgtCards = tgt.sections[section] ??= {};
+        if (!tgtCards[card_id]) tgtCards[card_id] = {};
+        if (!tgtCards[card_id][edition_id]) tgtCards[card_id][edition_id] = {};
+        const existing = tgtCards[card_id][edition_id][foil_id] || 0;
+        tgtCards[card_id][edition_id][foil_id] = existing + quantity;
 
-        if (!partial) binCardRows = binCardRows.filter(r => !(r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id));
+        if (!partial) binCardRows = binCardRows.filter(r => !(r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id && r.section === section));
 
         closeMoveModal();
         renderBinCards();
@@ -2246,7 +2534,7 @@ async function submitImport() {
                 const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/resolve`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({line: item.line, slug: item.slug})
+                    body: JSON.stringify({line: item.line, slug: item.slug, section: item.section})
                 });
                 const data = await res.json();
                 if (!data.ok) resolvedFails.push({

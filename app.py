@@ -661,16 +661,25 @@ def _inv_load(username: str) -> dict:
 
     # Empty file → init default structure
     if not raw:
-        data = {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "cards": {}}}
+        data = {
+            DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "sections": {}}}
         _inv_save(username, data)
         return data
 
     # Old flat UUID-keyed structure → migrate to default bin
     first_val = next(iter(raw.values()), {})
     if isinstance(first_val, dict) and "card_id" in first_val:
-        data = {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "cards": {}}}
+        data = {
+            DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "sections": {}}}
         _inv_save(username, data)
         return data
+
+    # Defensive: every bin must expose a sections dict. Bins from the
+    # pre-section schema get an empty one (their legacy "cards" data is
+    # intentionally not migrated — the schema cutover was a clean wipe).
+    for b in raw.values():
+        if isinstance(b, dict) and "sections" not in b:
+            b["sections"] = {}
 
     return raw
 
@@ -753,8 +762,18 @@ async def api_bin_export(bin_name: str, request: Request):
     name_map = {data["card_id"]: data["name"] for data in slug_data.values()}
 
     lines = []
-    cards = inv[bin_name].get("cards", {})
+    for section_name, cards in inv[bin_name].get("sections", {}).items():
+        if not cards:
+            continue
+        lines.append(f"# {section_name}")
+        lines.extend(_bin_export_section_lines(cards, info_data, name_map, collector_map))
+        lines.append("")
 
+    return JSONResponse({"lines": [ln for ln in lines[:-1]] if lines else []})
+
+
+def _bin_export_section_lines(cards: dict, info_data: dict, name_map: dict, collector_map: dict) -> list:
+    lines = []
     for card_id, editions in cards.items():
         card_name = name_map.get(card_id, card_id)
         card_info = info_data.get(card_id, {})
@@ -781,7 +800,7 @@ async def api_bin_export(bin_name: str, request: Request):
 
                 lines.append(f"{quantity}x {card_name} ({set_prefix}) #{collector_number} {foil_kind}")
 
-    return JSONResponse({"lines": lines})
+    return lines
 
 
 def toFoilLabel(s: str) -> str:
@@ -931,11 +950,17 @@ async def api_bin_import_parse(bin_name: str, request: Request):
     resolved = []
     unresolved = []
     failed = []
+    current_section = "Imported"
 
     for raw_line in lines:
-        if not raw_line.strip():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            current_section = line.lstrip("#").strip() or current_section
             continue
         result = _bin_import_resolve_line(raw_line, info_data, slug_data, set_collector_map)
+        result["section"] = current_section
         if result.get("ok"):
             resolved.append(result)
         elif result.get("needs_lookup"):
@@ -960,15 +985,17 @@ async def api_bin_import_commit(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    cards = inv[bin_name]["cards"]
+    sections = inv[bin_name]["sections"]
 
     for item in inserts:
         card_id = item.get("card_id")
         edition_id = item.get("edition_id")
         foil_id = item.get("foil_id")
         quantity = int(item.get("quantity", 1))
+        section = item.get("section", "Imported").strip() or "Imported"
         if not card_id or not edition_id or not foil_id:
             continue
+        cards = sections.setdefault(section, {})
         cards.setdefault(card_id, {}).setdefault(edition_id, {})
         existing = cards[card_id][edition_id].get(foil_id, 0)
         cards[card_id][edition_id][foil_id] = existing + quantity
@@ -1015,7 +1042,8 @@ async def api_bin_import_resolve(bin_name: str, request: Request):
             {"ok": False, "found": True, "line": raw_line, "error": result.get("error", "Resolution failed")})
 
     # Commit immediately, same as a single-item resolve
-    cards = inv[bin_name]["cards"]
+    section = body.get("section", "Imported").strip() or "Imported"
+    cards = inv[bin_name]["sections"].setdefault(section, {})
     cards.setdefault(result["card_id"], {}).setdefault(result["edition_id"], {})
     existing = cards[result["card_id"]][result["edition_id"]].get(result["foil_id"], 0)
     cards[result["card_id"]][result["edition_id"]][result["foil_id"]] = existing + result["quantity"]
@@ -1044,7 +1072,7 @@ async def api_bin_create(request: Request):
         raise HTTPException(status_code=400, detail="Bin already exists")
 
     inv[name] = {"banner": None, "default": False, "desc": desc, "symbol": None, "tags": None,
-                 "cards": {}}
+                 "sections": {}}
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
 
@@ -1113,6 +1141,103 @@ async def api_bin_delete(bin_name: str, request: Request):
 
 # ── Card CRUD ──
 
+# ── Bin sections ──
+
+@app.post("/api/inventory/bins/{bin_name}/section")
+async def api_bin_section_add(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    section = body.get("section", "").strip()
+    if not section:
+        raise HTTPException(status_code=400, detail="Section name required")
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    if section in inv[bin_name]["sections"]:
+        raise HTTPException(status_code=400, detail="Section already exists")
+    inv[bin_name]["sections"][section] = {}
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/inventory/bins/{bin_name}/section/{section_name}")
+async def api_bin_section_delete(bin_name: str, section_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    if section_name not in inv[bin_name]["sections"]:
+        raise HTTPException(status_code=404, detail="Section not found")
+    del inv[bin_name]["sections"][section_name]
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.patch("/api/inventory/bins/{bin_name}/section/{section_name}/rename")
+async def api_bin_section_rename(bin_name: str, section_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name required")
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    sections = inv[bin_name]["sections"]
+    if section_name not in sections:
+        raise HTTPException(status_code=404, detail="Section not found")
+    if new_name in sections:
+        raise HTTPException(status_code=400, detail="Section name already taken")
+    # Rebuild dict preserving insertion order
+    inv[bin_name]["sections"] = {new_name if k == section_name else k: v for k, v in sections.items()}
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/inventory/card/move")
+async def api_inv_card_move(request: Request):
+    """Move a card entry (card+edition+foil) between sections of a bin.
+    Quantities merge if the same entry already exists in the target."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    bin_name = body.get("bin")
+    card_id = body.get("card_id")
+    edition_id = body.get("edition_id")
+    foil_id = body.get("foil_id")
+    from_section = body.get("from_section", "")
+    to_section = body.get("to_section", "")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    sections = inv[bin_name]["sections"]
+    if from_section not in sections or to_section not in sections:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    try:
+        src_cards = sections[from_section]
+        qty = src_cards[card_id][edition_id].pop(foil_id)
+        if not src_cards[card_id][edition_id]: del src_cards[card_id][edition_id]
+        if not src_cards[card_id]: del src_cards[card_id]
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Card entry not found")
+
+    dst = sections[to_section]
+    dst.setdefault(card_id, {}).setdefault(edition_id, {})
+    dst[card_id][edition_id][foil_id] = dst[card_id][edition_id].get(foil_id, 0) + qty
+
+    _inv_save(user, inv)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/inventory/card")
 async def api_card_add(request: Request):
     user = get_current_user(request)
@@ -1121,19 +1246,22 @@ async def api_card_add(request: Request):
 
     body = await request.json()
     bin_name = body.get("bin")
+    section = body.get("section", "").strip()
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
     quantity = int(body.get("quantity", 1))
 
-    if not all([bin_name, card_id, edition_id, foil_id]):
+    if not all([bin_name, section, card_id, edition_id, foil_id]):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
     inv = _inv_load(user)
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    cards = inv[bin_name]["cards"]
+    # Section is auto-created so flows like move-to-bin can land cards
+    # in a matching section of the target bin without a separate call
+    cards = inv[bin_name]["sections"].setdefault(section, {})
     cards.setdefault(card_id, {}).setdefault(edition_id, {})
     existing = cards[card_id][edition_id].get(foil_id, 0)
     cards[card_id][edition_id][foil_id] = existing + quantity
@@ -1150,6 +1278,7 @@ async def api_card_patch(request: Request):
 
     body = await request.json()
     bin_name = body.get("bin")
+    section = body.get("section", "").strip()
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
@@ -1160,7 +1289,7 @@ async def api_card_patch(request: Request):
         raise HTTPException(status_code=404, detail="Bin not found")
 
     try:
-        inv[bin_name]["cards"][card_id][edition_id][foil_id] = quantity
+        inv[bin_name]["sections"][section][card_id][edition_id][foil_id] = quantity
     except KeyError:
         raise HTTPException(status_code=404, detail="Card entry not found")
 
@@ -1176,6 +1305,7 @@ async def api_card_delete(request: Request):
 
     body = await request.json()
     bin_name = body.get("bin")
+    section = body.get("section", "").strip()
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
@@ -1184,11 +1314,12 @@ async def api_card_delete(request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    cards = inv[bin_name]["cards"]
     try:
+        cards = inv[bin_name]["sections"][section]
         del cards[card_id][edition_id][foil_id]
         if not cards[card_id][edition_id]: del cards[card_id][edition_id]
         if not cards[card_id]: del cards[card_id]
+        # Empty sections are kept — they're user-managed structure
     except KeyError:
         raise HTTPException(status_code=404, detail="Card entry not found")
 

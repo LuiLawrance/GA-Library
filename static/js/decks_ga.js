@@ -801,12 +801,44 @@ function renderDeckSections(deckData, animate = true) {
         }
     }
 
-    // Add section button — always visible
-    const addSection = document.createElement('button');
-    addSection.className = 'dga-add-section-btn';
-    addSection.innerHTML = `+ Add Section`;
-    addSection.onclick = openAddSectionModal;
-    grid.appendChild(addSection);
+    // Add section button — always visible; swaps into an inline name input
+    grid.appendChild(dgaBuildAddSectionButton());
+}
+
+function dgaBuildAddSectionButton() {
+    const btn = document.createElement('button');
+    btn.className = 'dga-add-section-btn';
+    btn.innerHTML = '+ Add Section';
+    btn.onclick = () => {
+        const input = document.createElement('input');
+        input.className = 'dga-add-section-btn inv-add-section-input';
+        input.placeholder = 'Section name...';
+        input.maxLength = 50;
+        btn.replaceWith(input);
+        input.focus();
+        const cancel = () => input.replaceWith(dgaBuildAddSectionButton());
+        input.addEventListener('keydown', async e => {
+            if (e.key === 'Escape') cancel();
+            if (e.key !== 'Enter') return;
+            const name = input.value.trim();
+            if (!name) return cancel();
+            if (activeDeckData?.sections?.[name] !== undefined) return cancel();
+            try {
+                const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({section: name})
+                });
+                if (!res.ok) return cancel();
+                activeDeckData.sections[name] = {};
+                renderDeckSections(activeDeckData, false);
+            } catch {
+                cancel();
+            }
+        });
+        input.addEventListener('blur', cancel);
+    };
+    return btn;
 }
 
 function updateDeckCounts(unique, total) {

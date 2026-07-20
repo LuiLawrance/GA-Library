@@ -22,6 +22,8 @@ function pickDefaultFoil(foils) {
 
 // ── Inventory snapshot (default bin) ──
 let invSnapshot = {};
+let invSnapshotSections = {}; // card→edition→foil→section (default bin)
+const INV_QUICKADD_SECTION = 'Unsorted';
 
 async function loadInvSnapshot() {
     if (!currentUser) {
@@ -37,7 +39,20 @@ async function loadInvSnapshot() {
         const data = await res.json();
         const bins = data.bins || {};
         const defaultBin = Object.values(bins).find(b => b.default);
-        invSnapshot = defaultBin?.cards || {};
+        invSnapshot = {};
+        invSnapshotSections = {};
+        for (const [sectionName, cards] of Object.entries(defaultBin?.sections || {})) {
+            for (const [cid, eds] of Object.entries(cards)) {
+                for (const [eid, foils] of Object.entries(eds)) {
+                    for (const [fid, qty] of Object.entries(foils)) {
+                        (invSnapshot[cid] ??= {})[eid] ??= {};
+                        invSnapshot[cid][eid][fid] = qty;
+                        (invSnapshotSections[cid] ??= {})[eid] ??= {};
+                        invSnapshotSections[cid][eid][fid] = sectionName;
+                    }
+                }
+            }
+        }
     } catch {
         invSnapshot = {};
     }
@@ -78,7 +93,11 @@ async function commitQtyToDefault(cardId, editionId, foilId, newQty) {
             await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: binName, card_id: cardId, edition_id: editionId, foil_id: foilId})
+                body: JSON.stringify({
+                    bin: binName,
+                    section: invSnapshotSections[cardId]?.[editionId]?.[foilId] || INV_QUICKADD_SECTION,
+                    card_id: cardId, edition_id: editionId, foil_id: foilId
+                })
             });
             delete invSnapshot[cardId]?.[editionId]?.[foilId];
         }
@@ -88,6 +107,7 @@ async function commitQtyToDefault(cardId, editionId, foilId, newQty) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 bin: binName,
+                section: invSnapshotSections[cardId]?.[editionId]?.[foilId] || INV_QUICKADD_SECTION,
                 card_id: cardId,
                 edition_id: editionId,
                 foil_id: foilId,
@@ -100,12 +120,16 @@ async function commitQtyToDefault(cardId, editionId, foilId, newQty) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 bin: binName,
+                section: (typeof cardSearchTargetSection === 'string' && cardSearchTargetSection) || INV_QUICKADD_SECTION,
                 card_id: cardId,
                 edition_id: editionId,
                 foil_id: foilId,
                 quantity: newQty
             })
         });
+        (invSnapshotSections[cardId] ??= {})[editionId] ??= {};
+        invSnapshotSections[cardId][editionId][foilId] =
+            (typeof cardSearchTargetSection === 'string' && cardSearchTargetSection) || INV_QUICKADD_SECTION;
     }
 
     if (!invSnapshot[cardId]) invSnapshot[cardId] = {};
@@ -171,6 +195,7 @@ class TileEditMode {
             cardId: input.dataset.cardId,
             editionId: input.dataset.editionId,
             foilId: input.dataset.foilId,
+            section: input.dataset.section,
         }));
 
         this.pending.clear();

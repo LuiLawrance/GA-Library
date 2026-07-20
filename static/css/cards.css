@@ -542,3 +542,33 @@
     border-radius: 2px;
     transition: width 0.2s ease;
 }
+
+/* Target-section picker hides whenever the bin picker is hidden (logged out) */
+#default-bin-wrap.hidden + #target-section-wrap {
+    display: none;
+}
+
+#target-section-wrap {
+    margin-left: 10px;
+}
+
+/* Section picker is icon-only; hovering expands to reveal the selection */
+#target-section-btn {
+    gap: 0;
+}
+
+#target-section-label {
+    display: inline-block;
+    max-width: 0;
+    margin-left: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 0;
+    transition: max-width 0.25s ease, opacity 0.2s ease, margin-left 0.25s ease;
+}
+
+#target-section-wrap:hover #target-section-label {
+    max-width: 160px;
+    margin-left: 7px;
+    opacity: 1;
+}

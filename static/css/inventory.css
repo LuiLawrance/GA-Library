@@ -534,12 +534,12 @@
     right: 830px;
 }
 
+/* Outer container now stacks section blocks vertically (deck-style);
+   the per-section .inv-section-grid holds the actual card tile grid */
 .inv-card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, 255px);
-    gap: 14px;
-    align-content: start;
-    justify-content: center;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
 }
 
 /* ── Card tile ── */
@@ -2066,4 +2066,25 @@
 
 .inv-import-results::-webkit-scrollbar {
     display: none;
+}
+
+/* ── Bin sections ── */
+
+.inv-section-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 255px);
+    gap: 14px;
+}
+
+.inv-section-grid.inv-drop-target {
+    outline: 2px dashed var(--accent);
+    outline-offset: 8px;
+    border-radius: var(--radius);
+}
+
+.inv-add-section-input {
+    background: var(--bg-card);
+    color: var(--text);
+    text-align: center;
+    outline: none;
 }

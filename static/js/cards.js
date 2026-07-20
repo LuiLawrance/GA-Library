@@ -1,6 +1,40 @@
 // ── Default bin picker ──
 let cardSearchDefaultBin = null;   // name of the currently selected default bin
 let allBinsCache = null;           // { binName: { default, ... } }
+let cardSearchTargetSection = 'Unsorted'; // section quick-adds land in
+
+function updateTargetSectionLabel() {
+    const label = document.getElementById('target-section-label');
+    if (label) label.textContent = cardSearchTargetSection;
+}
+
+function _currentBinSectionNames() {
+    const sections = Object.keys(allBinsCache?.[cardSearchDefaultBin]?.sections || {});
+    // 'Unsorted' is always offered — it's the auto-created quick-add target
+    return sections.includes('Unsorted') ? sections : ['Unsorted', ...sections];
+}
+
+function openTargetSectionPicker() {
+    const menu = document.getElementById('target-section-menu');
+    if (!menu) return;
+    if (!menu.classList.contains('hidden')) {
+        menu.classList.add('hidden');
+        return;
+    }
+    menu.innerHTML = '';
+    _currentBinSectionNames().forEach(name => {
+        const item = document.createElement('div');
+        item.className = 'default-bin-menu-item' + (name === cardSearchTargetSection ? ' active' : '');
+        item.innerHTML = `<span>${name}</span><span class="default-bin-check">✓</span>`;
+        item.onclick = () => {
+            cardSearchTargetSection = name;
+            updateTargetSectionLabel();
+            menu.classList.add('hidden');
+        };
+        menu.appendChild(item);
+    });
+    menu.classList.remove('hidden');
+}
 
 async function initDefaultBinPicker() {
     if (!currentUser) return;
@@ -12,6 +46,9 @@ async function initDefaultBinPicker() {
         // Find the bin marked default
         cardSearchDefaultBin = Object.entries(allBinsCache).find(([, b]) => b.default)?.[0] ?? null;
         updateDefaultBinLabel();
+        // Keep the section choice if the bin has it; otherwise fall back
+        if (!_currentBinSectionNames().includes(cardSearchTargetSection)) cardSearchTargetSection = 'Unsorted';
+        updateTargetSectionLabel();
     } catch { /* silent */
     }
 }
@@ -57,6 +94,9 @@ async function selectDefaultBin(name) {
         await fetch(`/api/inventory/bins/${encodeURIComponent(name)}/default`, {method: 'POST'});
         cardSearchDefaultBin = name;
         _defaultBinName = null;
+        // Switching bins: keep the section if it exists there, else reset
+        if (!_currentBinSectionNames().includes(cardSearchTargetSection)) cardSearchTargetSection = 'Unsorted';
+        updateTargetSectionLabel();
         // Reload snapshot for the new default bin
         await loadInvSnapshot();
         updateDefaultBinLabel();
@@ -443,6 +483,7 @@ document.addEventListener('click', e => {
     }
     if (!e.target.closest('.default-bin-wrap')) {
         document.getElementById('default-bin-menu')?.classList.add('hidden');
+        document.getElementById('target-section-menu')?.classList.add('hidden');
     }
     if (!e.target.closest('.cards-filter-wrap')) {
         closeCardsFilter();
