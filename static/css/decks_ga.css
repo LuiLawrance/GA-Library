@@ -647,8 +647,21 @@
     border-radius: var(--radius);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     z-index: 300;
-    overflow: hidden;
+    max-height: 240px;
+    overflow-y: auto;
+    overflow-x: hidden;
     animation: dgaDropdownReveal 0.2s ease forwards;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-focus) transparent;
+}
+
+.dga-fmt-dropdown-menu::-webkit-scrollbar {
+    width: 6px;
+}
+
+.dga-fmt-dropdown-menu::-webkit-scrollbar-thumb {
+    background: var(--border-focus);
+    border-radius: 3px;
 }
 
 @keyframes dgaDropdownReveal {

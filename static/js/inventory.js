@@ -936,7 +936,7 @@ function invBuildAddSectionButton() {
                     body: JSON.stringify({section: name})
                 });
                 if (!res.ok) return cancel();
-                invBins[activeBin].sections[name] = {};
+                (invBins[activeBin].sections ??= {})[name] = {};
                 renderBinCards();
             } catch {
                 cancel();
@@ -1287,8 +1287,51 @@ async function removeCardModal() {
 
 let invAddTargetSection = null;
 
+// Populate the add-modal's section dropdown; pre-select the section whose
+// + tile opened the modal, falling back to the bin's first section/Unsorted
+function invPopulateAddSectionDropdown() {
+    const menu = document.getElementById('inv-add-section-menu');
+    const label = document.getElementById('inv-add-section-label');
+    const hidden = document.getElementById('inv-add-section');
+    if (!menu || !label || !hidden) return;
+
+    const sections = Object.keys(invBins[activeBin]?.sections || {});
+    const options = sections.length ? sections : ['Unsorted'];
+    const preSelect = invAddTargetSection && options.includes(invAddTargetSection)
+        ? invAddTargetSection
+        : options[0];
+
+    menu.innerHTML = '';
+    options.forEach(s => {
+        const opt = document.createElement('div');
+        opt.className = `dga-fmt-dropdown-option${s === preSelect ? ' selected' : ''}`;
+        opt.dataset.value = s;
+        opt.textContent = s;
+        opt.onclick = () => {
+            hidden.value = s;
+            label.textContent = s;
+            menu.querySelectorAll('.dga-fmt-dropdown-option').forEach(o => o.classList.toggle('selected', o === opt));
+            menu.classList.add('hidden');
+            document.getElementById('inv-add-section-btn').classList.remove('open');
+        };
+        menu.appendChild(opt);
+    });
+    hidden.value = preSelect;
+    label.textContent = preSelect;
+}
+
+function toggleInvAddSectionDropdown() {
+    const menu = document.getElementById('inv-add-section-menu');
+    const btn = document.getElementById('inv-add-section-btn');
+    const open = !menu.classList.contains('hidden');
+    if (!open) openSectionDropdownFixed(menu, btn);
+    menu.classList.toggle('hidden', open);
+    btn.classList.toggle('open', !open);
+}
+
 function openAddModal(sectionName = null) {
     invAddTargetSection = sectionName;
+    invPopulateAddSectionDropdown();
     addModalCardId = null;
     addModalCardData = null;
     addModalEditionId = null;
@@ -1492,7 +1535,7 @@ async function submitAddCard() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 bin: activeBin,
-                section: invAddTargetSection || 'Unsorted',
+                section: document.getElementById('inv-add-section')?.value || invAddTargetSection || 'Unsorted',
                 card_id: addModalCardId,
                 edition_id: addModalEditionId,
                 foil_id: addModalFoilId,
@@ -1502,7 +1545,8 @@ async function submitAddCard() {
 
         if (res.ok) {
             const bin = invBins[activeBin];
-            const sec = bin.sections[invAddTargetSection || 'Unsorted'] ??= {};
+            const chosenSection = document.getElementById('inv-add-section')?.value || invAddTargetSection || 'Unsorted';
+            const sec = bin.sections[chosenSection] ??= {};
             if (!sec[addModalCardId]) sec[addModalCardId] = {};
             if (!sec[addModalCardId][addModalEditionId]) sec[addModalCardId][addModalEditionId] = {};
             const existing = sec[addModalCardId][addModalEditionId][addModalFoilId] || 0;
@@ -1858,7 +1902,7 @@ async function submitCreateBin() {
             body: JSON.stringify({name, desc})
         });
         if (res.ok) {
-            invBins[name] = {banner: null, default: false, desc, symbol: null, tags: null, cards: {}};
+            invBins[name] = {banner: null, default: false, desc, symbol: null, tags: null, sections: {}};
             closeCreateModal();
             renderBinGrid();
         } else {
@@ -2403,7 +2447,7 @@ async function ctxMoveToNewBin() {
             body: JSON.stringify({name, desc: ''})
         });
         if (!res.ok) throw new Error('Failed to create bin');
-        invBins[name] = {banner: null, default: false, desc: '', symbol: null, tags: null, cards: {}};
+        invBins[name] = {banner: null, default: false, desc: '', symbol: null, tags: null, sections: {}};
         await executeMoveCard(name);
     } catch (err) {
         document.getElementById('move-modal-error').textContent = err.message || 'Failed.';

@@ -294,6 +294,18 @@
                     </div>
                     <div class="inv-foil-step-bottom">
                         <div class="inv-modal-qty-row">
+                            <label class="inv-field-label">Section</label>
+                            <div class="dga-fmt-dropdown-wrap">
+                                <button class="dga-fmt-dropdown-btn" id="inv-add-section-btn"
+                                        onclick="toggleInvAddSectionDropdown()" type="button">
+                                    <span id="inv-add-section-label">Unsorted</span>
+                                    <span class="dga-fmt-dropdown-arrow">&#8249;</span>
+                                </button>
+                                <div class="dga-fmt-dropdown-menu hidden" id="inv-add-section-menu"></div>
+                                <input id="inv-add-section" type="hidden" value="Unsorted">
+                            </div>
+                        </div>
+                        <div class="inv-modal-qty-row">
                             <label class="inv-field-label">Quantity</label>
                             <div class="inv-qty-wrap">
                                 <button class="inv-qty-btn" onclick="changeAddQty(-1)">−</button>

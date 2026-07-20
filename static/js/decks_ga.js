@@ -1704,7 +1704,7 @@ async function searchDgaAddCards() {
         const uniqueIds = [...new Set(data.cards.map(c => c.card_id))];
         if (uniqueIds.length === 1) {
             const card = data.cards[0];
-            dgaGoToConfirm(card.card_id, card.name, card.edition_id);
+            dgaGoToConfirm(card.card_id, card.name, card.edition_id, dgaCardSetLabel(card));
             return;
         }
 
@@ -1721,7 +1721,7 @@ async function searchDgaAddCards() {
                     <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
                     <div class="inv-search-tile-overlay">＋</div>
                 </div>`;
-            tile.onclick = () => dgaGoToConfirm(card.card_id, card.name, card.edition_id);
+            tile.onclick = () => dgaGoToConfirm(card.card_id, card.name, card.edition_id, dgaCardSetLabel(card));
             tile.addEventListener('animationend', () => tile.classList.add('animated'));
             results.appendChild(tile);
         });
@@ -1730,12 +1730,21 @@ async function searchDgaAddCards() {
     }
 }
 
-function dgaGoToConfirm(cardId, cardName, editionId) {
+function dgaCardSetLabel(card) {
+    const name = card.set_name || '';
+    const prefix = card.set_prefix || '';
+    if (name && prefix) return `${name} (${prefix})`;
+    return name || prefix || '';
+}
+
+function dgaGoToConfirm(cardId, cardName, editionId, setLabel = '') {
     dgaAddModalCardId = cardId;
     dgaAddModalCardName = cardName;
     dgaAddModalEditionId = editionId;
 
     document.getElementById('dga-add-modal-name').textContent = cardName;
+    const setEl = document.getElementById('dga-add-modal-set');
+    if (setEl) setEl.textContent = setLabel;
     document.getElementById('dga-add-modal-img').src = editionId ? `/images/${editionId}.jpg` : '';
     document.getElementById('dga-add-modal-qty').value = 1;
 
@@ -1771,10 +1780,32 @@ function dgaGoToConfirm(cardId, cardName, editionId) {
     document.querySelector('#dga-add-modal .inv-modal-wide').classList.add('inv-modal-foil-step');
 }
 
+
+// Open a section dropdown as position:fixed above its button — ancestor
+// overflow:hidden containers (modal panels) can no longer clip it.
+// Under the root zoom rule, getBoundingClientRect reports visual (zoomed)
+// pixels while fixed positioning uses layout pixels — divide by the zoom.
+function _pageZoom() {
+    const z = parseFloat(getComputedStyle(document.documentElement).zoom);
+    return (isFinite(z) && z > 0) ? z : 1;
+}
+
+function openSectionDropdownFixed(menu, btn) {
+    const z = _pageZoom();
+    const r = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.left = (r.left / z) + 'px';
+    menu.style.width = (r.width / z) + 'px';
+    menu.style.right = 'auto';
+    menu.style.top = 'auto';
+    menu.style.bottom = ((window.innerHeight - r.top) / z + 6) + 'px';
+}
+
 function toggleDgaAddSectionDropdown() {
     const menu = document.getElementById('dga-add-section-menu');
     const btn = document.getElementById('dga-add-section-btn');
     const open = !menu.classList.contains('hidden');
+    if (!open) openSectionDropdownFixed(menu, btn);
     menu.classList.toggle('hidden', open);
     btn.classList.toggle('open', !open);
 }
