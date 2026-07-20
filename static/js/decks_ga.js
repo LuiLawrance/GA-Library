@@ -561,10 +561,148 @@ function closeDeckDetail() {
 // ═══════════════════════════════════════
 
 const rarityMapDga = {1: 'C', 2: 'U', 3: 'R', 4: 'SR', 5: 'UR', 6: 'PR', 7: 'CSR', 8: 'CUR', 9: 'CPR'};
+
+// ── Card drag & drop state ──
+
+let dgaDragCard = null; // {cardId, fromSection, tile}
+let dgaDragGhost = null;
+let dgaPlaceholder = null;
+let dgaDragTileAspect = '5 / 7';
+// A tile's rect at its settled layout position — FLIP slides via transform,
+// so subtracting the in-flight transform gives where the tile will end up.
+// Decisions made against settled rects are correct even mid-animation.
+function dgaSettledRect(el) {
+    const r = el.getBoundingClientRect();
+    const t = getComputedStyle(el).transform;
+    if (t && t !== 'none') {
+        const m = new DOMMatrixReadOnly(t);
+        return {left: r.left - m.m41, top: r.top - m.m42, width: r.width, height: r.height};
+    }
+    return r;
+}
+
+// FLIP: record positions, mutate the DOM, then animate everything that shifted
+function dgaFlipMove(mutate) {
+    const els = [...document.querySelectorAll(
+        '.dga-section-grid .dga-card-tile, ' +
+        '.dga-section-grid .inv-card-add-tile, .dga-drop-placeholder')];
+    const first = new Map(els.map(el => [el, el.getBoundingClientRect()]));
+    mutate();
+    for (const el of els) {
+        if (!el.isConnected) continue;
+        const f = first.get(el);
+        const l = el.getBoundingClientRect();
+        const dx = f.left - l.left, dy = f.top - l.top;
+        if (!dx && !dy) continue;
+        el.style.transition = 'none';
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+        requestAnimationFrame(() => {
+            el.style.transition = 'transform 0.18s ease';
+            el.style.transform = '';
+            el.addEventListener('transitionend', () => {
+                el.style.transition = '';
+            }, {once: true});
+        });
+    }
+}
+
+// Pure geometric insertion: cursor position in, reference tile out.
+// Row-aware scan over settled rects — same cursor position ALWAYS yields
+// the same insertion point, regardless of animations, gutters, or history.
+function dgaResolveInsertion(grid, x, y) {
+    const tiles = [...grid.querySelectorAll('.dga-card-tile')]
+        .filter(t => t !== dgaDragCard?.tile);
+    for (const t of tiles) {
+        const r = dgaSettledRect(t);
+        if (y < r.top) return t;                       // above this row → before it
+        if (y <= r.top + r.height) {                   // within this row
+            if (x < r.left + r.width / 2) return t;    // left of center → before
+        }
+    }
+    return null; // past every tile → append at end
+}
+
+// Open the gap before `refNode` (or at `grid` end, before the add tile).
+// There is only ever one gap: moving it here closes it wherever it was.
+function dgaMovePlaceholder(grid, refNode, e) {
+    if (!dgaDragCard) return;
+    if (!dgaPlaceholder) {
+        dgaPlaceholder = document.createElement('div');
+        dgaPlaceholder.className = 'dga-drop-placeholder';
+        // Aspect ratio (not px height): the grid supplies the width, height
+        // follows in proportion — exact tile dimensions, immune to page zoom
+        dgaPlaceholder.style.aspectRatio = dgaDragTileAspect;
+    }
+    const target = refNode || grid.querySelector('.inv-card-add-tile');
+    if (target === dgaPlaceholder) return; // hovering just left of the gap — same position
+    if (dgaPlaceholder.parentNode === grid && dgaPlaceholder.nextSibling === target) return; // already there
+    // A gap directly beside the dragged card is a no-op position — close instead
+    if (target === dgaDragCard.tile || (target && target.previousSibling === dgaDragCard.tile)) {
+        if (dgaPlaceholder.isConnected) dgaFlipMove(() => dgaPlaceholder.remove());
+        return;
+    }
+    dgaFlipMove(() => grid.insertBefore(dgaPlaceholder, target));
+}
+
+// Commit the move to wherever the gap currently sits
+function dgaCommitFromPlaceholder() {
+    const grid = dgaPlaceholder?.closest('.dga-section-grid');
+    if (!grid) return; // no gap open — nothing to commit
+    const toSection = grid.dataset.section;
+    let index = 0;
+    for (const el of grid.children) {
+        if (el === dgaPlaceholder) break;
+        // The dragged card is still visible in its slot — don't count it,
+        // since the backend indexes the section as if it were removed
+        if (el.classList.contains('dga-card-tile') && el !== dgaDragCard?.tile) index++;
+    }
+    dgaCommitCardMove(toSection, index);
+}
+
+async function dgaCommitCardMove(toSection, index) {
+    if (!dgaDragCard || !activeDeck) return;
+    const {cardId, fromSection} = dgaDragCard;
+
+    // No-op guard: dropping back onto its own position. Indices are
+    // post-removal (the dragged card is excluded from the count), so its
+    // own position is exactly currentIndex — one step right is index + 1.
+    const sections = activeDeckData?.sections || {};
+    if (fromSection === toSection) {
+        const currentIndex = Object.keys(sections[fromSection] || {}).indexOf(cardId);
+        if (currentIndex === index) return;
+    }
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/move`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({card_id: cardId, from_section: fromSection, to_section: toSection, index})
+        });
+        if (!res.ok) return;
+
+        // Mirror the server-side move locally, then re-render
+        if (sections[fromSection] && cardId in sections[fromSection]) {
+            let qty = sections[fromSection][cardId];
+            delete sections[fromSection][cardId];
+            if (cardId in (sections[toSection] || {})) {
+                qty += sections[toSection][cardId];
+                delete sections[toSection][cardId];
+            }
+            const items = Object.entries(sections[toSection] || {});
+            items.splice(Math.max(0, Math.min(index, items.length)), 0, [cardId, qty]);
+            sections[toSection] = Object.fromEntries(items);
+        }
+        renderDeckSections(activeDeckData, false);
+    } catch {
+        console.error('Failed to move card');
+    }
+}
+
 const ALWAYS_FOIL_DGA = new Set([7, 8, 9]);
 
-function renderDeckSections(deckData) {
+function renderDeckSections(deckData, animate = true) {
     const grid = document.getElementById('dga-card-grid');
+    grid.classList.toggle('dga-no-anim', !animate);
     const sections = deckData.sections || {};
     const nameMap = deckData.name_map || {};
     const editionMap = deckData.edition_map || {};
@@ -613,6 +751,21 @@ function renderDeckSections(deckData) {
             // Per-section grid — always rendered
             const sectionGrid = document.createElement('div');
             sectionGrid.className = 'dga-section-grid';
+            sectionGrid.dataset.section = sectionName;
+
+            // Dropping on empty grid space appends to the section's end
+            sectionGrid.addEventListener('dragover', e => {
+                if (!dgaDragCard) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const ref = dgaResolveInsertion(sectionGrid, e.clientX, e.clientY);
+                dgaMovePlaceholder(sectionGrid, ref, e);
+            });
+            sectionGrid.addEventListener('drop', e => {
+                if (!dgaDragCard) return;
+                e.preventDefault();
+                dgaCommitFromPlaceholder();
+            });
 
             // Card tiles
             const cardEntries = Object.entries(cards);
@@ -764,6 +917,60 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
         e.preventDefault();
         dgaOpenCardContextMenu(e, editionId);
     });
+
+    // ── Drag & drop: reorder within / move across sections ──
+    tile.draggable = true;
+    tile.dataset.cardId = card_id;
+    tile.dataset.section = sectionName;
+
+    // Qty controls need normal mouse interaction — suspend dragging over them
+    // The qty ctrl overlay spans the whole tile face, so only suspend
+    // dragging when the press is on an actual button/input inside it
+    const qtyBox = tile.querySelector('.inv-card-tile-qty-ctrl');
+    if (qtyBox) {
+        qtyBox.addEventListener('mousedown', e => {
+            if (e.target.closest('button, input')) tile.draggable = false;
+        });
+        document.addEventListener('mouseup', () => {
+            tile.draggable = true;
+        });
+    }
+
+    tile.addEventListener('dragstart', e => {
+        dgaDragCard = {cardId: card_id, fromSection: sectionName, tile};
+        tile.classList.add('dga-dragging');
+        document.body.classList.add('dga-drag-active');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', card_id); // Firefox requires data
+
+        // Clean drag ghost: the card itself, minus overlay and qty controls
+        const rect = tile.getBoundingClientRect();
+        const ghost = tile.cloneNode(true);
+        ghost.querySelector('.dga-card-tile-overlay')?.remove();
+        ghost.querySelector('.inv-card-tile-qty-ctrl')?.remove();
+        ghost.classList.remove('dga-dragging');
+        ghost.style.cssText = `position: fixed; top: -9999px; left: -9999px;` +
+            `width: ${rect.width}px; height: ${rect.height}px;` +
+            `margin: 0; animation: none; opacity: 1; pointer-events: none;`;
+        document.body.appendChild(ghost);
+        // Anchor the drag image at its center so the cursor — which drives
+        // all gap decisions — always sits at the card's visual center
+        e.dataTransfer.setDragImage(ghost, rect.width / 2, rect.height / 2);
+        dgaDragGhost = ghost;
+        dgaDragTileAspect = `${rect.width} / ${rect.height}`;
+    });
+
+    tile.addEventListener('dragend', () => {
+        // Close the gap (successful drops re-render right after)
+        dgaFlipMove(() => dgaPlaceholder?.remove());
+        dgaPlaceholder = null;
+        tile.classList.remove('dga-dragging');
+        document.body.classList.remove('dga-drag-active');
+        dgaDragGhost?.remove();
+        dgaDragGhost = null;
+        dgaDragCard = null;
+    });
+
 
     // Commit immediately — used by +/− buttons and direct text input
     async function commitNow(newQty) {

@@ -930,3 +930,54 @@
     flex: 0 0 auto;
     white-space: nowrap;
 }
+
+/* ── Card drag & drop ── */
+
+.dga-card-tile {
+    cursor: grab;
+}
+
+.dga-card-tile.dga-dragging {
+    cursor: grabbing;
+    opacity: 0.45;
+}
+
+.dga-drop-placeholder {
+    border: 2px dashed var(--border-focus);
+    border-radius: 14px;
+    background: var(--bg-hover);
+    opacity: 0.7;
+}
+
+/* While dragging, suppress all tile hover effects and overlays */
+body.dga-drag-active .dga-card-tile:hover .dga-card-tile-overlay {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.dga-drag-active .dga-card-tile:hover .card-tile-dim {
+    opacity: 0;
+}
+
+body.dga-drag-active .dga-card-tile:hover .edition-tile-wrap {
+    transform: none;
+}
+
+body.dga-drag-active .dga-card-tile:hover .dga-qty-badge,
+body.dga-drag-active .dga-card-tile:hover .edition-rarity-badge {
+    opacity: 1;
+}
+
+/* Qty controls come from inventory.css via the shared inv-card-tile class —
+   suppress them during drags too */
+body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Re-renders triggered by drag reorders skip the tile fan reveal */
+.dga-no-anim .dga-card-tile,
+.dga-no-anim .inv-card-add-tile {
+    animation: none;
+    opacity: 1;
+}

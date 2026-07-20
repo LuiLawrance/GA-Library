@@ -1536,6 +1536,44 @@ async def api_deck_delete(deck_name: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/decks/{deck_name}/card/move")
+async def api_deck_card_move(deck_name: str, request: Request):
+    """Move a card to a new position — within a section or across sections."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    card_id = body.get("card_id", "")
+    from_section = body.get("from_section", "")
+    to_section = body.get("to_section", "")
+    index = body.get("index", 0)
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    sections = deck_data.get("sections", {})
+    if from_section not in sections or to_section not in sections:
+        raise HTTPException(status_code=404, detail="Section not found")
+    if card_id not in sections[from_section]:
+        raise HTTPException(status_code=404, detail="Card not in section")
+
+    qty = sections[from_section].pop(card_id)
+
+    target = sections[to_section]
+    if card_id in target:
+        # Card already in target section — merge quantities at its new position
+        qty += target.pop(card_id)
+
+    items = list(target.items())
+    index = max(0, min(int(index), len(items)))
+    items.insert(index, (card_id, qty))
+    sections[to_section] = dict(items)
+
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True, "merged_qty": qty})
+
+
 @app.post("/api/decks/{deck_name}/card")
 async def api_deck_card_add(deck_name: str, request: Request):
     user = get_current_user(request)
