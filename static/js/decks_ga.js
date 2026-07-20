@@ -19,11 +19,34 @@ let dgaCtxTargetDeck = null;
 function dgaOpenContextMenu(e, deckName) {
     dgaCtxTargetDeck = deckName;
     const menu = document.getElementById('dga-context-menu');
+
+    // Only offer Clear Banner when the deck has one
+    const clearBtn = document.getElementById('dga-ctx-clear-banner');
+    if (clearBtn) clearBtn.style.display = gaDecks[deckName]?.banner ? '' : 'none';
+
     menu.classList.remove('hidden');
     const x = Math.min(e.clientX, window.innerWidth - 180);
     const y = Math.min(e.clientY, window.innerHeight - 130);
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
+}
+
+async function dgaCtxClearBanner() {
+    if (!dgaCtxTargetDeck) return;
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({banner: null})
+        });
+        if (!res.ok) return;
+        if (gaDecks[name]) gaDecks[name].banner = null;
+        renderDeckGrid();
+    } catch {
+        console.error('Failed to clear banner');
+    }
 }
 
 function dgaCloseContextMenu() {

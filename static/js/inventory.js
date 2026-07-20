@@ -1338,6 +1338,10 @@ function openBinContextMenu(e, binName) {
     const divider = document.querySelector('#inv-bin-context-menu .inv-context-divider');
     if (divider) divider.style.display = isDefault ? 'none' : '';
 
+    // Only offer Clear Banner when the bin has one
+    const clearBannerBtn = document.getElementById('ctx-clear-banner');
+    if (clearBannerBtn) clearBannerBtn.style.display = invBins[binName]?.banner ? '' : 'none';
+
     menu.classList.remove('hidden');
 
     // Position near cursor, keep within viewport
@@ -1485,6 +1489,24 @@ async function ctxDelete() {
         }
     } catch {
         console.error('Failed to delete bin');
+    }
+}
+
+async function ctxClearBanner() {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({banner: null})
+        });
+        if (!res.ok) return;
+        if (invBins[name]) invBins[name].banner = null;
+        renderBinGrid();
+    } catch {
+        console.error('Failed to clear banner');
     }
 }
 
