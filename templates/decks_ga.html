@@ -280,7 +280,7 @@
                                         <span id="dga-add-section-label">Main Deck</span>
                                         <span class="dga-fmt-dropdown-arrow">&#8249;</span>
                                     </button>
-                                    <div class="dga-fmt-dropdown-menu hidden" id="dga-add-section-menu"></div>
+                                    <div class="dga-fmt-dropdown-menu drop-up hidden" id="dga-add-section-menu"></div>
                                     <input id="dga-add-section" type="hidden" value="Main Deck">
                                 </div>
                             </div>
@@ -301,73 +301,72 @@
                 </div>
             </div>
         </div>
-        <!-- ── Import / Export modal ── -->
-        <div class="inv-modal-overlay hidden" id="dga-import-export-modal" onclick="dgaCloseImportExportModal()">
-            <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
-                <div class="inv-modal-header">
-                    <div>
-                        <div class="inv-modal-title">Import / Export</div>
-                        <div class="inv-modal-set" id="dga-import-export-deck-label"></div>
-                    </div>
-                    <button class="inv-modal-close" onclick="dgaCloseImportExportModal()">✕</button>
+    </div>
+    <!-- ── Import / Export modal ── -->
+    <div class="inv-modal-overlay hidden" id="dga-import-export-modal" onclick="dgaCloseImportExportModal()">
+        <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
+            <div class="inv-modal-header">
+                <div>
+                    <div class="inv-modal-title">Import / Export</div>
+                    <div class="inv-modal-set" id="dga-import-export-deck-label"></div>
                 </div>
-                <div class="inv-import-export-tabs">
-                    <button class="inv-import-export-tab active" id="dga-import-tab-btn"
-                            onclick="dgaSwitchImportExportTab('import')">Import
-                    </button>
-                    <button class="inv-import-export-tab" id="dga-export-tab-btn"
-                            onclick="dgaSwitchImportExportTab('export')">Export
-                    </button>
+                <button class="inv-modal-close" onclick="dgaCloseImportExportModal()">✕</button>
+            </div>
+            <div class="inv-import-export-tabs">
+                <button class="inv-import-export-tab active" id="dga-import-tab-btn"
+                        onclick="dgaSwitchImportExportTab('import')">Import
+                </button>
+                <button class="inv-import-export-tab" id="dga-export-tab-btn"
+                        onclick="dgaSwitchImportExportTab('export')">Export
+                </button>
+            </div>
+            <div id="dga-import-panel">
+                <div class="inv-label" style="margin-bottom:6px;">Paste your list below</div>
+                <div class="inv-import-format-hint">Format: <code># Section Name</code> then <code>1 Card Name</code>
+                    per line
                 </div>
-                <div id="dga-import-panel">
-                    <div class="inv-label" style="margin-bottom:6px;">Paste your list below</div>
-                    <div class="inv-import-format-hint">Format: <code># Section Name</code> then <code>1 Card
-                        Name</code>
-                        per line
-                    </div>
-                    <div class="inv-textarea-wrap">
+                <div class="inv-textarea-wrap">
                     <textarea class="inv-import-textarea" id="dga-import-textarea"
                               placeholder="# Material Deck&#10;1 Spirit of Fortuitous Fire&#10;# Main Deck&#10;1 Academy Guide"></textarea>
-                    </div>
-                    <div class="dga-import-footer">
-                        <button class="inv-modal-submit" id="dga-import-submit-btn" onclick="dgaSubmitImport()">Import
-                        </button>
-                        <div class="inv-import-results hidden" id="dga-import-results"></div>
-                    </div>
                 </div>
-                <div class="hidden" id="dga-export-panel">
-                    <div class="inv-label" style="margin-bottom:6px;">Copy your list below</div>
-                    <div class="inv-textarea-wrap">
-                        <textarea class="inv-import-textarea" id="dga-export-textarea" readonly></textarea>
-                    </div>
-                    <button class="inv-modal-submit" id="dga-export-copy-btn" onclick="dgaCopyExport()">Copy to
-                        Clipboard
+                <div class="dga-import-footer">
+                    <button class="inv-modal-submit" id="dga-import-submit-btn" onclick="dgaSubmitImport()">Import
                     </button>
+                    <div class="inv-import-results hidden" id="dga-import-results"></div>
                 </div>
             </div>
-        </div>
-
-        <!-- ── Add section modal ── -->
-        <div class="inv-modal-overlay hidden" id="dga-add-section-modal" onclick="closeAddSectionModal()">
-            <div class="inv-modal" onclick="event.stopPropagation()">
-                <div class="inv-modal-header">
-                    <span class="inv-modal-title">New Section</span>
-                    <button class="inv-modal-close" onclick="closeAddSectionModal()">✕</button>
+            <div class="hidden" id="dga-export-panel">
+                <div class="inv-label" style="margin-bottom:6px;">Copy your list below</div>
+                <div class="inv-textarea-wrap">
+                    <textarea class="inv-import-textarea" id="dga-export-textarea" readonly></textarea>
                 </div>
-                <div class="inv-modal-fields">
-                    <div class="inv-field-group">
-                        <label class="inv-field-label">Section Name</label>
-                        <input class="inv-text-input" id="dga-add-section-input"
-                               onkeydown="if(event.key==='Enter') submitAddSectionModal(); if(event.key==='Escape') closeAddSectionModal();"
-                               placeholder="e.g. Side Deck"
-                               type="text">
-                    </div>
-                </div>
-                <div class="inv-modal-error hidden" id="dga-add-section-error"></div>
-                <div class="inv-modal-actions">
-                    <button class="inv-modal-submit" onclick="submitAddSectionModal()">Add Section</button>
-                </div>
+                <button class="inv-modal-submit" id="dga-export-copy-btn" onclick="dgaCopyExport()">Copy to Clipboard
+                </button>
             </div>
         </div>
-
     </div>
+
+    <!-- ── Add section modal ── -->
+    <div class="inv-modal-overlay hidden" id="dga-add-section-modal" onclick="closeAddSectionModal()">
+        <div class="inv-modal" onclick="event.stopPropagation()">
+            <div class="inv-modal-header">
+                <span class="inv-modal-title">New Section</span>
+                <button class="inv-modal-close" onclick="closeAddSectionModal()">✕</button>
+            </div>
+            <div class="inv-modal-fields">
+                <div class="inv-field-group">
+                    <label class="inv-field-label">Section Name</label>
+                    <input class="inv-text-input" id="dga-add-section-input"
+                           onkeydown="if(event.key==='Enter') submitAddSectionModal(); if(event.key==='Escape') closeAddSectionModal();"
+                           placeholder="e.g. Side Deck"
+                           type="text">
+                </div>
+            </div>
+            <div class="inv-modal-error hidden" id="dga-add-section-error"></div>
+            <div class="inv-modal-actions">
+                <button class="inv-modal-submit" onclick="submitAddSectionModal()">Add Section</button>
+            </div>
+        </div>
+    </div>
+
+</div>
