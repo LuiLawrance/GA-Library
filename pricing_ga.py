@@ -1,18 +1,23 @@
 from datetime import date
 from util_file import new_json
 
+import api_tcgplayer
 import json
-
-API_TCG = "https://www.tcgplayer.com/search/grand-archive/product?productLineName=grand-archive&q="
-
-DIR_SETS = "DATA_GA/SETS_GA"
-
-JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"  # Mirrors JSON_EDITIONS from api_ga.py — update both if path changes
-JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"  # Mirrors JSON_INFO path from api_ga.py — update both if path changes
-JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"
 
 JSON_LISTINGS = "DATA_GA/PRICING_GA/LISTINGS.json"
 JSON_SALES = "DATA_GA/PRICING_GA/SALES.json"
+
+RARITY_MAP = {
+    1: "C",
+    2: "U",
+    3: "R",
+    4: "SR",
+    5: "UR",
+    6: "PR",
+    7: "CSR",
+    8: "CUR",
+    9: "CPR"
+}
 
 
 def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, info: str, debug: bool = False) -> None:
@@ -60,6 +65,7 @@ def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, inf
 
 
 def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict) -> str:
+    from api_ga import JSON_EDITIONS
     editions_file = new_json(JSON_EDITIONS)
     target_file = new_json(file_path)
 
@@ -79,37 +85,21 @@ def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict) ->
     return card_id
 
 
+def _build_edition_options(info_data: dict, card_id: str) -> list[tuple[str, str, str, str]]:
+    options = []
+
+    for edition_id, edition_info in info_data[card_id]["editions"].items():
+        set_prefix, rarity, collector_number = _edition_display(edition_id, edition_info)
+        options.append((edition_id, set_prefix, rarity, collector_number))
+
+    return options
+
+
 def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, str, str, str, str]]:
     options = []
 
-    rarity_map = {
-        1: "C",
-        2: "U",
-        3: "R",
-        4: "SR",
-        5: "UR",
-        6: "PR",
-        7: "CSR",
-        8: "CUR",
-        9: "CPR"
-    }
-
     for edition_id, edition_info in info_data[card_id]["editions"].items():
-        set_prefix = edition_info["set_prefix"]
-        rarity = rarity_map.get(edition_info["rarity"], "?")
-
-        from api_ga import _format_search
-        set_file_name = _format_search(set_prefix).replace("-", "_")
-        set_file = new_json(f"{DIR_SETS}/{set_file_name}.json")
-
-        with set_file.open("r", encoding="utf-8") as f:
-            set_data = json.load(f)
-
-        collector_number = next(
-            (num for num, eids in set_data.items()
-             if edition_id in (eids if isinstance(eids, list) else [eids])),
-            "?"
-        )
+        set_prefix, rarity, collector_number = _edition_display(edition_id, edition_info)
 
         for foil_id, foil_info in edition_info["foils"].items():
             variant_population = sum(v["population"] for v in foil_info["variants"].values())
@@ -122,6 +112,26 @@ def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, s
                 options.append((edition_id, variant_id, set_prefix, rarity, variant_info["kind"], collector_number))
 
     return options
+
+
+def _edition_display(edition_id: str, edition_info: dict) -> tuple[str, str, str]:
+    set_prefix = edition_info["set_prefix"]
+    rarity = RARITY_MAP.get(edition_info["rarity"], "?")
+
+    from api_ga import _format_search, DIR_SETS
+    set_file_name = _format_search(set_prefix).replace("-", "_")
+    set_file = new_json(f"{DIR_SETS}/{set_file_name}.json")
+
+    with set_file.open("r", encoding="utf-8") as f:
+        set_data = json.load(f)
+
+    collector_number = next(
+        (num for num, eids in set_data.items()
+         if edition_id in (eids if isinstance(eids, list) else [eids])),
+        "?"
+    )
+
+    return set_prefix, rarity, collector_number
 
 
 def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
@@ -160,7 +170,9 @@ def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
         )
 
 
-def _select_foil(card_name: str) -> tuple[str, str] | None:
+def _resolve_card(card_name: str) -> tuple[dict, str] | None:
+    from api_ga import _api_search, _format_search, JSON_INFO, JSON_SLUGS
+
     info_file = new_json(JSON_INFO)
 
     with info_file.open("r", encoding="utf-8") as f:
@@ -171,7 +183,6 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     with slug_file.open("r", encoding="utf-8") as f:
         slug_data = json.load(f)
 
-    from api_ga import _format_search, _api_search
     slug = _format_search(card_name)
 
     if slug not in slug_data:
@@ -187,10 +198,53 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
         with slug_file.open("r", encoding="utf-8") as f:
             slug_data = json.load(f)
 
-    card_id = slug_data[slug]["card_id"]
-    options = _build_foil_options(info_data, card_id)
-
     print(f"\n{slug_data[slug]['name']}")
+
+    return info_data, slug_data[slug]["card_id"]
+
+
+def _select_edition(card_name: str) -> str | None:
+    resolved = _resolve_card(card_name)
+
+    if not resolved:
+        return None
+
+    info_data, card_id = resolved
+    options = _build_edition_options(info_data, card_id)
+
+    prefix_width = max(len(o[1]) for o in options)
+    rarity_width = max(len(o[2]) for o in options)
+
+    total = len(options)
+    index_width = len(str(total))
+
+    for i, (_, set_prefix, rarity, collector_number) in enumerate(options, 1):
+        print(
+            f"{str(i).rjust(index_width)}. "
+            f"{set_prefix:<{prefix_width}} | "
+            f"{collector_number:>{len(str(collector_number))}} | "
+            f"{rarity:<{rarity_width}}"
+        )
+
+    choice = input("\nSelect option: ").strip()
+
+    if not choice.isdigit() or not (1 <= int(choice) <= len(options)):
+        print("\nInvalid option.")
+        return None
+
+    edition_id, _, _, _ = options[int(choice) - 1]
+
+    return edition_id
+
+
+def _select_foil(card_name: str) -> tuple[str, str] | None:
+    resolved = _resolve_card(card_name)
+
+    if not resolved:
+        return None
+
+    info_data, card_id = resolved
+    options = _build_foil_options(info_data, card_id)
 
     prefix_width = max(len(o[2]) for o in options)
     rarity_width = max(len(o[3]) for o in options)
@@ -220,6 +274,8 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
 
 
 def _sync_info(card_data: dict, debug: bool = False) -> None:
+    from api_ga import JSON_INFO
+
     info_file = new_json(JSON_INFO)
     listings_file = new_json(JSON_LISTINGS)
     sales_file = new_json(JSON_SALES)
@@ -286,3 +342,23 @@ def add_listing(card_name: str, debug: bool = False) -> None:
 
 def add_sale(card_name: str, debug: bool = False) -> None:
     _prompt_entry(card_name, JSON_SALES, debug)
+
+
+def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
+    edition_id = _select_edition(card_name)
+
+    if not edition_id:
+        return
+
+    product_id = api_tcgplayer.prompt_product_id(edition_id, debug)
+    url = api_tcgplayer._build_url(product_id)
+
+    sales = api_tcgplayer.fetch_sales(url, debug)
+
+    if not sales:
+        return
+
+    print()
+
+    for i, sale in enumerate(sales, 1):
+        print(f"{i}. {sale['date']} | x{sale['quantity']} | ${sale['price']:.2f}")

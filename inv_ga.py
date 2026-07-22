@@ -1,5 +1,6 @@
+from api_ga import JSON_INFO, JSON_SLUGS
 from pathlib import Path
-from pricing_ga import _select_foil, JSON_INFO, JSON_SLUGS
+from pricing_ga import _select_foil
 from util_file import new_dir, new_json
 
 import json
