@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from util_file import new_json
 
 import api_tcgplayer
@@ -134,6 +134,10 @@ def _edition_display(edition_id: str, edition_info: dict) -> tuple[str, str, str
     return set_prefix, rarity, collector_number
 
 
+def _parse_tcg_date(date_str: str) -> str:
+    return datetime.strptime(date_str, "%m/%d/%y").date().isoformat()
+
+
 def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
     result = _select_foil(card_name)
 
@@ -211,19 +215,23 @@ def _select_edition(card_name: str) -> str | None:
 
     info_data, card_id = resolved
     options = _build_edition_options(info_data, card_id)
+    product_ids = [api_tcgplayer.get_product_id(edition_id) or "-" for edition_id, _, _, _ in options]
 
     prefix_width = max(len(o[1]) for o in options)
+    number_width = max(len(o[3]) for o in options)
     rarity_width = max(len(o[2]) for o in options)
+    product_id_width = max(len(p) for p in product_ids)
 
     total = len(options)
     index_width = len(str(total))
 
-    for i, (_, set_prefix, rarity, collector_number) in enumerate(options, 1):
+    for i, ((_, set_prefix, rarity, collector_number), product_id) in enumerate(zip(options, product_ids), 1):
         print(
             f"{str(i).rjust(index_width)}. "
             f"{set_prefix:<{prefix_width}} | "
-            f"{collector_number:>{len(str(collector_number))}} | "
-            f"{rarity:<{rarity_width}}"
+            f"{collector_number:>{number_width}} | "
+            f"{rarity:<{rarity_width}} | "
+            f"TCG: {product_id:<{product_id_width}}"
         )
 
     choice = input("\nSelect option: ").strip()
@@ -247,6 +255,7 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     options = _build_foil_options(info_data, card_id)
 
     prefix_width = max(len(o[2]) for o in options)
+    number_width = max(len(o[5]) for o in options)
     rarity_width = max(len(o[3]) for o in options)
     foil_width = max(len(o[4]) for o in options)
 
@@ -257,7 +266,7 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
         print(
             f"{str(i).rjust(index_width)}. "
             f"{set_prefix:<{prefix_width}} | "
-            f"{collector_number:>{len(str(collector_number))}} | "
+            f"{collector_number:>{number_width}} | "
             f"{rarity:<{rarity_width}} | "
             f"{foil_kind:<{foil_width}}"
         )
@@ -271,6 +280,72 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     edition_id, foil_id, _, _, _, _ = options[int(choice) - 1]
 
     return edition_id, foil_id
+
+
+def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) -> tuple[int, int, int]:
+    from api_ga import JSON_EDITIONS, JSON_INFO
+
+    editions_file = new_json(JSON_EDITIONS)
+    info_file = new_json(JSON_INFO)
+    sales_file = new_json(JSON_SALES)
+
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    foils = info_data[card_id]["editions"][edition_id]["foils"]
+    foil_ids_by_kind = {foil_info["kind"]: foil_id for foil_id, foil_info in foils.items()}
+
+    with sales_file.open("r", encoding="utf-8") as f:
+        sales_data = json.load(f)
+
+    today = date.today().isoformat()
+    stored = 0
+    skipped_today = 0
+    skipped_unrecognized = 0
+
+    for sale in sales:
+        foil_id = foil_ids_by_kind.get(sale["foil_kind"]) if sale["foil_kind"] else None
+
+        if not foil_id:
+            skipped_unrecognized += 1
+            continue
+
+        sale_date = _parse_tcg_date(sale["date"])
+
+        if sale_date == today:
+            skipped_today += 1
+            continue
+
+        entry = {
+            "date": sale_date,
+            "marketplace": "TCGPlayer",
+            "price": sale["price"],
+            "quantity": sale["quantity"],
+            "info": sale["condition"],
+        }
+
+        sales_data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).append(entry)
+        stored += 1
+
+    with sales_file.open("w", encoding="utf-8") as f:
+        json.dump(sales_data, f, indent=4, ensure_ascii=False)
+
+    if debug:
+        print(
+            f"Stored TCG sales | "
+            f"card_id={card_id} | "
+            f"edition_id={edition_id} | "
+            f"stored={stored} | "
+            f"skipped_today={skipped_today} | "
+            f"skipped_unrecognized={skipped_unrecognized}"
+        )
+
+    return stored, skipped_today, skipped_unrecognized
 
 
 def _sync_info(card_data: dict, debug: bool = False) -> None:
@@ -355,10 +430,40 @@ def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
 
     sales = api_tcgplayer.fetch_sales(url, debug)
 
+    if sales is None:
+        return
+
+    api_tcgplayer.set_last_scraped(edition_id, debug)
+
     if not sales:
         return
 
     print()
 
+    total = len(sales)
+    index_width = len(str(total))
+    date_width = max(len(sale["date"]) for sale in sales)
+    condition_width = max(len(sale["condition"]) for sale in sales)
+    quantity_width = max(len(str(sale["quantity"])) for sale in sales)
+    price_width = max(len(f"{sale['price']:.2f}") for sale in sales)
+
     for i, sale in enumerate(sales, 1):
-        print(f"{i}. {sale['date']} | x{sale['quantity']} | ${sale['price']:.2f}")
+        print(
+            f"{str(i).rjust(index_width)}. "
+            f"{sale['date']:<{date_width}} | "
+            f"{sale['condition']:<{condition_width}} | "
+            f"x{str(sale['quantity']).rjust(quantity_width)} | "
+            f"${sale['price']:>{price_width}.2f}"
+        )
+
+    stored, skipped_today, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+
+    summary = f"\nStored {stored} sale(s)"
+
+    if skipped_today:
+        summary += f", excluded {skipped_today} from today"
+
+    if skipped_unrecognized:
+        summary += f", skipped {skipped_unrecognized} unrecognized variant(s)"
+
+    print(summary)
