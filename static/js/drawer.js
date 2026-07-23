@@ -292,11 +292,30 @@ function buildPricingSeriesMarks(entries, seriesKey, xAt, yAt) {
 
     if (!entries.length) return {linePath: '', dotsHTML: '', last: null};
 
-    const points = entries.map(e => ({...e, cx: xAt(e.date), cy: yAt(e.price)}));
+    // The line traces one vertex per date — its average price when more than
+    // one entry shares that date, its actual price otherwise. Every individual
+    // entry still gets its own solid marker regardless of grouping.
+    const byDate = new Map();
+    for (const e of entries) {
+        if (!byDate.has(e.date)) byDate.set(e.date, []);
+        byDate.get(e.date).push(e);
+    }
 
-    const linePath = points.length > 1
-        ? points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.cy.toFixed(1)}`).join(' ')
+    const vertices = [...byDate.entries()]
+        .map(([vdate, group]) => ({
+            date: vdate,
+            group,
+            price: group.reduce((sum, e) => sum + e.price, 0) / group.length
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+    const vertexPoints = vertices.map(v => ({...v, cx: xAt(v.date), cy: yAt(v.price)}));
+
+    const linePath = vertexPoints.length > 1
+        ? vertexPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.cy.toFixed(1)}`).join(' ')
         : '';
+
+    const points = entries.map(e => ({...e, cx: xAt(e.date), cy: yAt(e.price)}));
 
     const dotsHTML = points.map(p => `
         <g class="pricing-chart-point"
@@ -313,7 +332,28 @@ function buildPricingSeriesMarks(entries, seriesKey, xAt, yAt) {
             <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="4" class="pricing-chart-dot ${series.cssClass}" />
         </g>`).join('');
 
-    return {linePath, dotsHTML, last: points[points.length - 1]};
+    // Hollow marker at the average, only where a date actually grouped more than one entry.
+    const avgDotsHTML = vertexPoints
+        .filter(v => v.group.length > 1)
+        .map(v => {
+            const totalQuantity = v.group.reduce((sum, e) => sum + (e.quantity ?? 1), 0);
+            return `
+        <g class="pricing-chart-point"
+           data-series="${escapeHtml(series.label)} Average"
+           data-series-class="${series.cssClass}"
+           data-date="${escapeHtml(v.date)}"
+           data-condition="Average of ${v.group.length}"
+           data-quantity="${totalQuantity}"
+           data-price="${Number(v.price).toFixed(2)}"
+           onmouseenter="showPricingTooltip(event)"
+           onmousemove="movePricingTooltip(event)"
+           onmouseleave="hidePricingTooltip()">
+            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="14" class="pricing-chart-hit" />
+            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="5" class="pricing-chart-avg-dot ${series.cssClass}" />
+        </g>`;
+        }).join('');
+
+    return {linePath, dotsHTML: dotsHTML + avgDotsHTML, last: vertexPoints[vertexPoints.length - 1]};
 }
 
 function buildPricingComboChart(sales, listings) {

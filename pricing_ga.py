@@ -282,7 +282,64 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     return edition_id, foil_id
 
 
-def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) -> tuple[int, int, int]:
+def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = False) -> tuple[int, int]:
+    from api_ga import JSON_EDITIONS, JSON_INFO
+
+    editions_file = new_json(JSON_EDITIONS)
+    info_file = new_json(JSON_INFO)
+    listings_file = new_json(JSON_LISTINGS)
+
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    foils = info_data[card_id]["editions"][edition_id]["foils"]
+    foil_ids_by_kind = {foil_info["kind"]: foil_id for foil_id, foil_info in foils.items()}
+
+    with listings_file.open("r", encoding="utf-8") as f:
+        listings_data = json.load(f)
+
+    stored = 0
+    skipped_unrecognized = 0
+
+    for listing in listings:
+        foil_id = foil_ids_by_kind.get(listing["foil_kind"]) if listing["foil_kind"] else None
+
+        if not foil_id:
+            skipped_unrecognized += 1
+            continue
+
+        entry = {
+            "date": listing["date"],
+            "marketplace": "TCGPlayer",
+            "price": listing["price"],
+            "quantity": listing["quantity"],
+            "info": listing["condition"],
+        }
+
+        listings_data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).append(entry)
+        stored += 1
+
+    with listings_file.open("w", encoding="utf-8") as f:
+        json.dump(listings_data, f, indent=4, ensure_ascii=False)
+
+    if debug:
+        print(
+            f"Stored TCG listings | "
+            f"card_id={card_id} | "
+            f"edition_id={edition_id} | "
+            f"stored={stored} | "
+            f"skipped_unrecognized={skipped_unrecognized}"
+        )
+
+    return stored, skipped_unrecognized
+
+
+def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) -> tuple[int, int, int, int]:
     from api_ga import JSON_EDITIONS, JSON_INFO
 
     editions_file = new_json(JSON_EDITIONS)
@@ -306,7 +363,13 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) ->
     today = date.today().isoformat()
     stored = 0
     skipped_today = 0
+    skipped_duplicate = 0
     skipped_unrecognized = 0
+
+    # Dates already present before this run, per foil_id. A non-today date is
+    # treated as settled — once it's been captured once, it never changes, so
+    # any further sale reported for that date this run is a re-scraped repeat.
+    existing_dates_by_foil = {}
 
     for sale in sales:
         foil_id = foil_ids_by_kind.get(sale["foil_kind"]) if sale["foil_kind"] else None
@@ -319,6 +382,14 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) ->
 
         if sale_date == today:
             skipped_today += 1
+            continue
+
+        if foil_id not in existing_dates_by_foil:
+            existing_entries = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+            existing_dates_by_foil[foil_id] = {entry["date"] for entry in existing_entries}
+
+        if sale_date in existing_dates_by_foil[foil_id]:
+            skipped_duplicate += 1
             continue
 
         entry = {
@@ -342,10 +413,11 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) ->
             f"edition_id={edition_id} | "
             f"stored={stored} | "
             f"skipped_today={skipped_today} | "
+            f"skipped_duplicate={skipped_duplicate} | "
             f"skipped_unrecognized={skipped_unrecognized}"
         )
 
-    return stored, skipped_today, skipped_unrecognized
+    return stored, skipped_today, skipped_duplicate, skipped_unrecognized
 
 
 def _sync_info(card_data: dict, debug: bool = False) -> None:
@@ -425,10 +497,24 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
     if not edition_id:
         return
 
+    last_listings = api_tcgplayer.get_last_listings(edition_id)
+
+    if last_listings:
+        days_since = (date.today() - date.fromisoformat(last_listings)).days
+
+        if days_since <= 7:
+            print(f"\nListings last updated {days_since} day(s) ago (on {last_listings}) — need more than 7 days between updates.")
+            return
+
     product_id = api_tcgplayer.prompt_product_id(edition_id, debug)
     url = api_tcgplayer._build_url(product_id)
 
     listings = api_tcgplayer.fetch_listings(url, debug)
+
+    if listings is None:
+        return
+
+    api_tcgplayer.set_last_listings(edition_id, debug)
 
     if not listings:
         return
@@ -452,6 +538,8 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
 
     cheapest = sorted(cheapest_by_condition.values(), key=lambda listing: condition_rank(listing["condition"]))
 
+    stored, skipped_unrecognized = _store_listings_tcg(edition_id, cheapest, debug)
+
     print()
 
     total = len(cheapest)
@@ -468,6 +556,13 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
             f"${listing['price']:>{price_width}.2f}"
         )
 
+    summary = f"\nStored {stored} listing(s)"
+
+    if skipped_unrecognized:
+        summary += f", skipped {skipped_unrecognized} unrecognized variant(s)"
+
+    print(summary)
+
 
 def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
     edition_id = _select_edition(card_name)
@@ -483,7 +578,7 @@ def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
     if sales is None:
         return
 
-    api_tcgplayer.set_last_scraped(edition_id, debug)
+    api_tcgplayer.set_last_sales(edition_id, debug)
 
     if not sales:
         return
@@ -506,12 +601,15 @@ def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
             f"${sale['price']:>{price_width}.2f}"
         )
 
-    stored, skipped_today, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
 
     summary = f"\nStored {stored} sale(s)"
 
     if skipped_today:
         summary += f", excluded {skipped_today} from today"
+
+    if skipped_duplicate:
+        summary += f", skipped {skipped_duplicate} already-recorded date(s)"
 
     if skipped_unrecognized:
         summary += f", skipped {skipped_unrecognized} unrecognized variant(s)"

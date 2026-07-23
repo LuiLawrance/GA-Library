@@ -21,61 +21,56 @@ def _build_url(product_id: str, page: int = 1) -> str:
     return f"{BASE_URL}{product_id}?page={page}"
 
 
+def _get_ids_field(edition_id: str, field: str) -> str | None:
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    return ids_data.get(edition_id, {}).get(field)
+
+
+def _set_ids_field(edition_id: str, field: str, value: str, debug: bool = False) -> None:
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    ids_data.setdefault(edition_id, {})[field] = value
+
+    with ids_file.open("w", encoding="utf-8") as f:
+        json.dump(ids_data, f, indent=4)
+
+    if debug:
+        print(
+            f"Updated ID_TCGPLAYER.json | "
+            f"edition_id={edition_id} | "
+            f"{field}={value}"
+        )
+
+
+def get_last_sales(edition_id: str) -> str | None:
+    return _get_ids_field(edition_id, "last_sales")
+
+
+def set_last_sales(edition_id: str, debug: bool = False) -> None:
+    _set_ids_field(edition_id, "last_sales", date.today().isoformat(), debug)
+
+
+def get_last_listings(edition_id: str) -> str | None:
+    return _get_ids_field(edition_id, "last_listings")
+
+
+def set_last_listings(edition_id: str, debug: bool = False) -> None:
+    _set_ids_field(edition_id, "last_listings", date.today().isoformat(), debug)
+
+
 def get_product_id(edition_id: str) -> str | None:
-    ids_file = new_json(JSON_IDS)
-
-    with ids_file.open("r", encoding="utf-8") as f:
-        ids_data = json.load(f)
-
-    return ids_data.get(edition_id, {}).get("product_id")
-
-
-def get_last_scraped(edition_id: str) -> str | None:
-    ids_file = new_json(JSON_IDS)
-
-    with ids_file.open("r", encoding="utf-8") as f:
-        ids_data = json.load(f)
-
-    return ids_data.get(edition_id, {}).get("last_scraped")
+    return _get_ids_field(edition_id, "product_id")
 
 
 def _set_product_id(edition_id: str, product_id: str, debug: bool = False) -> None:
-    ids_file = new_json(JSON_IDS)
-
-    with ids_file.open("r", encoding="utf-8") as f:
-        ids_data = json.load(f)
-
-    ids_data.setdefault(edition_id, {})["product_id"] = product_id
-
-    with ids_file.open("w", encoding="utf-8") as f:
-        json.dump(ids_data, f, indent=4)
-
-    if debug:
-        print(
-            f"Updated ID_TCGPLAYER.json | "
-            f"edition_id={edition_id} | "
-            f"product_id={product_id}"
-        )
-
-
-def set_last_scraped(edition_id: str, debug: bool = False) -> None:
-    ids_file = new_json(JSON_IDS)
-
-    with ids_file.open("r", encoding="utf-8") as f:
-        ids_data = json.load(f)
-
-    last_scraped = date.today().isoformat()
-    ids_data.setdefault(edition_id, {})["last_scraped"] = last_scraped
-
-    with ids_file.open("w", encoding="utf-8") as f:
-        json.dump(ids_data, f, indent=4)
-
-    if debug:
-        print(
-            f"Updated ID_TCGPLAYER.json | "
-            f"edition_id={edition_id} | "
-            f"last_scraped={last_scraped}"
-        )
+    _set_ids_field(edition_id, "product_id", product_id, debug)
 
 
 def fetch_sales(url: str, debug: bool = False) -> list[dict] | None:
@@ -159,6 +154,7 @@ def fetch_listings(url: str, debug: bool = False) -> list[dict] | None:
     from api_ga import _log_error
 
     base_url = url.split("?")[0]
+    condition_names = set(CONDITION_MAP.values())
 
     try:
         with sync_playwright() as p:
@@ -191,9 +187,21 @@ def fetch_listings(url: str, debug: bool = False) -> list[dict] | None:
                     available = row.locator(".add-to-cart__available").inner_text().strip()
                     quantity = int(available.replace("of", "").strip())
 
+                    # Listings already show the full condition name (e.g. "Near Mint"),
+                    # unlike the sales popup's abbreviations, so no CONDITION_MAP lookup
+                    # is needed here — just the same Foil-suffix classification.
+                    is_foil = condition.endswith(" Foil")
+                    base_condition = condition.removesuffix(" Foil") if is_foil else condition
+
+                    if is_foil:
+                        foil_kind = "FOIL" if base_condition in condition_names else None
+                    else:
+                        foil_kind = "NONFOIL"
+
                     listings.append({
                         "date": date.today().isoformat(),
                         "condition": condition,
+                        "foil_kind": foil_kind,
                         "quantity": quantity,
                         "price": float(price.replace("$", "").replace(",", ""))
                     })

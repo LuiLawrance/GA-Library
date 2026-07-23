@@ -663,6 +663,19 @@
     fill: var(--series-listings);
 }
 
+.pricing-chart-avg-dot {
+    fill: var(--bg-card);
+    stroke-width: 2;
+}
+
+.pricing-chart-avg-dot.pricing-series-sales {
+    stroke: var(--series-sales);
+}
+
+.pricing-chart-avg-dot.pricing-series-listings {
+    stroke: var(--series-listings);
+}
+
 .pricing-chart-hit {
     fill: transparent;
     cursor: pointer;
