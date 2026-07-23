@@ -419,6 +419,56 @@ def add_sale(card_name: str, debug: bool = False) -> None:
     _prompt_entry(card_name, JSON_SALES, debug)
 
 
+def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
+    edition_id = _select_edition(card_name)
+
+    if not edition_id:
+        return
+
+    product_id = api_tcgplayer.prompt_product_id(edition_id, debug)
+    url = api_tcgplayer._build_url(product_id)
+
+    listings = api_tcgplayer.fetch_listings(url, debug)
+
+    if not listings:
+        return
+
+    cheapest_by_condition = {}
+
+    for listing in listings:
+        condition = listing["condition"]
+        current_cheapest = cheapest_by_condition.get(condition)
+
+        if current_cheapest is None or listing["price"] < current_cheapest["price"]:
+            cheapest_by_condition[condition] = listing
+
+    condition_order = list(api_tcgplayer.CONDITION_MAP.values())
+
+    def condition_rank(condition: str) -> float:
+        is_foil = condition.endswith(" Foil")
+        base = condition.removesuffix(" Foil") if is_foil else condition
+        rank = condition_order.index(base) if base in condition_order else len(condition_order)
+        return rank + (0.5 if is_foil else 0)
+
+    cheapest = sorted(cheapest_by_condition.values(), key=lambda listing: condition_rank(listing["condition"]))
+
+    print()
+
+    total = len(cheapest)
+    index_width = len(str(total))
+    condition_width = max(len(listing["condition"]) for listing in cheapest)
+    quantity_width = max(len(str(listing["quantity"])) for listing in cheapest)
+    price_width = max(len(f"{listing['price']:.2f}") for listing in cheapest)
+
+    for i, listing in enumerate(cheapest, 1):
+        print(
+            f"{str(i).rjust(index_width)}. "
+            f"{listing['condition']:<{condition_width}} | "
+            f"x{str(listing['quantity']).rjust(quantity_width)} | "
+            f"${listing['price']:>{price_width}.2f}"
+        )
+
+
 def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
     edition_id = _select_edition(card_name)
 

@@ -155,6 +155,73 @@ def fetch_sales(url: str, debug: bool = False) -> list[dict] | None:
     return sales
 
 
+def fetch_listings(url: str, debug: bool = False) -> list[dict] | None:
+    from api_ga import _log_error
+
+    base_url = url.split("?")[0]
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=False)
+            page = browser.new_page()
+            page.goto(url)
+            page.wait_for_load_state("networkidle")
+
+            # Page-number buttons are the only role="link" buttons whose visible
+            # text is a bare number — "tcg-standard-button" itself is too generic
+            # (Add to Cart, Filter Sales, etc. all share it) to scope to directly.
+            page_number_texts = page.locator("a[role='link'] .tcg-standard-button__content").all_inner_texts()
+            page_numbers = [int(t.strip()) for t in page_number_texts if t.strip().isdigit()]
+            total_pages = max(page_numbers) if page_numbers else 1
+
+            listings = []
+
+            for page_num in range(1, total_pages + 1):
+                if page_num > 1:
+                    page.goto(f"{base_url}?page={page_num}")
+                    page.wait_for_load_state("networkidle")
+
+                rows = page.locator(".listing-item")
+
+                for i in range(rows.count()):
+                    row = rows.nth(i)
+
+                    condition = row.locator(".listing-item__condition").inner_text().strip()
+                    price = row.locator(".listing-item__listing-data__info__price").inner_text().strip()
+                    available = row.locator(".add-to-cart__available").inner_text().strip()
+                    quantity = int(available.replace("of", "").strip())
+
+                    listings.append({
+                        "date": date.today().isoformat(),
+                        "condition": condition,
+                        "quantity": quantity,
+                        "price": float(price.replace("$", "").replace(",", ""))
+                    })
+
+            browser.close()
+
+    except Exception as e:
+        _log_error(url, e, debug)
+
+        print(
+            f"Fetch Error | "
+            f"url={url} | "
+            f"{e}"
+        )
+
+        return None
+
+    if debug:
+        print(
+            f"Fetched listings | "
+            f"url={url} | "
+            f"pages={total_pages} | "
+            f"count={len(listings)}"
+        )
+
+    return listings
+
+
 def prompt_product_id(edition_id: str, debug: bool = False) -> str:
     product_id = get_product_id(edition_id)
 

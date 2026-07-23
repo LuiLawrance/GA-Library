@@ -1,7 +1,7 @@
 from api_ga import card_reset, card_search, set_search
 from deck_ga import deck_card_add, deck_create, deck_delete, deck_edit, deck_list, deck_view
 from inv_ga import bin_create, bin_delete, bin_edit, bin_list, inv_edit
-from pricing_ga import add_listing, add_sale, scrape_sales_tcg
+from pricing_ga import add_listing, add_sale, scrape_listings_tcg, scrape_sales_tcg
 from user import user_create, user_delete, user_reset
 from util_file import new_json
 
@@ -103,7 +103,8 @@ def menu_listings() -> None:
         print("0. Back")
         print("1. Add Listing")
         print("2. Add Sale")
-        print("3. Scrape Sales (TCG)")
+        print("3. Scrape Listings (TCG)")
+        print("4. Scrape Sales (TCG)")
 
         choice = input("\nSelect option: ").strip()
 
@@ -120,6 +121,10 @@ def menu_listings() -> None:
                 add_sale(card_name)
 
             case "3":
+                card_name = input("\nEnter card name: ").strip()
+                scrape_listings_tcg(card_name)
+
+            case "4":
                 card_name = input("\nEnter card name: ").strip()
                 scrape_sales_tcg(card_name)
 
