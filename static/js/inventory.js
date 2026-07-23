@@ -2125,6 +2125,7 @@ async function openInvDrawer(cardId, editionId, cardName) {
                         ${legalityHTML ? `<div><div class="drawer-section-label">Legality</div><div class="drawer-legality">${legalityHTML}</div></div>` : ''}
                     </div>
                     <div class="drawer-tab-thema hidden"></div>
+                    <div class="drawer-tab-pricing hidden"></div>
                 </div>
             </div>
             <div class="drawer-editions-section">
@@ -2142,11 +2143,18 @@ async function openInvDrawer(cardId, editionId, cardName) {
 
             // Apply active tab to newly rendered panels
             const cardInfo = drawer.querySelector('.drawer-card-info');
-            if (cardInfo && invDrawerActiveTab === 'thema') {
+            if (cardInfo && invDrawerActiveTab !== 'info') {
                 cardInfo.querySelector('.drawer-tab-info').classList.add('hidden');
-                const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
-                themaPanel.classList.remove('hidden');
-                themaPanel.innerHTML = buildTabThemaPanel(card.editions[editionId]);
+
+                if (invDrawerActiveTab === 'thema') {
+                    const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
+                    themaPanel.classList.remove('hidden');
+                    themaPanel.innerHTML = buildTabThemaPanel(card.editions[editionId]);
+                } else if (invDrawerActiveTab === 'pricing') {
+                    const pricingPanel = cardInfo.querySelector('.drawer-tab-pricing');
+                    pricingPanel.classList.remove('hidden');
+                    pricingPanel.innerHTML = buildTabPricingPanel(card.editions[editionId]);
+                }
             }
         };
 
@@ -2244,6 +2252,9 @@ function selectInvDrawerEdition(editionId) {
     if (invDrawerActiveTab === 'thema') {
         const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
         if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
+    } else if (invDrawerActiveTab === 'pricing') {
+        const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
+        if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition);
     }
 }
 

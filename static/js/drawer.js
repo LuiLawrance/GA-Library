@@ -216,8 +216,256 @@ function buildTabThemaPanel(edition) {
         + illustratorHTML;
 }
 
+const PRICING_CHART_W = 400;
+const PRICING_CHART_H = 140;
+const PRICING_CHART_PAD = {top: 14, right: 10, bottom: 20, left: 46};
+
+// Fixed series identity → color assignment. Never reassigned by data
+// presence or rank — Sales is always the blue slot, Listings always orange.
+const PRICING_SERIES = {
+    sales: {label: 'Sales', cssClass: 'pricing-series-sales'},
+    listings: {label: 'Listings', cssClass: 'pricing-series-listings'}
+};
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function showPricingTooltip(evt) {
+    const g = evt.currentTarget;
+    let tooltip = document.getElementById('pricing-tooltip');
+
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'pricing-tooltip';
+        tooltip.className = 'pricing-tooltip hidden';
+        document.body.appendChild(tooltip);
+    }
+
+    tooltip.innerHTML = '';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'pricing-tooltip-header';
+
+    const keyEl = document.createElement('span');
+    keyEl.className = `pricing-tooltip-key ${g.dataset.seriesClass}`;
+    headerEl.appendChild(keyEl);
+
+    const seriesEl = document.createElement('span');
+    seriesEl.className = 'pricing-tooltip-series';
+    seriesEl.textContent = g.dataset.series;
+    headerEl.appendChild(seriesEl);
+    tooltip.appendChild(headerEl);
+
+    const priceEl = document.createElement('div');
+    priceEl.className = 'pricing-tooltip-price';
+    priceEl.textContent = `$${g.dataset.price}`;
+    tooltip.appendChild(priceEl);
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pricing-tooltip-meta';
+    metaEl.textContent = `${g.dataset.date} · ${g.dataset.condition} · x${g.dataset.quantity}`;
+    tooltip.appendChild(metaEl);
+
+    tooltip.classList.remove('hidden');
+    movePricingTooltip(evt);
+}
+
+function movePricingTooltip(evt) {
+    const tooltip = document.getElementById('pricing-tooltip');
+    if (!tooltip) return;
+    tooltip.style.left = `${evt.clientX + 14}px`;
+    tooltip.style.top = `${evt.clientY + 14}px`;
+}
+
+function hidePricingTooltip() {
+    document.getElementById('pricing-tooltip')?.classList.add('hidden');
+}
+
+function buildPricingSeriesMarks(entries, seriesKey, xAt, yAt) {
+    const series = PRICING_SERIES[seriesKey];
+
+    if (!entries.length) return {linePath: '', dotsHTML: '', last: null};
+
+    const points = entries.map(e => ({...e, cx: xAt(e.date), cy: yAt(e.price)}));
+
+    const linePath = points.length > 1
+        ? points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.cx.toFixed(1)} ${p.cy.toFixed(1)}`).join(' ')
+        : '';
+
+    const dotsHTML = points.map(p => `
+        <g class="pricing-chart-point"
+           data-series="${escapeHtml(series.label)}"
+           data-series-class="${series.cssClass}"
+           data-date="${escapeHtml(p.date)}"
+           data-condition="${escapeHtml(p.info || '')}"
+           data-quantity="${p.quantity ?? 1}"
+           data-price="${Number(p.price).toFixed(2)}"
+           onmouseenter="showPricingTooltip(event)"
+           onmousemove="movePricingTooltip(event)"
+           onmouseleave="hidePricingTooltip()">
+            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="12" class="pricing-chart-hit" />
+            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="4" class="pricing-chart-dot ${series.cssClass}" />
+        </g>`).join('');
+
+    return {linePath, dotsHTML, last: points[points.length - 1]};
+}
+
+function buildPricingComboChart(sales, listings) {
+    const salesSorted = [...(sales || [])].sort((a, b) => a.date.localeCompare(b.date));
+    const listingsSorted = [...(listings || [])].sort((a, b) => a.date.localeCompare(b.date));
+    const all = [...salesSorted, ...listingsSorted];
+
+    const legendHTML = `
+        <div class="pricing-legend">
+            <span class="pricing-legend-item"><span class="pricing-legend-key pricing-series-sales"></span>Sales</span>
+            <span class="pricing-legend-item"><span class="pricing-legend-key pricing-series-listings"></span>Listings</span>
+        </div>`;
+
+    if (all.length === 0) {
+        return legendHTML + `<div class="pricing-empty">No pricing data available.</div>`;
+    }
+
+    const w = PRICING_CHART_W, h = PRICING_CHART_H, pad = PRICING_CHART_PAD;
+    const plotW = w - pad.left - pad.right;
+    const plotH = h - pad.top - pad.bottom;
+
+    const times = all.map(e => new Date(e.date).getTime());
+    const minTime = Math.min(...times);
+    const maxTime = Math.max(...times);
+    const timeSpan = (maxTime - minTime) || 1;
+
+    const prices = all.map(e => e.price);
+    const rawMin = Math.min(...prices);
+    const rawMax = Math.max(...prices);
+    const span = (rawMax - rawMin) || Math.max(rawMax * 0.2, 1);
+    const minPrice = rawMin - span * 0.15;
+    const maxPrice = rawMax + span * 0.15;
+
+    const singleTime = minTime === maxTime;
+    const xAt = date => singleTime ? pad.left + plotW / 2 : pad.left + ((new Date(date).getTime() - minTime) / timeSpan) * plotW;
+    const yAt = price => pad.top + plotH - ((price - minPrice) / (maxPrice - minPrice)) * plotH;
+
+    const gridlinesHTML = [0, 0.5, 1].map(t => {
+        const gy = pad.top + plotH * t;
+        const price = maxPrice - (maxPrice - minPrice) * t;
+        return `
+            <line x1="${pad.left}" y1="${gy.toFixed(1)}" x2="${(w - pad.right).toFixed(1)}" y2="${gy.toFixed(1)}" class="pricing-chart-grid" />
+            <text x="${(pad.left - 6).toFixed(1)}" y="${gy.toFixed(1)}" class="pricing-chart-axis-label" text-anchor="end" dominant-baseline="middle">$${price.toFixed(2)}</text>`;
+    }).join('');
+
+    const salesMarks = buildPricingSeriesMarks(salesSorted, 'sales', xAt, yAt);
+    const listingsMarks = buildPricingSeriesMarks(listingsSorted, 'listings', xAt, yAt);
+
+    // Direct end-labels, skipped when the two series' last points would collide vertically —
+    // the legend + tooltip already carry identity, so dropping them here is a safe fallback.
+    const candidates = [
+        salesMarks.last && {...salesMarks.last, cssClass: PRICING_SERIES.sales.cssClass},
+        listingsMarks.last && {...listingsMarks.last, cssClass: PRICING_SERIES.listings.cssClass}
+    ].filter(Boolean);
+
+    let endLabelsHTML = '';
+    if (!(candidates.length === 2 && Math.abs(candidates[0].cy - candidates[1].cy) < 12)) {
+        endLabelsHTML = candidates.map(p => {
+            const anchor = p.cx > w - pad.right - 30 ? 'end' : 'middle';
+            return `<text x="${p.cx.toFixed(1)}" y="${(p.cy - 10).toFixed(1)}" class="pricing-chart-end-label" text-anchor="${anchor}">$${Number(p.price).toFixed(2)}</text>`;
+        }).join('');
+    }
+
+    const firstDate = all.reduce((min, e) => e.date < min ? e.date : min, all[0].date);
+    const lastDate = all.reduce((max, e) => e.date > max ? e.date : max, all[0].date);
+
+    const dateLabelsHTML = `
+        <text x="${pad.left}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="start">${escapeHtml(firstDate)}</text>
+        ${firstDate !== lastDate ? `<text x="${(w - pad.right).toFixed(1)}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="end">${escapeHtml(lastDate)}</text>` : ''}`;
+
+    return `
+        ${legendHTML}
+        <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+            ${gridlinesHTML}
+            <path d="${salesMarks.linePath}" class="pricing-chart-line ${PRICING_SERIES.sales.cssClass}" fill="none" />
+            <path d="${listingsMarks.linePath}" class="pricing-chart-line ${PRICING_SERIES.listings.cssClass}" fill="none" />
+            ${salesMarks.dotsHTML}
+            ${listingsMarks.dotsHTML}
+            ${endLabelsHTML}
+            ${dateLabelsHTML}
+        </svg>`;
+}
+
+function buildPricingStats(sales, listings) {
+    const stats = [];
+
+    if (sales.length > 0) {
+        const mostRecent = [...sales].sort((a, b) => b.date.localeCompare(a.date))[0];
+        stats.push(['Most Recent Sale', `$${Number(mostRecent.price).toFixed(2)}`]);
+    }
+
+    if (listings.length > 0) {
+        const lowest = Math.min(...listings.map(l => l.price));
+        stats.push(['Lowest Recent Listing', `$${lowest.toFixed(2)}`]);
+    }
+
+    if (stats.length === 0) return '';
+
+    return `
+        <div class="drawer-stats pricing-stats">
+            ${stats.map(([label, value]) => `
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">${label}</span>
+                    <span class="drawer-stat-value">${value}</span>
+                </div>
+            `).join('')}
+        </div>`;
+}
+
+function buildPricingFoilSection(foilId, label, pricing) {
+    const data = pricing?.[foilId] || {listings: [], sales: []};
+
+    return `
+        <div class="pricing-section">
+            <div class="collector-section-label">${label}</div>
+            ${buildPricingStats(data.sales, data.listings)}
+            ${buildPricingComboChart(data.sales, data.listings)}
+        </div>`;
+}
+
+function buildTabPricingPanel(edition) {
+    const foils = edition?.foils || {};
+    const pricing = edition?.pricing || {};
+
+    if (Object.keys(foils).length === 0) {
+        return `<div class="thema-empty">No pricing data available for this edition.</div>`;
+    }
+
+    const entries = Object.entries(foils);
+    const nonfoilEntry = entries.find(([, f]) => f.kind?.toLowerCase() === 'nonfoil');
+    const foilEntry = entries.find(([, f]) => f.kind?.toLowerCase() === 'foil');
+    const specials = entries.filter(([, f]) => {
+        const k = f.kind?.toLowerCase();
+        return k !== 'nonfoil' && k !== 'foil';
+    });
+
+    const sections = [];
+
+    if (nonfoilEntry) sections.push(buildPricingFoilSection(nonfoilEntry[0], 'Non-Foil', pricing));
+    if (foilEntry) sections.push(buildPricingFoilSection(foilEntry[0], 'Foil', pricing));
+    specials.forEach(([fid, f]) => sections.push(buildPricingFoilSection(fid, toFoilLabel(f.kind), pricing)));
+
+    return sections.join('');
+}
+
 function switchDrawerTab(tab, drawerId = 'card-drawer') {
-    if (drawerId === 'card-drawer') {
+    const isCardDrawer = drawerId === 'card-drawer';
+    const previousTab = isCardDrawer ? drawerActiveTab : invDrawerActiveTab;
+
+    if (previousTab === tab) return;
+
+    if (isCardDrawer) {
         drawerActiveTab = tab;
     } else {
         invDrawerActiveTab = tab;
@@ -226,7 +474,7 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     if (!drawer) return;
 
     // Update the external floating sidebar
-    const sidebarId = drawerId === 'card-drawer' ? 'drawer-sidebar' : 'inv-drawer-sidebar';
+    const sidebarId = isCardDrawer ? 'drawer-sidebar' : 'inv-drawer-sidebar';
     const sidebar = document.getElementById(sidebarId);
     if (sidebar) {
         sidebar.querySelectorAll('.drawer-sidebar-btn').forEach(btn => {
@@ -237,18 +485,25 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     const cardInfo = drawer.querySelector('.drawer-card-info');
     if (!cardInfo) return;
 
-    const infoPanel = cardInfo.querySelector('.drawer-tab-info');
-    const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
-    if (!infoPanel || !themaPanel) return;
+    const panels = {
+        info: cardInfo.querySelector('.drawer-tab-info'),
+        thema: cardInfo.querySelector('.drawer-tab-thema'),
+        pricing: cardInfo.querySelector('.drawer-tab-pricing'),
+    };
 
-    const outgoing = tab === 'info' ? themaPanel : infoPanel;
-    const incoming = tab === 'info' ? infoPanel : themaPanel;
+    const outgoing = panels[previousTab];
+    const incoming = panels[tab];
+    if (!outgoing || !incoming) return;
 
     // Populate incoming content before animating in
-    if (tab !== 'info') {
-        const currentEditionId = drawer.dataset.selectedEdition;
-        const editions = JSON.parse(drawer.dataset.editions || '{}');
-        themaPanel.innerHTML = buildTabThemaPanel(editions[currentEditionId]);
+    const currentEditionId = drawer.dataset.selectedEdition;
+    const editions = JSON.parse(drawer.dataset.editions || '{}');
+    const edition = editions[currentEditionId];
+
+    if (tab === 'thema') {
+        incoming.innerHTML = buildTabThemaPanel(edition);
+    } else if (tab === 'pricing') {
+        incoming.innerHTML = buildTabPricingPanel(edition);
     }
 
     // Fade out outgoing
@@ -419,6 +674,7 @@ async function openCardDrawer(cardId, editionId, cardName) {
                     </div>
 
                     <div class="drawer-tab-thema hidden"></div>
+                    <div class="drawer-tab-pricing hidden"></div>
                 </div>
             </div>
 
@@ -438,14 +694,20 @@ async function openCardDrawer(cardId, editionId, cardName) {
 
             // Apply active tab to the newly rendered panels
             const cardInfo = drawer.querySelector('.drawer-card-info');
-            if (cardInfo && drawerIsOpen) {
+            if (cardInfo && drawerIsOpen && drawerActiveTab !== 'info') {
                 const infoPanel = cardInfo.querySelector('.drawer-tab-info');
-                const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
+                const editions = JSON.parse(drawer.dataset.editions || '{}');
+                const edition = editions[drawer.dataset.selectedEdition];
+                infoPanel.classList.add('hidden');
+
                 if (drawerActiveTab === 'thema') {
-                    infoPanel.classList.add('hidden');
+                    const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
                     themaPanel.classList.remove('hidden');
-                    const editions = JSON.parse(drawer.dataset.editions || '{}');
-                    themaPanel.innerHTML = buildTabThemaPanel(editions[drawer.dataset.selectedEdition]);
+                    themaPanel.innerHTML = buildTabThemaPanel(edition);
+                } else if (drawerActiveTab === 'pricing') {
+                    const pricingPanel = cardInfo.querySelector('.drawer-tab-pricing');
+                    pricingPanel.classList.remove('hidden');
+                    pricingPanel.innerHTML = buildTabPricingPanel(edition);
                 }
             }
         };
@@ -553,10 +815,14 @@ function selectDrawerEdition(editionId) {
 
     document.getElementById(`edition-tile-${editionId}`).classList.add('edition-selected');
 
-    // If thema tab is active, re-render for the new edition
+    // If a data-driven tab is active, re-render for the new edition
     if (drawerActiveTab === 'thema') {
         const cardInfo = drawer.querySelector('.drawer-card-info');
         const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
         if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
+    } else if (drawerActiveTab === 'pricing') {
+        const cardInfo = drawer.querySelector('.drawer-card-info');
+        const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
+        if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition);
     }
 }

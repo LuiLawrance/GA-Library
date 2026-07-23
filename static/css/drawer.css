@@ -590,6 +590,177 @@
     padding: 4px 0;
 }
 
+.drawer-tab-pricing {
+    padding: 4px 0;
+}
+
+.pricing-empty {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    padding: 4px 0 10px;
+}
+
+.pricing-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+
+.pricing-section:last-child {
+    margin-bottom: 0;
+}
+
+.pricing-stats {
+    grid-template-columns: 1fr 1fr;
+    margin-bottom: 12px;
+}
+
+.pricing-chart {
+    width: 100%;
+    height: auto;
+    display: block;
+    overflow: visible;
+    margin-bottom: 4px;
+}
+
+.pricing-chart-grid {
+    stroke: var(--border);
+    stroke-width: 1;
+}
+
+.pricing-chart-axis-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    fill: var(--text-muted);
+}
+
+.pricing-chart-line {
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.pricing-chart-line.pricing-series-sales {
+    stroke: var(--series-sales);
+}
+
+.pricing-chart-line.pricing-series-listings {
+    stroke: var(--series-listings);
+}
+
+.pricing-chart-dot {
+    stroke: var(--bg-card);
+    stroke-width: 2;
+}
+
+.pricing-chart-dot.pricing-series-sales {
+    fill: var(--series-sales);
+}
+
+.pricing-chart-dot.pricing-series-listings {
+    fill: var(--series-listings);
+}
+
+.pricing-chart-hit {
+    fill: transparent;
+    cursor: pointer;
+}
+
+.pricing-chart-end-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    fill: var(--text);
+}
+
+.pricing-legend {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 8px;
+}
+
+.pricing-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+.pricing-legend-key {
+    display: inline-block;
+    width: 12px;
+    height: 2px;
+    border-radius: 1px;
+}
+
+.pricing-legend-key.pricing-series-sales {
+    background: var(--series-sales);
+}
+
+.pricing-legend-key.pricing-series-listings {
+    background: var(--series-listings);
+}
+
+.pricing-tooltip {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.pricing-tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.pricing-tooltip-key {
+    display: inline-block;
+    width: 10px;
+    height: 2px;
+    border-radius: 1px;
+}
+
+.pricing-tooltip-key.pricing-series-sales {
+    background: var(--series-sales);
+}
+
+.pricing-tooltip-key.pricing-series-listings {
+    background: var(--series-listings);
+}
+
+.pricing-tooltip-series {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.pricing-tooltip-price {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.pricing-tooltip-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+    white-space: nowrap;
+}
+
 .thema-empty {
     font-family: 'DM Mono', monospace;
     font-size: 0.78rem;

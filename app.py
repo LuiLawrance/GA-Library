@@ -6,6 +6,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
+from pricing_ga import JSON_LISTINGS, JSON_SALES
 from rapidfuzz import fuzz, process
 from user import user_create, user_login
 from util_file import new_json
@@ -347,6 +348,8 @@ async def api_cards_suggest(q: str):
 async def api_card_detail(card_id: str):
     info_file = new_json(JSON_INFO)
     thema_file = new_json(JSON_THEMA)
+    listings_file = new_json(JSON_LISTINGS)
+    sales_file = new_json(JSON_SALES)
 
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
@@ -354,10 +357,19 @@ async def api_card_detail(card_id: str):
     with thema_file.open("r", encoding="utf-8") as f:
         thema_data = json.load(f)
 
+    with listings_file.open("r", encoding="utf-8") as f:
+        listings_data = json.load(f)
+
+    with sales_file.open("r", encoding="utf-8") as f:
+        sales_data = json.load(f)
+
     card_info = info_data.get(card_id)
 
     if not card_info:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    card_listings = listings_data.get(card_id, {})
+    card_sales = sales_data.get(card_id, {})
 
     for edition_id, edition_info in card_info.get("editions", {}).items():
         set_prefix = edition_info.get("set_prefix", "")
@@ -378,6 +390,22 @@ async def api_card_detail(card_id: str):
 
         edition_info["collector_number"] = collector_number
         edition_info["thema"] = thema_data.get(edition_id, {})
+
+        edition_listings = card_listings.get(edition_id, {})
+        edition_sales = card_sales.get(edition_id, {})
+        foil_ids = list(edition_info.get("foils", {}).keys()) + [
+            variant_id
+            for foil_info in edition_info.get("foils", {}).values()
+            for variant_id in foil_info.get("variants", {})
+        ]
+
+        edition_info["pricing"] = {
+            foil_id: {
+                "listings": edition_listings.get(foil_id, []),
+                "sales": edition_sales.get(foil_id, [])
+            }
+            for foil_id in foil_ids
+        }
 
     return JSONResponse({"card_id": card_id, "card": card_info})
 
