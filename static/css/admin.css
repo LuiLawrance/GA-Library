@@ -120,23 +120,16 @@
     height: 16px;
     margin: 0;
     flex-shrink: 0;
-    background: var(--bg-card);
+    background: transparent;
     border: 1px solid var(--border);
-    border-radius: 0;
+    border-radius: 4px;
     cursor: pointer;
-    position: relative;
     transition: background 0.15s, border-color 0.15s;
-}
-
-.admin-pid-filter-toggle input[type="checkbox"]:hover,
-.admin-pid-col-check input[type="checkbox"]:hover {
-    border-color: var(--border-focus);
 }
 
 .admin-pid-filter-toggle input[type="checkbox"]:focus-visible,
 .admin-pid-col-check input[type="checkbox"]:focus-visible {
     outline: none;
-    border-color: var(--border-focus);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
@@ -146,33 +139,9 @@
     border-color: var(--accent);
 }
 
-.admin-pid-filter-toggle input[type="checkbox"]:checked::after,
-.admin-pid-col-check input[type="checkbox"]:checked::after {
-    content: "";
-    position: absolute;
-    left: 5px;
-    top: 3px;
-    width: 4px;
-    height: 8px;
-    border: solid var(--bg);
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-}
-
 .admin-pid-col-check input[type="checkbox"]:indeterminate {
     background: color-mix(in srgb, var(--accent) 45%, transparent);
     border-color: var(--accent);
-}
-
-.admin-pid-col-check input[type="checkbox"]:indeterminate::after {
-    content: "";
-    position: absolute;
-    left: 3px;
-    top: 6px;
-    width: 8px;
-    height: 2px;
-    background: var(--bg);
-    border-radius: 1px;
 }
 
 .admin-pid-refresh-group {
