@@ -491,33 +491,40 @@ def add_sale(card_name: str, debug: bool = False) -> None:
     _prompt_entry(card_name, JSON_SALES, debug)
 
 
-def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
-    edition_id = _select_edition(card_name)
-
-    if not edition_id:
-        return
-
+def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False) -> dict:
+    """Web-safe core: no interactive prompts, requires a product_id to already
+    be stored. Returns a result dict rather than printing, so both the CLI
+    and the web admin-refresh endpoint can share this logic."""
     last_listings = api_tcgplayer.get_last_listings(edition_id)
 
     if last_listings:
         days_since = (date.today() - date.fromisoformat(last_listings)).days
 
         if days_since <= 7:
-            print(f"\nListings last updated {days_since} day(s) ago (on {last_listings}) — need more than 7 days between updates.")
-            return
+            return {
+                "ok": True,
+                "gated": True,
+                "gated_message": f"Listings last updated {days_since} day(s) ago (on {last_listings}) — need more than 7 days between updates.",
+                "listings": [],
+                "stored": 0,
+                "skipped_unrecognized": 0,
+            }
 
-    product_id = api_tcgplayer.prompt_product_id(edition_id, debug)
+    product_id = api_tcgplayer.get_product_id(edition_id)
+
+    if not product_id:
+        return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+
     url = api_tcgplayer._build_url(product_id)
-
-    listings = api_tcgplayer.fetch_listings(url, debug)
+    listings = api_tcgplayer.fetch_listings(url, debug, headless)
 
     if listings is None:
-        return
+        return {"ok": False, "error": "Fetch failed. See server logs for details."}
 
     api_tcgplayer.set_last_listings(edition_id, debug)
 
     if not listings:
-        return
+        return {"ok": True, "gated": False, "listings": [], "stored": 0, "skipped_unrecognized": 0}
 
     cheapest_by_condition = {}
 
@@ -540,6 +547,38 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
 
     stored, skipped_unrecognized = _store_listings_tcg(edition_id, cheapest, debug)
 
+    return {
+        "ok": True,
+        "gated": False,
+        "listings": cheapest,
+        "stored": stored,
+        "skipped_unrecognized": skipped_unrecognized,
+    }
+
+
+def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
+    edition_id = _select_edition(card_name)
+
+    if not edition_id:
+        return
+
+    api_tcgplayer.prompt_product_id(edition_id, debug)
+
+    result = scrape_listings_tcg_by_edition(edition_id, debug)
+
+    if not result["ok"]:
+        print(f"\n{result['error']}")
+        return
+
+    if result.get("gated"):
+        print(f"\n{result['gated_message']}")
+        return
+
+    cheapest = result["listings"]
+
+    if not cheapest:
+        return
+
     print()
 
     total = len(cheapest)
@@ -556,12 +595,44 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
             f"${listing['price']:>{price_width}.2f}"
         )
 
-    summary = f"\nStored {stored} listing(s)"
+    summary = f"\nStored {result['stored']} listing(s)"
 
-    if skipped_unrecognized:
-        summary += f", skipped {skipped_unrecognized} unrecognized variant(s)"
+    if result["skipped_unrecognized"]:
+        summary += f", skipped {result['skipped_unrecognized']} unrecognized variant(s)"
 
     print(summary)
+
+
+def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False) -> dict:
+    """Web-safe core: no interactive prompts, requires a product_id to already
+    be stored. Returns a result dict rather than printing, so both the CLI
+    and the web admin-refresh endpoint can share this logic."""
+    product_id = api_tcgplayer.get_product_id(edition_id)
+
+    if not product_id:
+        return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+
+    url = api_tcgplayer._build_url(product_id)
+    sales = api_tcgplayer.fetch_sales(url, debug, headless)
+
+    if sales is None:
+        return {"ok": False, "error": "Fetch failed. See server logs for details."}
+
+    api_tcgplayer.set_last_sales(edition_id, debug)
+
+    if not sales:
+        return {"ok": True, "sales": [], "stored": 0, "skipped_today": 0, "skipped_duplicate": 0, "skipped_unrecognized": 0}
+
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+
+    return {
+        "ok": True,
+        "sales": sales,
+        "stored": stored,
+        "skipped_today": skipped_today,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_unrecognized": skipped_unrecognized,
+    }
 
 
 def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
@@ -570,15 +641,15 @@ def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
     if not edition_id:
         return
 
-    product_id = api_tcgplayer.prompt_product_id(edition_id, debug)
-    url = api_tcgplayer._build_url(product_id)
+    api_tcgplayer.prompt_product_id(edition_id, debug)
 
-    sales = api_tcgplayer.fetch_sales(url, debug)
+    result = scrape_sales_tcg_by_edition(edition_id, debug)
 
-    if sales is None:
+    if not result["ok"]:
+        print(f"\n{result['error']}")
         return
 
-    api_tcgplayer.set_last_sales(edition_id, debug)
+    sales = result["sales"]
 
     if not sales:
         return
@@ -601,17 +672,15 @@ def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
             f"${sale['price']:>{price_width}.2f}"
         )
 
-    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+    summary = f"\nStored {result['stored']} sale(s)"
 
-    summary = f"\nStored {stored} sale(s)"
+    if result["skipped_today"]:
+        summary += f", excluded {result['skipped_today']} from today"
 
-    if skipped_today:
-        summary += f", excluded {skipped_today} from today"
+    if result["skipped_duplicate"]:
+        summary += f", skipped {result['skipped_duplicate']} already-recorded date(s)"
 
-    if skipped_duplicate:
-        summary += f", skipped {skipped_duplicate} already-recorded date(s)"
-
-    if skipped_unrecognized:
-        summary += f", skipped {skipped_unrecognized} unrecognized variant(s)"
+    if result["skipped_unrecognized"]:
+        summary += f", skipped {result['skipped_unrecognized']} unrecognized variant(s)"
 
     print(summary)

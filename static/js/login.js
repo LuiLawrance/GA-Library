@@ -47,6 +47,7 @@ async function handleLogin() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
+            isAdmin = data.auth_type === 'admin';
             setLoggedIn(currentUser);
             navigate('/');
         } else {

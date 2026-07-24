@@ -129,12 +129,11 @@ body {
     border-bottom-color: var(--accent);
 }
 
-.nav-decks-ga {
+.navbar-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     margin-left: auto;
-}
-
-.nav-inventory {
-    margin-left: 0;
 }
 
 /* ── Content area ── */

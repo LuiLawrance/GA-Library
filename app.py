@@ -1,14 +1,15 @@
-from api_ga import _api_search, _format_search, _sort_collector_number, _update_slug, JSON_INFO, JSON_SLUGS, JSON_THEMA, \
-    set_search, UPDATE_THRESHOLD
+from api_ga import _api_search, _format_search, _sort_collector_number, _update_slug, JSON_EDITIONS, JSON_INFO, \
+    JSON_SLUGS, JSON_THEMA, set_search, UPDATE_THRESHOLD
+from api_tcgplayer import get_last_listings, get_last_sales, get_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES
+from pricing_ga import JSON_LISTINGS, JSON_SALES, scrape_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
-from user import user_create, user_login
+from user import JSON_USERS, user_create, user_login
 from util_file import new_json
 
 import json
@@ -35,6 +36,11 @@ _set_search_cache = {}
 _set_search_jobs = {}
 _set_search_jobs_lock = threading.Lock()
 
+# ── Pricing refresh background jobs (admin-only) ──
+# job_id → {status: "running"|"done"|"error", edition_id, sales: {...}|None, listings: {...}|None, error}
+_pricing_jobs = {}
+_pricing_jobs_lock = threading.Lock()
+
 
 def create_token(username: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
@@ -59,6 +65,24 @@ def get_current_user(request: Request) -> str | None:
 
     except JWTError:
         return None
+
+
+def get_user_auth_type(username: str) -> str | None:
+    users_file = new_json(JSON_USERS)
+
+    with users_file.open("r", encoding="utf-8") as f:
+        users_data = json.load(f)
+
+    return users_data.get(username, {}).get("auth_type")
+
+
+def require_admin(request: Request) -> str:
+    user = get_current_user(request)
+
+    if not user or get_user_auth_type(user) != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return user
 
 
 def serve_index():
@@ -417,7 +441,7 @@ async def api_me(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    return JSONResponse({"username": user})
+    return JSONResponse({"username": user, "auth_type": get_user_auth_type(user)})
 
 
 @app.get("/api/sets")
@@ -511,6 +535,171 @@ async def api_sets_search_status(job_id: str):
     return JSONResponse(snapshot)
 
 
+def _run_pricing_refresh_job(job_id: str, edition_id: str, target: str = "both") -> None:
+    try:
+        sales_result = scrape_sales_tcg_by_edition(edition_id, debug=False, headless=False) \
+            if target in ("both", "sales") else None
+        listings_result = scrape_listings_tcg_by_edition(edition_id, debug=False, headless=False) \
+            if target in ("both", "listings") else None
+
+        with _pricing_jobs_lock:
+            job = _pricing_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "done"
+                job["sales"] = sales_result
+                job["listings"] = listings_result
+    except Exception as e:
+        with _pricing_jobs_lock:
+            job = _pricing_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "error"
+                job["error"] = str(e)
+
+
+@app.post("/api/pricing/{edition_id}/refresh/start")
+async def api_pricing_refresh_start(edition_id: str, request: Request, target: str = "both"):
+    require_admin(request)
+
+    if target not in ("both", "sales", "listings"):
+        raise HTTPException(status_code=400, detail="target must be 'both', 'sales', or 'listings'")
+
+    job_id = uuid.uuid4().hex
+    with _pricing_jobs_lock:
+        _pricing_jobs[job_id] = {
+            "status": "running",
+            "edition_id": edition_id,
+            "sales": None,
+            "listings": None,
+            "error": None
+        }
+
+    thread = threading.Thread(
+        target=_run_pricing_refresh_job,
+        args=(job_id, edition_id, target),
+        daemon=True
+    )
+    thread.start()
+
+    return JSONResponse({"job_id": job_id})
+
+
+@app.get("/api/pricing/refresh/status/{job_id}")
+async def api_pricing_refresh_status(job_id: str, request: Request):
+    require_admin(request)
+
+    with _pricing_jobs_lock:
+        job = _pricing_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        snapshot = dict(job)
+
+    if snapshot["status"] in ("done", "error"):
+        with _pricing_jobs_lock:
+            _pricing_jobs.pop(job_id, None)
+
+    return JSONResponse(snapshot)
+
+
+@app.get("/api/admin/pricing/product-ids")
+async def api_admin_pricing_product_ids(request: Request):
+    require_admin(request)
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    with open(JSON_INFO, encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    with open(JSON_SLUGS, encoding="utf-8") as f:
+        slugs_data = json.load(f)
+
+    name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
+
+    results = []
+
+    for edition_id, edition_ref in editions_data.items():
+        card_id = edition_ref.get("card_id")
+        edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
+
+        results.append({
+            "edition_id": edition_id,
+            "card_id": card_id,
+            "name": name_by_card_id.get(card_id, "Unknown"),
+            "set_prefix": edition_info.get("set_prefix"),
+            "set_name": edition_info.get("set_name"),
+            "product_id": get_product_id(edition_id),
+        })
+
+    results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
+
+    return JSONResponse({"editions": results})
+
+
+@app.post("/api/admin/pricing/product-id")
+async def api_admin_set_product_id(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    edition_id = body.get("edition_id", "").strip()
+    product_id = body.get("product_id", "").strip()
+
+    if not edition_id:
+        raise HTTPException(status_code=400, detail="edition_id is required")
+
+    if product_id and not product_id.isdigit():
+        raise HTTPException(status_code=400, detail="Product ID must be numeric")
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    set_product_id(edition_id, product_id)
+
+    return JSONResponse({"edition_id": edition_id, "product_id": product_id})
+
+
+@app.get("/api/admin/pricing/{edition_id}/history")
+async def api_admin_pricing_history(edition_id: str, request: Request):
+    require_admin(request)
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with open(JSON_INFO, encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
+    foil_kind_by_id = {foil_id: foil_info.get("kind") for foil_id, foil_info in foils.items()}
+
+    def _flatten(json_path):
+        with open(json_path, encoding="utf-8") as f:
+            store = json.load(f)
+
+        by_foil = store.get(card_id, {}).get(edition_id, {})
+        entries = []
+
+        for foil_id, records in by_foil.items():
+            for record in records:
+                entries.append({**record, "foil_kind": foil_kind_by_id.get(foil_id, "")})
+
+        entries.sort(key=lambda r: r["date"], reverse=True)
+        return entries
+
+    return JSONResponse({
+        "sales": _flatten(JSON_SALES),
+        "listings": _flatten(JSON_LISTINGS),
+        "last_sales": get_last_sales(edition_id),
+        "last_listings": get_last_listings(edition_id),
+    })
+
+
 @app.get("/api/sets/search")
 async def api_sets_search(prefix: str):
     set_filter = prefix.strip().lower().replace(" ", "_")
@@ -579,7 +768,7 @@ async def api_login(username: str = Form(...), password: str = Form(...)):
 
     token = create_token(username)
 
-    resp = JSONResponse({"username": username})
+    resp = JSONResponse({"username": username, "auth_type": get_user_auth_type(username)})
     resp.set_cookie(
         key="token",
         value=token,
@@ -627,6 +816,11 @@ async def inventory_page():
     return serve_index()
 
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    return serve_index()
+
+
 @app.get("/fragments/cards", response_class=HTMLResponse)
 async def fragment_cards():
     with open("templates/cards.html", encoding="utf-8") as f:
@@ -660,6 +854,12 @@ async def fragment_home():
 @app.get("/fragments/inventory", response_class=HTMLResponse)
 async def fragment_inventory():
     with open("templates/inventory.html", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/admin", response_class=HTMLResponse)
+async def fragment_admin():
+    with open("templates/admin.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 

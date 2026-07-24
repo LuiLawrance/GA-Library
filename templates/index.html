@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="/static/css/prices.css">
     <link rel="stylesheet" href="/static/css/inventory.css">
     <link rel="stylesheet" href="/static/css/decks_ga.css">
+    <link rel="stylesheet" href="/static/css/admin.css">
 </head>
 <body>
 
@@ -38,8 +39,11 @@
     <a href="/collection" data-link>Collection</a>
     <a href="/decks" data-link>Decks</a>
     <a href="/prices" data-link>Prices</a>
-    <a href="/decks_ga" id="nav-decks-ga" class="nav-decks-ga hidden" data-link>My Decks</a>
-    <a href="/inventory" id="nav-inventory" class="nav-inventory hidden" data-link>Inventory</a>
+    <div class="navbar-right">
+        <a href="/admin" id="nav-admin" class="nav-admin hidden" data-link>Admin</a>
+        <a href="/decks_ga" id="nav-decks-ga" class="nav-decks-ga hidden" data-link>My Decks</a>
+        <a href="/inventory" id="nav-inventory" class="nav-inventory hidden" data-link>Inventory</a>
+    </div>
 </nav>
 
 <!-- Content area -->
@@ -80,6 +84,7 @@
 <script src="/static/js/prices.js"></script>
 <script src="/static/js/inventory.js"></script>
 <script src="/static/js/decks_ga.js"></script>
+<script src="/static/js/admin.js"></script>
 <script src="/static/js/app.js"></script>
 
 </body>

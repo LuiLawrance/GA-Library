@@ -69,16 +69,16 @@ def get_product_id(edition_id: str) -> str | None:
     return _get_ids_field(edition_id, "product_id")
 
 
-def _set_product_id(edition_id: str, product_id: str, debug: bool = False) -> None:
+def set_product_id(edition_id: str, product_id: str, debug: bool = False) -> None:
     _set_ids_field(edition_id, "product_id", product_id, debug)
 
 
-def fetch_sales(url: str, debug: bool = False) -> list[dict] | None:
+def fetch_sales(url: str, debug: bool = False, headless: bool = False) -> list[dict] | None:
     from api_ga import _log_error
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=headless)
             page = browser.new_page()
             page.goto(url)
             page.wait_for_load_state("networkidle")
@@ -150,7 +150,7 @@ def fetch_sales(url: str, debug: bool = False) -> list[dict] | None:
     return sales
 
 
-def fetch_listings(url: str, debug: bool = False) -> list[dict] | None:
+def fetch_listings(url: str, debug: bool = False, headless: bool = False) -> list[dict] | None:
     from api_ga import _log_error
 
     base_url = url.split("?")[0]
@@ -158,7 +158,7 @@ def fetch_listings(url: str, debug: bool = False) -> list[dict] | None:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=headless)
             page = browser.new_page()
             page.goto(url)
             page.wait_for_load_state("networkidle")
@@ -235,6 +235,6 @@ def prompt_product_id(edition_id: str, debug: bool = False) -> str:
 
     if not product_id:
         product_id = input("Enter TCGPlayer product ID: ").strip()
-        _set_product_id(edition_id, product_id, debug)
+        set_product_id(edition_id, product_id, debug)
 
     return product_id

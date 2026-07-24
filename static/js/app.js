@@ -1,5 +1,6 @@
 // ── State ──
 let currentUser = null;
+let isAdmin = false;
 let loginMode = 'login';
 
 // ── Router ──
@@ -12,6 +13,7 @@ const routes = {
     '/prices': '/fragments/prices',
     '/inventory': '/fragments/inventory',
     '/decks_ga': '/fragments/decks_ga',
+    '/admin': '/fragments/admin',
 };
 
 async function navigate(path, pushState = true) {
@@ -27,6 +29,12 @@ async function navigate(path, pushState = true) {
     // Reset card drawer globals so stale state from deck page doesn't bleed into inventory
     if (typeof selectedCardId !== 'undefined') selectedCardId = null;
     if (typeof drawerIsOpen !== 'undefined') drawerIsOpen = false;
+
+    // Same, for the inventory page's separate drawer instance — inv-card-drawer
+    // has no DOM-independent "is open" flag, it's derived from selectedInvCardId
+    // being non-null, so a stale value here caused openInvDrawer() to think a
+    // freshly-loaded, empty drawer was already open and populated.
+    if (typeof selectedInvCardId !== 'undefined') selectedInvCardId = null;
 
     if (pushState) {
         window.history.pushState({}, '', path);
@@ -106,6 +114,12 @@ async function navigate(path, pushState = true) {
         }
         setTimeout(setupDgaFooterScroll, 100);
     }
+
+    if (pathname === '/admin') {
+        if (typeof window.initAdmin === 'function') {
+            window.initAdmin();
+        }
+    }
 }
 
 function sleep(ms) {
@@ -170,13 +184,16 @@ async function checkAuth() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
+            isAdmin = data.auth_type === 'admin';
             setLoggedIn(currentUser);
         } else {
             currentUser = null;
+            isAdmin = false;
             setLoggedOut();
         }
     } catch {
         currentUser = null;
+        isAdmin = false;
         setLoggedOut();
     }
 }
@@ -188,6 +205,7 @@ function setLoggedIn(username) {
     document.getElementById('topbar-logout-btn').classList.remove('hidden');
     document.getElementById('nav-inventory').classList.remove('hidden');
     document.getElementById('nav-decks-ga').classList.remove('hidden');
+    document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin);
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.remove('hidden');
     if (typeof initDefaultBinPicker === 'function') initDefaultBinPicker();
@@ -199,6 +217,7 @@ function setLoggedOut() {
     document.getElementById('topbar-logout-btn').classList.add('hidden');
     document.getElementById('nav-inventory').classList.add('hidden');
     document.getElementById('nav-decks-ga').classList.add('hidden');
+    document.getElementById('nav-admin').classList.add('hidden');
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.add('hidden');
 }
@@ -206,6 +225,7 @@ function setLoggedOut() {
 async function handleLogout() {
     await fetch('/api/logout', {method: 'POST'});
     currentUser = null;
+    isAdmin = false;
     setLoggedOut();
     navigate('/');
 }
@@ -260,6 +280,7 @@ async function handleLogin() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
+            isAdmin = data.auth_type === 'admin';
             setLoggedIn(currentUser);
             navigate('/');
         } else {
