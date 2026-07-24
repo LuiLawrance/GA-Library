@@ -752,6 +752,7 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
     foil_id = body.get("foil_id", "").strip()
     marketplace = body.get("marketplace", "").strip() or "Manual"
     info = body.get("info", "").strip()
+    entry_date = body.get("date", "").strip()
 
     if entry_type not in ("sales", "listings"):
         raise HTTPException(status_code=400, detail="type must be 'sales' or 'listings'")
@@ -772,8 +773,19 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
     if price < 0 or quantity < 1:
         raise HTTPException(status_code=400, detail="price must be non-negative and quantity at least 1")
 
+    if entry_date:
+        try:
+            parsed_date = date.fromisoformat(entry_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be in YYYY-MM-DD format")
+
+        if parsed_date > date.today():
+            raise HTTPException(status_code=400, detail="date cannot be in the future")
+    else:
+        entry_date = None
+
     try:
-        entry = add_manual_entry(edition_id, foil_id, entry_type, price, quantity, info, marketplace)
+        entry = add_manual_entry(edition_id, foil_id, entry_type, price, quantity, info, marketplace, entry_date)
     except KeyError:
         raise HTTPException(status_code=400, detail="Invalid foil_id for this edition")
 

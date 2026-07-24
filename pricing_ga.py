@@ -492,13 +492,14 @@ def add_sale(card_name: str, debug: bool = False) -> None:
 
 
 def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: float, quantity: int = 1,
-                      info: str = "", marketplace: str = "Manual", debug: bool = False) -> dict:
+                      info: str = "", marketplace: str = "Manual", entry_date: str | None = None,
+                      debug: bool = False) -> dict:
     """Web-safe core: appends a single sale/listing entry without interactive
     prompts, for the admin console's manual-entry form."""
     file_path = JSON_SALES if entry_type == "sales" else JSON_LISTINGS
 
     entry = {
-        "date": date.today().isoformat(),
+        "date": entry_date or date.today().isoformat(),
         "marketplace": marketplace,
         "price": price,
         "quantity": quantity,
@@ -513,6 +514,7 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
             f"card_id={card_id} | "
             f"edition_id={edition_id} | "
             f"foil_id={foil_id} | "
+            f"date={entry['date']} | "
             f"marketplace={marketplace} | "
             f"price={price} | "
             f"quantity={quantity} | "

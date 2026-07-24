@@ -54,4 +54,23 @@
             </div>
         </div>
     </div>
+
+    <div class="card-drawer hidden" id="card-drawer">
+        <div class="drawer-inner">
+            <div id="drawer-content"></div>
+        </div>
+    </div>
+    <div class="drawer-sidebar hidden" id="drawer-sidebar">
+        <button class="drawer-sidebar-close" onclick="closeCardDrawer()">&#x2715;</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
+                title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                title="Thema">🏷️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+                title="Pricing">💵
+        </button>
+    </div>
 </div>

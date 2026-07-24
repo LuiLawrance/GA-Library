@@ -466,6 +466,11 @@ function renderAdminPricingImageCol() {
                    onblur="saveAdminProductId(this)">
         </div>
     `;
+
+    const img = col.querySelector('.admin-pid-detail-image');
+    if (img && document.getElementById('card-drawer')) {
+        img.onclick = () => openCardDrawer(record.card_id, record.edition_id, record.name);
+    }
 }
 
 function renderAdminPricingDetail() {
@@ -527,6 +532,12 @@ function closeAdminPidAddEntry() {
     renderAdminPricingDetail();
 }
 
+function adminPidTodayIso() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function adminPidAddEntryFormHtml(type) {
     const foilsLoaded = !!adminPidDetailFoils;
     const selectedFoil = foilsLoaded ? adminPidDetailFoils.find(f => f.foil_id === adminPidAddEntryFoilId) : null;
@@ -565,6 +576,7 @@ function adminPidAddEntryFormHtml(type) {
                 <input type="number" step="0.01" min="0" class="admin-pid-add-entry-input" id="admin-pid-add-price" placeholder="Price">
                 <input type="number" min="1" step="1" class="admin-pid-add-entry-input admin-pid-add-entry-qty" id="admin-pid-add-qty" placeholder="Qty" value="1">
             </div>
+            <input type="date" class="admin-pid-add-entry-input" id="admin-pid-add-date" value="${adminPidTodayIso()}" max="${adminPidTodayIso()}">
             ${conditionDropdown}
             <input type="text" class="admin-pid-add-entry-input" id="admin-pid-add-marketplace" placeholder="Marketplace" value="Manual">
             <div class="admin-pid-add-entry-actions">
@@ -655,6 +667,7 @@ async function submitAdminPricingManualEntry(type) {
     const foilId = document.getElementById('admin-pid-add-foil').value;
     const priceInput = document.getElementById('admin-pid-add-price');
     const qtyInput = document.getElementById('admin-pid-add-qty');
+    const dateInput = document.getElementById('admin-pid-add-date');
     const infoInput = document.getElementById('admin-pid-add-info');
     const marketplaceInput = document.getElementById('admin-pid-add-marketplace');
 
@@ -669,6 +682,12 @@ async function submitAdminPricingManualEntry(type) {
 
     if (isNaN(price) || price < 0) {
         status.textContent = 'Enter a valid price.';
+        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+        return;
+    }
+
+    if (dateInput.value && dateInput.value > adminPidTodayIso()) {
+        status.textContent = 'Date cannot be in the future.';
         status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
         return;
     }
@@ -688,6 +707,7 @@ async function submitAdminPricingManualEntry(type) {
                 foil_id: foilId,
                 price,
                 quantity,
+                date: dateInput.value,
                 info: infoInput.value.trim(),
                 marketplace: marketplaceInput.value.trim() || 'Manual',
             })
