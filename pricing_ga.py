@@ -491,6 +491,37 @@ def add_sale(card_name: str, debug: bool = False) -> None:
     _prompt_entry(card_name, JSON_SALES, debug)
 
 
+def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: float, quantity: int = 1,
+                      info: str = "", marketplace: str = "Manual", debug: bool = False) -> dict:
+    """Web-safe core: appends a single sale/listing entry without interactive
+    prompts, for the admin console's manual-entry form."""
+    file_path = JSON_SALES if entry_type == "sales" else JSON_LISTINGS
+
+    entry = {
+        "date": date.today().isoformat(),
+        "marketplace": marketplace,
+        "price": price,
+        "quantity": quantity,
+        "info": info,
+    }
+
+    card_id = _append_entry(file_path, edition_id, foil_id, entry)
+
+    if debug:
+        print(
+            f"Added manual {entry_type} entry | "
+            f"card_id={card_id} | "
+            f"edition_id={edition_id} | "
+            f"foil_id={foil_id} | "
+            f"marketplace={marketplace} | "
+            f"price={price} | "
+            f"quantity={quantity} | "
+            f"info={info}"
+        )
+
+    return entry
+
+
 def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False) -> dict:
     """Web-safe core: no interactive prompts, requires a product_id to already
     be stored. Returns a result dict rather than printing, so both the CLI

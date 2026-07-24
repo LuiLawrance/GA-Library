@@ -7,7 +7,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, scrape_listings_tcg_by_edition, scrape_sales_tcg_by_edition
+from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, scrape_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from user import JSON_USERS, user_create, user_login
 from util_file import new_json
@@ -676,7 +676,13 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
         info_data = json.load(f)
 
     foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
-    foil_kind_by_id = {foil_id: foil_info.get("kind") for foil_id, foil_info in foils.items()}
+    foil_kind_by_id = {}
+
+    for foil_id, foil_info in foils.items():
+        foil_kind_by_id[foil_id] = foil_info.get("kind")
+
+        for variant_id, variant_info in foil_info.get("variants", {}).items():
+            foil_kind_by_id[variant_id] = variant_info.get("kind")
 
     def _flatten(json_path):
         with open(json_path, encoding="utf-8") as f:
@@ -698,6 +704,80 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
         "last_sales": get_last_sales(edition_id),
         "last_listings": get_last_listings(edition_id),
     })
+
+
+@app.get("/api/admin/pricing/{edition_id}/foils")
+async def api_admin_pricing_foils(edition_id: str, request: Request):
+    require_admin(request)
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with open(JSON_INFO, encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
+    options = []
+
+    for foil_id, foil_info in foils.items():
+        variant_population = sum(v.get("population", 0) for v in foil_info.get("variants", {}).values())
+        remaining_population = foil_info.get("population", 0) - variant_population
+
+        if remaining_population > 0:
+            options.append({"foil_id": foil_id, "kind": foil_info.get("kind", "").title()})
+
+        for variant_id, variant_info in foil_info.get("variants", {}).items():
+            options.append({"foil_id": variant_id, "kind": variant_info.get("kind", "")})
+
+    return JSONResponse({"foils": options})
+
+
+@app.post("/api/admin/pricing/{edition_id}/entry")
+async def api_admin_pricing_add_entry(edition_id: str, request: Request):
+    require_admin(request)
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    body = await request.json()
+    entry_type = body.get("type")
+    foil_id = body.get("foil_id", "").strip()
+    marketplace = body.get("marketplace", "").strip() or "Manual"
+    info = body.get("info", "").strip()
+
+    if entry_type not in ("sales", "listings"):
+        raise HTTPException(status_code=400, detail="type must be 'sales' or 'listings'")
+
+    if not foil_id:
+        raise HTTPException(status_code=400, detail="foil_id is required")
+
+    try:
+        price = float(body.get("price"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="price must be a number")
+
+    try:
+        quantity = int(body.get("quantity") or 1)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="quantity must be a whole number")
+
+    if price < 0 or quantity < 1:
+        raise HTTPException(status_code=400, detail="price must be non-negative and quantity at least 1")
+
+    try:
+        entry = add_manual_entry(edition_id, foil_id, entry_type, price, quantity, info, marketplace)
+    except KeyError:
+        raise HTTPException(status_code=400, detail="Invalid foil_id for this edition")
+
+    return JSONResponse({"ok": True, "entry": entry})
 
 
 @app.get("/api/sets/search")

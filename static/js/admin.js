@@ -7,6 +7,15 @@ let adminPidRefreshing = false;
 
 let adminPidDetailSelected = null;
 let adminPidDetailHistory = null;
+let adminPidDetailFoils = null;
+let adminPidAddEntryOpenType = null;
+let adminPidAddEntryFoilId = null;
+let adminPidAddEntryCondition = null;
+let adminPidAddEntryPending = false;
+
+// Matches CONDITION_MAP in api_tcgplayer.py, so manual entries use the same
+// grading vocabulary as scraped TCGPlayer data.
+const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played', 'Heavily Played', 'Damaged'];
 
 async function switchAdminSection(section) {
     const page = document.getElementById('admin-page');
@@ -345,6 +354,10 @@ async function selectAdminPricingDetail(editionId) {
 
     adminPidDetailSelected = editionId;
     adminPidDetailHistory = null;
+    adminPidDetailFoils = null;
+    adminPidAddEntryOpenType = null;
+    adminPidAddEntryFoilId = null;
+    adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
 
     renderAdminPricingIds();
     renderAdminPricingDetailAll();
@@ -358,7 +371,30 @@ async function selectAdminPricingDetail(editionId) {
         detail?.classList.remove('fade-in');
     }, 200);
 
-    await loadAdminPricingDetailHistory();
+    await Promise.all([loadAdminPricingDetailHistory(), loadAdminPricingDetailFoils()]);
+}
+
+async function loadAdminPricingDetailFoils() {
+    const editionId = adminPidDetailSelected;
+    if (!editionId) return;
+
+    try {
+        const res = await fetch(`/api/admin/pricing/${editionId}/foils`);
+        if (!res.ok) throw new Error('Failed to load foils');
+        const data = await res.json();
+
+        if (adminPidDetailSelected !== editionId) return;
+        adminPidDetailFoils = data.foils || [];
+    } catch (err) {
+        if (adminPidDetailSelected !== editionId) return;
+        adminPidDetailFoils = [];
+    }
+
+    if (!adminPidAddEntryFoilId && adminPidDetailFoils.length > 0) {
+        adminPidAddEntryFoilId = adminPidDetailFoils[0].foil_id;
+    }
+
+    renderAdminPricingDetail();
 }
 
 async function loadAdminPricingDetailHistory() {
@@ -453,14 +489,238 @@ function renderAdminPricingDetail() {
 
     panel.innerHTML = `
         <div class="admin-pid-detail-section">
-            <span class="admin-pid-detail-section-title">Sales</span>
+            <div class="admin-pid-detail-section-header">
+                <span class="admin-pid-detail-section-title">Sales</span>
+                ${adminPidAddEntryTriggerHtml('sales')}
+            </div>
             ${adminPidDetailHistoryTableHtml(salesRows, historyLoaded)}
         </div>
         <div class="admin-pid-detail-section">
-            <span class="admin-pid-detail-section-title">Listings</span>
+            <div class="admin-pid-detail-section-header">
+                <span class="admin-pid-detail-section-title">Listings</span>
+                ${adminPidAddEntryTriggerHtml('listings')}
+            </div>
             ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded)}
         </div>
     `;
+}
+
+function adminPidAddEntryTriggerHtml(type) {
+    const isOpen = adminPidAddEntryOpenType === type;
+
+    return `
+        <div class="admin-pid-add-entry-wrap">
+            <button class="admin-pid-add-entry-toggle ${isOpen ? 'open' : ''}" onclick="toggleAdminPidAddEntry('${type}')">+</button>
+            ${isOpen ? adminPidAddEntryFormHtml(type) : ''}
+        </div>
+    `;
+}
+
+function toggleAdminPidAddEntry(type) {
+    adminPidAddEntryOpenType = adminPidAddEntryOpenType === type ? null : type;
+    renderAdminPricingDetail();
+}
+
+function closeAdminPidAddEntry() {
+    if (adminPidAddEntryOpenType === null) return;
+    adminPidAddEntryOpenType = null;
+    renderAdminPricingDetail();
+}
+
+function adminPidAddEntryFormHtml(type) {
+    const foilsLoaded = !!adminPidDetailFoils;
+    const selectedFoil = foilsLoaded ? adminPidDetailFoils.find(f => f.foil_id === adminPidAddEntryFoilId) : null;
+    const foilLabel = !foilsLoaded ? 'Loading…' : (selectedFoil ? selectedFoil.kind : 'No options');
+
+    const foilDropdown = adminPidDropdownHtml({
+        wrapId: 'admin-pid-foil-dropdown-wrap',
+        menuId: 'admin-pid-foil-dropdown-menu',
+        btnId: 'admin-pid-foil-dropdown-btn',
+        labelId: 'admin-pid-foil-dropdown-label',
+        hiddenId: 'admin-pid-add-foil',
+        label: foilLabel,
+        value: adminPidAddEntryFoilId,
+        disabled: !foilsLoaded,
+        options: foilsLoaded ? adminPidDetailFoils.map(f => ({value: f.foil_id, label: f.kind})) : [],
+        onSelect: 'selectAdminPidFoilOption',
+    });
+
+    const conditionDropdown = adminPidDropdownHtml({
+        wrapId: 'admin-pid-condition-dropdown-wrap',
+        menuId: 'admin-pid-condition-dropdown-menu',
+        btnId: 'admin-pid-condition-dropdown-btn',
+        labelId: 'admin-pid-condition-dropdown-label',
+        hiddenId: 'admin-pid-add-info',
+        label: adminPidAddEntryCondition,
+        value: adminPidAddEntryCondition,
+        disabled: false,
+        options: ADMIN_PID_CONDITIONS.map(c => ({value: c, label: c})),
+        onSelect: 'selectAdminPidConditionOption',
+    });
+
+    return `
+        <div class="admin-pid-add-entry-menu">
+            ${foilDropdown}
+            <div class="admin-pid-add-entry-row">
+                <input type="number" step="0.01" min="0" class="admin-pid-add-entry-input" id="admin-pid-add-price" placeholder="Price">
+                <input type="number" min="1" step="1" class="admin-pid-add-entry-input admin-pid-add-entry-qty" id="admin-pid-add-qty" placeholder="Qty" value="1">
+            </div>
+            ${conditionDropdown}
+            <input type="text" class="admin-pid-add-entry-input" id="admin-pid-add-marketplace" placeholder="Marketplace" value="Manual">
+            <div class="admin-pid-add-entry-actions">
+                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-add-entry-btn"
+                        onclick="submitAdminPricingManualEntry('${type}')" ${foilsLoaded ? '' : 'disabled'}>Add</button>
+                <span class="admin-pid-add-entry-status" id="admin-pid-add-entry-status"></span>
+            </div>
+        </div>
+    `;
+}
+
+function adminPidDropdownHtml({wrapId, menuId, btnId, labelId, hiddenId, label, value, disabled, options, onSelect}) {
+    const optionsHtml = options.map(o => `
+        <div class="admin-pid-dropdown-option ${o.value === value ? 'selected' : ''}"
+             data-value="${escapeHtml(o.value)}"
+             onclick="${onSelect}('${escapeHtml(o.value)}', '${escapeHtml(o.label)}')">
+            ${escapeHtml(o.label)}
+        </div>
+    `).join('');
+
+    return `
+        <div class="admin-pid-dropdown-wrap" id="${wrapId}">
+            <button type="button" class="admin-pid-dropdown-btn" id="${btnId}"
+                    onclick="toggleAdminPidDropdown('${menuId}', '${btnId}')" ${disabled ? 'disabled' : ''}>
+                <span id="${labelId}">${escapeHtml(label || '')}</span>
+                <span class="admin-pid-dropdown-arrow">&#8249;</span>
+            </button>
+            <div class="admin-pid-dropdown-menu hidden" id="${menuId}">
+                ${optionsHtml}
+            </div>
+            <input type="hidden" id="${hiddenId}" value="${escapeHtml(value || '')}">
+        </div>
+    `;
+}
+
+function toggleAdminPidDropdown(menuId, btnId) {
+    const menu = document.getElementById(menuId);
+    const btn = document.getElementById(btnId);
+    if (!menu || !btn) return;
+
+    const isOpen = !menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', isOpen);
+    btn.classList.toggle('open', !isOpen);
+}
+
+function closeAdminPidDropdown(menuId, btnId) {
+    document.getElementById(menuId)?.classList.add('hidden');
+    document.getElementById(btnId)?.classList.remove('open');
+}
+
+function selectAdminPidDropdownOption(menuId, btnId, hiddenId, labelId, value, label) {
+    const hidden = document.getElementById(hiddenId);
+    const labelEl = document.getElementById(labelId);
+    if (hidden) hidden.value = value;
+    if (labelEl) labelEl.textContent = label;
+
+    document.querySelectorAll(`#${menuId} .admin-pid-dropdown-option`).forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.value === value);
+    });
+
+    closeAdminPidDropdown(menuId, btnId);
+}
+
+function selectAdminPidFoilOption(foilId, kind) {
+    adminPidAddEntryFoilId = foilId;
+    selectAdminPidDropdownOption('admin-pid-foil-dropdown-menu', 'admin-pid-foil-dropdown-btn', 'admin-pid-add-foil', 'admin-pid-foil-dropdown-label', foilId, kind);
+}
+
+function closeAdminPidFoilDropdown() {
+    closeAdminPidDropdown('admin-pid-foil-dropdown-menu', 'admin-pid-foil-dropdown-btn');
+}
+
+function selectAdminPidConditionOption(condition) {
+    adminPidAddEntryCondition = condition;
+    selectAdminPidDropdownOption('admin-pid-condition-dropdown-menu', 'admin-pid-condition-dropdown-btn', 'admin-pid-add-info', 'admin-pid-condition-dropdown-label', condition, condition);
+}
+
+function closeAdminPidConditionDropdown() {
+    closeAdminPidDropdown('admin-pid-condition-dropdown-menu', 'admin-pid-condition-dropdown-btn');
+}
+
+async function submitAdminPricingManualEntry(type) {
+    const editionId = adminPidDetailSelected;
+    if (!editionId || adminPidAddEntryPending) return;
+
+    const btn = document.getElementById('admin-pid-add-entry-btn');
+    const status = document.getElementById('admin-pid-add-entry-status');
+    const foilId = document.getElementById('admin-pid-add-foil').value;
+    const priceInput = document.getElementById('admin-pid-add-price');
+    const qtyInput = document.getElementById('admin-pid-add-qty');
+    const infoInput = document.getElementById('admin-pid-add-info');
+    const marketplaceInput = document.getElementById('admin-pid-add-marketplace');
+
+    const price = parseFloat(priceInput.value);
+    const quantity = parseInt(qtyInput.value, 10) || 1;
+
+    if (!foilId) {
+        status.textContent = 'Select a foil/variant first.';
+        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+        return;
+    }
+
+    if (isNaN(price) || price < 0) {
+        status.textContent = 'Enter a valid price.';
+        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+        return;
+    }
+
+    adminPidAddEntryPending = true;
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+    status.textContent = '';
+    status.className = 'admin-pid-add-entry-status';
+
+    try {
+        const res = await fetch(`/api/admin/pricing/${editionId}/entry`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                type,
+                foil_id: foilId,
+                price,
+                quantity,
+                info: infoInput.value.trim(),
+                marketplace: marketplaceInput.value.trim() || 'Manual',
+            })
+        });
+        const data = await res.json();
+
+        adminPidAddEntryPending = false;
+        if (adminPidDetailSelected !== editionId) return;
+
+        if (!res.ok) {
+            btn.disabled = false;
+            btn.textContent = 'Add';
+            status.textContent = data.detail || 'Failed to add entry.';
+            status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+            return;
+        }
+
+        // Success re-renders the whole detail panel (fresh, empty form) via the
+        // history reload, so the "Added." confirmation must target the new DOM node.
+        await loadAdminPricingDetailHistory();
+        const freshStatus = document.getElementById('admin-pid-add-entry-status');
+        if (freshStatus) {
+            freshStatus.textContent = 'Added.';
+            freshStatus.className = 'admin-pid-add-entry-status admin-pid-refresh-done';
+        }
+    } catch (err) {
+        adminPidAddEntryPending = false;
+        if (adminPidDetailSelected !== editionId) return;
+        btn.disabled = false;
+        btn.textContent = 'Add';
+        status.textContent = 'Request failed.';
+        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+    }
 }
 
 function adminPidDetailHistoryTableHtml(rows, loaded) {
@@ -495,5 +755,16 @@ function initAdmin() {
     adminPidRefreshing = false;
     adminPidDetailSelected = null;
     adminPidDetailHistory = null;
+    adminPidDetailFoils = null;
+    adminPidAddEntryOpenType = null;
+    adminPidAddEntryFoilId = null;
+    adminPidAddEntryCondition = null;
+    adminPidAddEntryPending = false;
     loadAdminPricingIds();
 }
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('.admin-pid-add-entry-wrap')) closeAdminPidAddEntry();
+    if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
+    if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
+}, true);

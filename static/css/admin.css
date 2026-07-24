@@ -489,7 +489,183 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--accent);
+}
+
+.admin-pid-detail-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 8px;
+}
+
+.admin-pid-add-entry-wrap {
+    position: relative;
+}
+
+.admin-pid-add-entry-toggle {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Sora', sans-serif;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+}
+
+.admin-pid-add-entry-toggle:hover,
+.admin-pid-add-entry-toggle.open {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.admin-pid-add-entry-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: auto;
+    width: 240px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 300;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: dropdownReveal 0.2s ease forwards;
+}
+
+/* ── Add-entry dropdowns (foil, condition) — mirrors .dga-fmt-dropdown-btn / .set-dropdown-btn rotating-arrow style ── */
+.admin-pid-dropdown-wrap {
+    position: relative;
+}
+
+.admin-pid-dropdown-btn {
+    width: 100%;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    transition: border-color 0.2s;
+}
+
+.admin-pid-dropdown-btn:hover,
+.admin-pid-dropdown-btn.open {
+    border-color: var(--border-focus);
+}
+
+.admin-pid-dropdown-btn:disabled {
+    cursor: not-allowed;
+    color: var(--text-muted);
+}
+
+.admin-pid-dropdown-arrow {
+    display: inline-block;
+    font-size: 1.1rem;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.25s ease;
+    color: var(--text-muted);
+}
+
+.admin-pid-dropdown-btn.open .admin-pid-dropdown-arrow {
+    transform: rotate(90deg);
+}
+
+.admin-pid-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    z-index: 301;
+    max-height: 200px;
+    overflow-y: auto;
+    animation: dropdownReveal 0.2s ease forwards;
+}
+
+.admin-pid-dropdown-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+}
+
+.admin-pid-dropdown-option:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+
+.admin-pid-dropdown-option.selected {
+    color: var(--accent);
+}
+
+.admin-pid-add-entry-row {
+    display: flex;
+    gap: 8px;
+}
+
+.admin-pid-add-entry-input {
+    flex: 1;
+    min-width: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 0.8rem;
+    color: var(--text);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.admin-pid-add-entry-input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+.admin-pid-add-entry-input::-webkit-inner-spin-button,
+.admin-pid-add-entry-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+}
+
+.admin-pid-add-entry-qty {
+    flex: 0 0 70px;
+}
+
+.admin-pid-add-entry-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 2px;
+}
+
+.admin-pid-add-entry-status {
+    font-size: 0.78rem;
 }
 
 .admin-pid-detail-table {
