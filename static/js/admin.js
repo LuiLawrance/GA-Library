@@ -256,28 +256,74 @@ async function refreshSelectedAdminPricing(target) {
     const progress = document.getElementById('admin-pid-progress');
     updateAdminPidRefreshButton();
 
-    for (let i = 0; i < editionIds.length; i++) {
-        const editionId = editionIds[i];
+    editionIds.forEach(id => {
+        adminPidRefreshStatus[id] = {state: 'running', message: ''};
+    });
+    renderAdminPricingIds();
 
-        adminPidRefreshStatus[editionId] = {state: 'running', message: ''};
+    if (progress) {
+        progress.classList.remove('hidden');
+        progress.textContent = `Refreshing 0 of ${editionIds.length}…`;
+    }
+
+    const markRemainingAsError = (seen, message) => {
+        editionIds.forEach(id => {
+            if (!seen.has(id)) adminPidRefreshStatus[id] = {state: 'error', message};
+        });
         renderAdminPricingIds();
+    };
 
-        if (progress) {
-            progress.classList.remove('hidden');
-            progress.textContent = `Refreshing ${i + 1} of ${editionIds.length}…`;
+    try {
+        const startRes = await fetch('/api/pricing/refresh/batch/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({edition_ids: editionIds, target}),
+        });
+
+        if (!startRes.ok) {
+            const errData = await startRes.json().catch(() => ({}));
+            markRemainingAsError(new Set(), errData.detail || 'Failed to start refresh');
+        } else {
+            const {job_id} = await startRes.json();
+            const seen = new Set();
+
+            while (true) {
+                await new Promise(r => setTimeout(r, 1200));
+
+                const statusRes = await fetch(`/api/pricing/refresh/batch/status/${job_id}`);
+                if (!statusRes.ok) {
+                    markRemainingAsError(seen, 'Lost track of refresh job');
+                    break;
+                }
+
+                const job = await statusRes.json();
+
+                for (const [editionId, result] of Object.entries(job.results || {})) {
+                    if (seen.has(editionId)) continue;
+                    seen.add(editionId);
+                    adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings, target);
+
+                    if (adminPidDetailSelected === editionId) {
+                        await loadAdminPricingDetailHistory();
+                    }
+                }
+
+                renderAdminPricingIds();
+
+                if (progress) {
+                    progress.textContent = `Refreshing ${job.done} of ${job.total}…`;
+                }
+
+                if (job.status === 'error') {
+                    markRemainingAsError(seen, job.error || 'Unknown error');
+                    break;
+                }
+
+                if (job.status === 'done') break;
+            }
         }
-
-        try {
-            adminPidRefreshStatus[editionId] = await runAdminPricingRefreshJob(editionId, target);
-        } catch (err) {
-            adminPidRefreshStatus[editionId] = {state: 'error', message: 'Request failed'};
-        }
-
-        renderAdminPricingIds();
-
-        if (adminPidDetailSelected === editionId) {
-            await loadAdminPricingDetailHistory();
-        }
+    } catch (err) {
+        markRemainingAsError(new Set(), 'Request failed');
     }
 
     adminPidRefreshing = false;
@@ -288,35 +334,6 @@ async function refreshSelectedAdminPricing(target) {
     }
 
     updateAdminPidRefreshButton();
-}
-
-async function runAdminPricingRefreshJob(editionId, target) {
-    const startRes = await fetch(`/api/pricing/${editionId}/refresh/start?target=${target}`, {method: 'POST'});
-
-    if (!startRes.ok) {
-        const errData = await startRes.json().catch(() => ({}));
-        return {state: 'error', message: errData.detail || 'Failed to start refresh'};
-    }
-
-    const {job_id} = await startRes.json();
-
-    while (true) {
-        await new Promise(r => setTimeout(r, 1200));
-
-        const statusRes = await fetch(`/api/pricing/refresh/status/${job_id}`);
-        if (!statusRes.ok) {
-            return {state: 'error', message: 'Lost track of refresh job'};
-        }
-
-        const job = await statusRes.json();
-        if (job.status === 'running') continue;
-
-        if (job.status === 'error') {
-            return {state: 'error', message: job.error || 'Unknown error'};
-        }
-
-        return summarizeAdminPricingRefresh(job.sales, job.listings, target);
-    }
 }
 
 function summarizeAdminPricingRefresh(sales, listings, target) {

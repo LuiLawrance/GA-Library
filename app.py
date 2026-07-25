@@ -7,7 +7,8 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, scrape_listings_tcg_by_edition, scrape_sales_tcg_by_edition
+from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, scrape_batch_tcg_by_editions, \
+    scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from user import JSON_USERS, user_create, user_login
 from util_file import new_json
@@ -40,6 +41,11 @@ _set_search_jobs_lock = threading.Lock()
 # job_id → {status: "running"|"done"|"error", edition_id, sales: {...}|None, listings: {...}|None, error}
 _pricing_jobs = {}
 _pricing_jobs_lock = threading.Lock()
+
+# ── Pricing refresh BATCH jobs (admin-only) — one shared browser across many editions ──
+# job_id → {status, target, total, done, current_edition_id, results: {edition_id: {sales, listings}}, error}
+_pricing_batch_jobs = {}
+_pricing_batch_jobs_lock = threading.Lock()
 
 
 def create_token(username: str) -> str:
@@ -537,10 +543,17 @@ async def api_sets_search_status(job_id: str):
 
 def _run_pricing_refresh_job(job_id: str, edition_id: str, target: str = "both") -> None:
     try:
-        sales_result = scrape_sales_tcg_by_edition(edition_id, debug=False, headless=False) \
-            if target in ("both", "sales") else None
-        listings_result = scrape_listings_tcg_by_edition(edition_id, debug=False, headless=False) \
-            if target in ("both", "listings") else None
+        if target == "both":
+            # Shares a single browser session for both scrapes instead of
+            # opening and closing a separate one for each.
+            combined = scrape_sales_and_listings_tcg_by_edition(edition_id, debug=False, headless=False)
+            sales_result = combined["sales"]
+            listings_result = combined["listings"]
+        else:
+            sales_result = scrape_sales_tcg_by_edition(edition_id, debug=False, headless=False) \
+                if target == "sales" else None
+            listings_result = scrape_listings_tcg_by_edition(edition_id, debug=False, headless=False) \
+                if target == "listings" else None
 
         with _pricing_jobs_lock:
             job = _pricing_jobs.get(job_id)
@@ -596,6 +609,86 @@ async def api_pricing_refresh_status(job_id: str, request: Request):
     if snapshot["status"] in ("done", "error"):
         with _pricing_jobs_lock:
             _pricing_jobs.pop(job_id, None)
+
+    return JSONResponse(snapshot)
+
+
+def _run_pricing_batch_job(job_id: str, edition_ids: list, target: str) -> None:
+    def on_progress(edition_id, result):
+        with _pricing_batch_jobs_lock:
+            job = _pricing_batch_jobs.get(job_id)
+            if job is None:
+                return
+            job["results"][edition_id] = result
+            job["done"] += 1
+            job["current_edition_id"] = edition_id
+
+    try:
+        scrape_batch_tcg_by_editions(edition_ids, target, debug=False, headless=False, progress_callback=on_progress)
+
+        with _pricing_batch_jobs_lock:
+            job = _pricing_batch_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "done"
+                job["current_edition_id"] = None
+    except Exception as e:
+        with _pricing_batch_jobs_lock:
+            job = _pricing_batch_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "error"
+                job["error"] = str(e)
+
+
+@app.post("/api/pricing/refresh/batch/start")
+async def api_pricing_refresh_batch_start(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    edition_ids = body.get("edition_ids", [])
+    target = body.get("target", "both")
+
+    if target not in ("both", "sales", "listings"):
+        raise HTTPException(status_code=400, detail="target must be 'both', 'sales', or 'listings'")
+
+    if not edition_ids:
+        raise HTTPException(status_code=400, detail="edition_ids is required")
+
+    job_id = uuid.uuid4().hex
+    with _pricing_batch_jobs_lock:
+        _pricing_batch_jobs[job_id] = {
+            "status": "running",
+            "target": target,
+            "total": len(edition_ids),
+            "done": 0,
+            "current_edition_id": None,
+            "results": {},
+            "error": None,
+        }
+
+    thread = threading.Thread(
+        target=_run_pricing_batch_job,
+        args=(job_id, edition_ids, target),
+        daemon=True
+    )
+    thread.start()
+
+    return JSONResponse({"job_id": job_id})
+
+
+@app.get("/api/pricing/refresh/batch/status/{job_id}")
+async def api_pricing_refresh_batch_status(job_id: str, request: Request):
+    require_admin(request)
+
+    with _pricing_batch_jobs_lock:
+        job = _pricing_batch_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        snapshot = dict(job)
+        snapshot["results"] = dict(job["results"])
+
+    if snapshot["status"] in ("done", "error"):
+        with _pricing_batch_jobs_lock:
+            _pricing_batch_jobs.pop(job_id, None)
 
     return JSONResponse(snapshot)
 

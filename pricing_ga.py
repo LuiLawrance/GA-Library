@@ -524,33 +524,51 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
     return entry
 
 
-def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False) -> dict:
-    """Web-safe core: no interactive prompts, requires a product_id to already
-    be stored. Returns a result dict rather than printing, so both the CLI
-    and the web admin-refresh endpoint can share this logic."""
+def _listings_gate_result(edition_id: str) -> dict | None:
+    """None if listings are safe to refresh, otherwise the gated result dict
+    to return as-is."""
     last_listings = api_tcgplayer.get_last_listings(edition_id)
 
-    if last_listings:
-        days_since = (date.today() - date.fromisoformat(last_listings)).days
+    if not last_listings:
+        return None
 
-        if days_since <= 7:
-            return {
-                "ok": True,
-                "gated": True,
-                "gated_message": f"Listings last updated {days_since} day(s) ago (on {last_listings}) — need more than 7 days between updates.",
-                "listings": [],
-                "stored": 0,
-                "skipped_unrecognized": 0,
-            }
+    days_since = (date.today() - date.fromisoformat(last_listings)).days
 
-    product_id = api_tcgplayer.get_product_id(edition_id)
+    if days_since <= 7:
+        return {
+            "ok": True,
+            "gated": True,
+            "gated_message": f"Listings last updated {days_since} day(s) ago (on {last_listings}) — need more than 7 days between updates.",
+            "listings": [],
+            "stored": 0,
+            "skipped_unrecognized": 0,
+        }
 
-    if not product_id:
-        return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+    return None
 
-    url = api_tcgplayer._build_url(product_id)
-    listings = api_tcgplayer.fetch_listings(url, debug, headless)
 
+def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool = False) -> dict:
+    if sales is None:
+        return {"ok": False, "error": "Fetch failed. See server logs for details."}
+
+    api_tcgplayer.set_last_sales(edition_id, debug)
+
+    if not sales:
+        return {"ok": True, "sales": [], "stored": 0, "skipped_today": 0, "skipped_duplicate": 0, "skipped_unrecognized": 0}
+
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+
+    return {
+        "ok": True,
+        "sales": sales,
+        "stored": stored,
+        "skipped_today": skipped_today,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_unrecognized": skipped_unrecognized,
+    }
+
+
+def _process_listings_result(edition_id: str, listings: list[dict] | None, debug: bool = False) -> dict:
     if listings is None:
         return {"ok": False, "error": "Fetch failed. See server logs for details."}
 
@@ -587,6 +605,27 @@ def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headles
         "stored": stored,
         "skipped_unrecognized": skipped_unrecognized,
     }
+
+
+def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None) -> dict:
+    """Web-safe core: no interactive prompts, requires a product_id to already
+    be stored. Returns a result dict rather than printing, so both the CLI
+    and the web admin-refresh endpoint can share this logic. Pass an existing
+    Playwright `page` to reuse a shared browser instead of opening a new one."""
+    gated = _listings_gate_result(edition_id)
+
+    if gated is not None:
+        return gated
+
+    product_id = api_tcgplayer.get_product_id(edition_id)
+
+    if not product_id:
+        return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+
+    url = api_tcgplayer._build_url(product_id)
+    listings = api_tcgplayer.fetch_listings(url, debug, headless, page=page)
+
+    return _process_listings_result(edition_id, listings, debug)
 
 
 def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
@@ -636,36 +675,93 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
     print(summary)
 
 
-def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False) -> dict:
+def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None) -> dict:
     """Web-safe core: no interactive prompts, requires a product_id to already
     be stored. Returns a result dict rather than printing, so both the CLI
-    and the web admin-refresh endpoint can share this logic."""
+    and the web admin-refresh endpoint can share this logic. Pass an existing
+    Playwright `page` to reuse a shared browser instead of opening a new one."""
     product_id = api_tcgplayer.get_product_id(edition_id)
 
     if not product_id:
         return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
 
     url = api_tcgplayer._build_url(product_id)
-    sales = api_tcgplayer.fetch_sales(url, debug, headless)
+    sales = api_tcgplayer.fetch_sales(url, debug, headless, page=page)
 
-    if sales is None:
-        return {"ok": False, "error": "Fetch failed. See server logs for details."}
+    return _process_sales_result(edition_id, sales, debug)
 
-    api_tcgplayer.set_last_sales(edition_id, debug)
 
-    if not sales:
-        return {"ok": True, "sales": [], "stored": 0, "skipped_today": 0, "skipped_duplicate": 0, "skipped_unrecognized": 0}
+def scrape_sales_and_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False,
+                                              page=None) -> dict:
+    """Combined web-safe core for a full ('both') refresh — scrapes sales and
+    listings in a single shared browser session instead of opening and closing
+    a separate browser for each. Returns {"sales": ..., "listings": ...}, each
+    shaped exactly like the respective solo scrape_*_tcg_by_edition() result.
+    Pass an existing Playwright `page` to reuse an even-wider shared browser
+    (e.g. one spanning multiple editions in a batch refresh)."""
+    product_id = api_tcgplayer.get_product_id(edition_id)
 
-    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+    if not product_id:
+        error = {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+        return {"sales": error, "listings": error}
 
-    return {
-        "ok": True,
-        "sales": sales,
-        "stored": stored,
-        "skipped_today": skipped_today,
-        "skipped_duplicate": skipped_duplicate,
-        "skipped_unrecognized": skipped_unrecognized,
-    }
+    gated = _listings_gate_result(edition_id)
+    url = api_tcgplayer._build_url(product_id)
+
+    sales, listings = api_tcgplayer.fetch_sales_and_listings(
+        url, debug, headless, want_sales=True, want_listings=gated is None, page=page
+    )
+
+    sales_result = _process_sales_result(edition_id, sales, debug)
+    listings_result = gated if gated is not None else _process_listings_result(edition_id, listings, debug)
+
+    return {"sales": sales_result, "listings": listings_result}
+
+
+def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: bool = False,
+                                  headless: bool = False, progress_callback=None) -> dict[str, dict]:
+    """Runs a full refresh — sales, listings, or both — across many editions
+    using a single shared browser session, instead of opening and closing a
+    browser per edition (or per edition per target). progress_callback(edition_id,
+    result), if given, is called after each edition finishes so callers (e.g. the
+    admin console's job-status endpoint) can report incremental progress.
+
+    `result` is always shaped {"sales": ... | None, "listings": ... | None},
+    matching scrape_sales_and_listings_tcg_by_edition()'s return value, with
+    whichever side wasn't requested left as None."""
+    from playwright.sync_api import sync_playwright
+
+    results = {}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        page = browser.new_page()
+
+        for edition_id in edition_ids:
+            try:
+                if target == "both":
+                    result = scrape_sales_and_listings_tcg_by_edition(edition_id, debug, headless, page=page)
+                elif target == "sales":
+                    result = {"sales": scrape_sales_tcg_by_edition(edition_id, debug, headless, page=page), "listings": None}
+                else:
+                    result = {"sales": None, "listings": scrape_listings_tcg_by_edition(edition_id, debug, headless, page=page)}
+            except Exception as e:
+                # One edition failing unexpectedly (e.g. a page-structure change
+                # mid-batch) shouldn't abort the rest of the batch.
+                error = {"ok": False, "error": f"Unexpected error: {e}"}
+                result = {
+                    "sales": error if target in ("both", "sales") else None,
+                    "listings": error if target in ("both", "listings") else None,
+                }
+
+            results[edition_id] = result
+
+            if progress_callback:
+                progress_callback(edition_id, result)
+
+        browser.close()
+
+    return results
 
 
 def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
