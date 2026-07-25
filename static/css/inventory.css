@@ -755,6 +755,27 @@
     backdrop-filter: blur(4px);
 }
 
+.inv-price-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--series-sales);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 5px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    z-index: 1;
+}
+
+.inv-card-tile:hover .inv-price-badge {
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
 /* Rarity badge overrides inside inventory card tiles */
 .inv-card-tile .edition-rarity-badge {
     bottom: 10px;

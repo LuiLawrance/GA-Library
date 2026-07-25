@@ -215,6 +215,7 @@ function buildCardTile(card, index, total = 1) {
                 onerror="this.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}
         </div>
+        ${card.last_price != null ? `<span class="inv-price-badge">$${card.last_price.toFixed(2)}</span>` : ''}
     `;
     tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
     tile.addEventListener('animationend', () => tile.classList.add('animated'));

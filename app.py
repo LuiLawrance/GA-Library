@@ -127,6 +127,32 @@ async def prices_page():
     return serve_index()
 
 
+def _pick_default_foil(foils: dict):
+    """Nonfoil/normal > foil > anything else — mirrors tiles.js pickDefaultFoil."""
+    if not foils:
+        return None
+
+    def priority(finfo):
+        kind = (finfo.get("kind") or "").lower()
+        if kind in ("normal", "nonfoil"):
+            return 0
+        if kind == "foil":
+            return 1
+        return 2
+
+    return min(foils.items(), key=lambda kv: priority(kv[1]))[0]
+
+
+def _last_sale_price(sales_data: dict, card_id: str, edition_id: str, foils: dict):
+    foil_id = _pick_default_foil(foils)
+    if not foil_id:
+        return None
+    records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+    if not records:
+        return None
+    return max(records, key=lambda r: r["date"])["price"]
+
+
 @app.get("/api/cards/search")
 async def api_cards_search(request: Request, q: str = ""):
     set_params = request.query_params.getlist("set")
@@ -140,6 +166,9 @@ async def api_cards_search(request: Request, q: str = ""):
 
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
+
+    with open(JSON_SALES, encoding="utf-8") as f:
+        sales_data = json.load(f)
 
     def enrich(cards):
         set_file_cache = {}
@@ -157,6 +186,9 @@ async def api_cards_search(request: Request, q: str = ""):
                 (num for num, eids in set_data.items()
                  if card["edition_id"] in (eids if isinstance(eids, list) else [eids])),
                 ""
+            )
+            card["last_price"] = _last_sale_price(
+                sales_data, card["card_id"], card["edition_id"], edition_info.get("foils", {})
             )
         return cards
 
@@ -934,6 +966,9 @@ async def api_sets_search(prefix: str):
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
 
+    with open(JSON_SALES, encoding="utf-8") as f:
+        sales_data = json.load(f)
+
     cards = []
 
     for collector_number, eids in set_data.items():
@@ -955,7 +990,8 @@ async def api_sets_search(prefix: str):
                 continue
 
             card_info = info_data.get(card_id, {})
-            rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
+            edition_info = card_info.get("editions", {}).get(edition_id, {})
+            rarity = edition_info.get("rarity")
 
             cards.append({
                 "card_id": card_id,
@@ -964,6 +1000,7 @@ async def api_sets_search(prefix: str):
                 "rarity": rarity,
                 "element": card_info.get("element") or "",
                 "collector_number": collector_number,
+                "last_price": _last_sale_price(sales_data, card_id, edition_id, edition_info.get("foils", {})),
             })
 
     return JSONResponse({"cards": cards})
@@ -1175,6 +1212,35 @@ async def api_bin_value(bin_name: str, request: Request):
         "priced_quantity": priced_quantity,
         "total_quantity": total_quantity,
     })
+
+
+@app.get("/api/inventory/bins/{bin_name}/prices")
+async def api_bin_prices(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    with open(JSON_SALES, encoding="utf-8") as f:
+        sales_data = json.load(f)
+
+    prices: dict = {}
+
+    for cards in inv[bin_name].get("sections", {}).values():
+        for card_id, editions in cards.items():
+            for edition_id, foils in editions.items():
+                for foil_id in foils:
+                    records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                    if not records:
+                        continue
+
+                    latest = max(records, key=lambda r: r["date"])
+                    prices.setdefault(card_id, {}).setdefault(edition_id, {})[foil_id] = latest["price"]
+
+    return JSONResponse(prices)
 
 
 @app.get("/api/inv/info")
