@@ -202,6 +202,30 @@
     margin-top: auto;
 }
 
+.inv-bin-value-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    color: var(--series-sales);
+    background: rgba(25, 158, 112, 0.1);
+    border: 1px solid rgba(25, 158, 112, 0.25);
+    border-radius: 3px;
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+
+.inv-bin-value-badge.inv-bin-value-loading {
+    color: var(--text-muted);
+    background: transparent;
+    border-color: var(--border);
+}
+
+.inv-bin-value-badge.inv-bin-value-partial {
+    color: var(--accent);
+    background: rgba(200, 169, 110, 0.08);
+    border-color: rgba(200, 169, 110, 0.3);
+}
+
 .inv-bin-default-badge {
     font-family: 'DM Mono', monospace;
     font-size: 0.62rem;
@@ -403,6 +427,12 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
+    gap: 8px;
+}
+
+.inv-detail-counts-row {
+    display: flex;
+    align-items: center;
     gap: 8px;
 }
 

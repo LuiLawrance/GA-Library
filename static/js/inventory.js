@@ -122,6 +122,27 @@ function buildBinTile(name, bin, index, total = 1) {
     return tile;
 }
 
+async function loadBinValue(binName, badgeEl) {
+    if (!badgeEl) return;
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(binName)}/value`);
+        if (!res.ok) throw new Error('Failed to load bin value');
+        const data = await res.json();
+
+        badgeEl.textContent = `$${data.total.toFixed(2)}`;
+        badgeEl.classList.remove('inv-bin-value-loading');
+
+        if (data.priced_quantity < data.total_quantity) {
+            badgeEl.classList.add('inv-bin-value-partial');
+            badgeEl.title = `${data.priced_quantity} of ${data.total_quantity} card(s) have sale data`;
+        }
+    } catch (err) {
+        badgeEl.textContent = '—';
+        badgeEl.classList.remove('inv-bin-value-loading');
+    }
+}
+
 function countBinEntries(sections) {
     let total = 0;
     for (const cards of Object.values(sections))
@@ -908,6 +929,14 @@ function updateInvCounts() {
     const totalQty = binCardRows.reduce((s, r) => s + r.quantity, 0);
     const countEl = document.getElementById('detail-bin-counts');
     if (countEl) countEl.textContent = `${binCardRows.length} card${binCardRows.length !== 1 ? 's' : ''} · ${totalQty} cop${totalQty !== 1 ? 'ies' : 'y'}`;
+
+    const valueBadge = document.getElementById('detail-bin-value');
+    if (valueBadge && activeBin) {
+        valueBadge.textContent = '…';
+        valueBadge.classList.add('inv-bin-value-loading');
+        valueBadge.classList.remove('inv-bin-value-partial');
+        loadBinValue(activeBin, valueBadge);
+    }
 }
 
 // ── Section CRUD ──

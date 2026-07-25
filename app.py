@@ -1018,6 +1018,47 @@ async def api_inventory_get(request: Request):
     return JSONResponse({"bins": _inv_load(user)})
 
 
+@app.get("/api/inventory/bins/{bin_name}/value")
+async def api_bin_value(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    with open(JSON_SALES, encoding="utf-8") as f:
+        sales_data = json.load(f)
+
+    total = 0.0
+    priced_quantity = 0
+    total_quantity = 0
+
+    for cards in inv[bin_name].get("sections", {}).values():
+        for card_id, editions in cards.items():
+            for edition_id, foils in editions.items():
+                for foil_id, quantity in foils.items():
+                    if quantity <= 0:
+                        continue
+
+                    total_quantity += quantity
+                    records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+
+                    if not records:
+                        continue
+
+                    latest = max(records, key=lambda r: r["date"])
+                    total += latest["price"] * quantity
+                    priced_quantity += quantity
+
+    return JSONResponse({
+        "total": round(total, 2),
+        "priced_quantity": priced_quantity,
+        "total_quantity": total_quantity,
+    })
+
+
 @app.get("/api/inv/info")
 async def api_inv_info():
     info_file = new_json(JSON_INFO)
