@@ -4,6 +4,8 @@ let adminPidData = [];
 let adminPidSelected = new Set();
 let adminPidRefreshStatus = {};
 let adminPidRefreshing = false;
+let adminPidSetFilter = new Set();
+let adminPidSetFilterOpen = false;
 
 let adminPidDetailSelected = null;
 let adminPidDetailHistory = null;
@@ -78,6 +80,8 @@ function renderAdminPricingIds() {
     const filtered = adminPidData.filter(e => {
         if (missingOnly && e.product_id) return false;
 
+        if (adminPidSetFilter.size > 0 && !adminPidSetFilter.has(e.set_prefix)) return false;
+
         if (query) {
             const haystack = `${e.name} ${e.set_prefix || ''} ${e.set_name || ''}`.toLowerCase();
             if (!haystack.includes(query)) return false;
@@ -117,7 +121,7 @@ function renderAdminPricingIds() {
                 <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
             </span>
             <span class="admin-pid-col-name">Card</span>
-            <span class="admin-pid-col-set">Set</span>
+            <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
             <span class="admin-pid-col-status">Product ID</span>
             <span class="admin-pid-col-refresh">Refresh Status</span>
         </div>
@@ -135,6 +139,51 @@ function renderAdminPricingIds() {
     }
 
     updateAdminPidRefreshButton();
+}
+
+function adminPidSetFilterHtml() {
+    const sets = [...new Set(adminPidData.map(e => e.set_prefix).filter(Boolean))].sort();
+
+    const optionsHtml = sets.map(set => `
+        <div class="set-dropdown-option ${adminPidSetFilter.has(set) ? 'selected' : ''}"
+             onclick="event.stopPropagation(); toggleAdminPidSetFilterOption('${escapeHtml(set)}')">
+            <span>${escapeHtml(set)}</span>
+            <div class="set-toggle"></div>
+        </div>
+    `).join('');
+
+    return `
+        <span class="set-dropdown-wrap">
+            <button type="button" class="set-dropdown-btn ${adminPidSetFilterOpen ? 'open' : ''}"
+                    onclick="event.stopPropagation(); toggleAdminPidSetFilter()">
+                <span>Set</span>
+                <span class="set-dropdown-arrow">&#8249;</span>
+            </button>
+            <div class="set-dropdown-menu ${adminPidSetFilterOpen ? '' : 'hidden'}">
+                ${optionsHtml || '<div class="admin-pid-detail-empty-small">No sets</div>'}
+            </div>
+        </span>
+    `;
+}
+
+function toggleAdminPidSetFilter() {
+    adminPidSetFilterOpen = !adminPidSetFilterOpen;
+    renderAdminPricingIds();
+}
+
+function closeAdminPidSetFilter() {
+    if (!adminPidSetFilterOpen) return;
+    adminPidSetFilterOpen = false;
+    renderAdminPricingIds();
+}
+
+function toggleAdminPidSetFilterOption(set) {
+    if (adminPidSetFilter.has(set)) {
+        adminPidSetFilter.delete(set);
+    } else {
+        adminPidSetFilter.add(set);
+    }
+    renderAdminPricingIds();
 }
 
 function adminPidRefreshStatusMarkup(editionId) {
@@ -792,6 +841,8 @@ function initAdmin() {
     adminPidSelected = new Set();
     adminPidRefreshStatus = {};
     adminPidRefreshing = false;
+    adminPidSetFilter = new Set();
+    adminPidSetFilterOpen = false;
     adminPidDetailSelected = null;
     adminPidDetailHistory = null;
     adminPidDetailFoils = null;
@@ -807,4 +858,5 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-add-entry-wrap')) closeAdminPidAddEntry();
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
+    if (!e.target.closest('#admin-pid-table-header .set-dropdown-wrap')) closeAdminPidSetFilter();
 }, true);

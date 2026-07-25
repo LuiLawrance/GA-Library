@@ -639,6 +639,56 @@
     color: var(--accent);
 }
 
+/* The Set-column header filter reuses cards.css's .set-dropdown-wrap /
+   .set-dropdown-btn / .set-dropdown-menu / .set-dropdown-option / .set-toggle
+   directly (loaded globally) for the dropdown menu itself, so it matches the
+   cards page's set filter exactly. The trigger button, though, should look
+   like the plain "Card" / "Product ID" header labels, not a boxed button —
+   this strips its chrome down to match while keeping the arrow. */
+#admin-pid-table-header .set-dropdown-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    gap: 4px;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+#admin-pid-table-header .set-dropdown-btn:hover,
+#admin-pid-table-header .set-dropdown-btn.open {
+    color: var(--accent);
+}
+
+/* The header row is uppercase/letter-spaced, but the menu's own set names
+   shouldn't inherit that, and the list is capped with a scrollbar instead of
+   growing tall enough to clip off-screen when there are many sets. */
+#admin-pid-table-header .set-dropdown-menu {
+    text-transform: none;
+    letter-spacing: normal;
+    max-height: 240px;
+    overflow: auto;
+}
+
+/* Matches #set-dropdown-options's scrollbar on the cards page exactly. */
+#admin-pid-table-header .set-dropdown-menu::-webkit-scrollbar {
+    width: 6px;
+}
+
+#admin-pid-table-header .set-dropdown-menu::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+#admin-pid-table-header .set-dropdown-menu::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+#admin-pid-table-header .set-dropdown-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
 .admin-pid-add-entry-row {
     display: flex;
     gap: 8px;
