@@ -804,8 +804,13 @@ function closeCardDrawer() {
     document.getElementById('drawer-sidebar').classList.add('hidden');
     selectedCardId = null;
 
+    // The admin console keeps the footer hidden unconditionally (see initAdmin()
+    // in admin.js) — it has no scrollable card grid to key footer visibility off of,
+    // so closing the drawer there must not reveal it.
+    const onAdminPage = !!document.getElementById('admin-page');
     const gridWrap = document.querySelector('.card-grid-wrap');
-    if (!gridWrap || gridWrap.scrollTop === 0) {
+
+    if (!onAdminPage && (!gridWrap || gridWrap.scrollTop === 0)) {
         document.querySelector('.footer').classList.remove('footer-hidden');
     }
 

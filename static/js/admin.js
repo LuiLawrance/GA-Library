@@ -445,7 +445,9 @@ function renderAdminPricingImageCol() {
             <span class="admin-pid-detail-name">${escapeHtml(record.name)}</span>
             <span class="admin-pid-detail-set">${escapeHtml(record.set_name || record.set_prefix || '—')}</span>
         </div>
-        <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}">
+        <div class="admin-pid-detail-image-wrap">
+            <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}">
+        </div>
         <div class="drawer-stats admin-pid-scrape-stats">
             <div class="drawer-stat">
                 <span class="drawer-stat-label">Last Sales</span>
@@ -780,6 +782,7 @@ function initAdmin() {
     adminPidAddEntryFoilId = null;
     adminPidAddEntryCondition = null;
     adminPidAddEntryPending = false;
+    document.querySelector('.footer')?.classList.add('footer-hidden');
     loadAdminPricingIds();
 }
 
