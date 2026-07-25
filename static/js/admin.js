@@ -14,6 +14,8 @@ let adminPidAddEntryOpenType = null;
 let adminPidAddEntryFoilId = null;
 let adminPidAddEntryCondition = null;
 let adminPidAddEntryPending = false;
+let adminPidBulkPasteOpen = false;
+let adminPidBulkPastePending = false;
 
 // Matches CONDITION_MAP in api_tcgplayer.py, so manual entries use the same
 // grading vocabulary as scraped TCGPlayer data.
@@ -424,6 +426,7 @@ async function selectAdminPricingDetail(editionId) {
     adminPidAddEntryOpenType = null;
     adminPidAddEntryFoilId = null;
     adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
+    adminPidBulkPasteOpen = false;
 
     renderAdminPricingIds();
     renderAdminPricingDetailAll();
@@ -561,14 +564,17 @@ function renderAdminPricingDetail() {
     const listingsRows = historyLoaded ? adminPidDetailHistory.listings : [];
 
     panel.innerHTML = `
-        <div class="admin-pid-detail-section">
+        <div class="admin-pid-detail-section" id="admin-pid-section-sales">
             <div class="admin-pid-detail-section-header">
                 <span class="admin-pid-detail-section-title">Sales</span>
-                ${adminPidAddEntryTriggerHtml('sales')}
+                <div class="admin-pid-section-actions">
+                    ${adminPidBulkPasteTriggerHtml()}
+                    ${adminPidAddEntryTriggerHtml('sales')}
+                </div>
             </div>
             ${adminPidDetailHistoryTableHtml(salesRows, historyLoaded)}
         </div>
-        <div class="admin-pid-detail-section">
+        <div class="admin-pid-detail-section" id="admin-pid-section-listings">
             <div class="admin-pid-detail-section-header">
                 <span class="admin-pid-detail-section-title">Listings</span>
                 ${adminPidAddEntryTriggerHtml('listings')}
@@ -576,6 +582,17 @@ function renderAdminPricingDetail() {
             ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded)}
         </div>
     `;
+
+    // Lifts each section's own overflow clipping while its popup (bulk-paste or
+    // add-entry) is open so the dropdown isn't cut off, without needing any
+    // JS-computed positioning — the popup itself stays on plain CSS positioning
+    // (see .admin-pid-add-entry-menu), since this page's global `zoom` scale
+    // doesn't compose correctly with manually-set position values.
+    const salesPopoverOpen = adminPidBulkPasteOpen || adminPidAddEntryOpenType === 'sales';
+    const listingsPopoverOpen = adminPidAddEntryOpenType === 'listings';
+    panel.classList.toggle('admin-pid-popover-open', salesPopoverOpen || listingsPopoverOpen);
+    document.getElementById('admin-pid-section-sales')?.classList.toggle('admin-pid-popover-open', salesPopoverOpen);
+    document.getElementById('admin-pid-section-listings')?.classList.toggle('admin-pid-popover-open', listingsPopoverOpen);
 }
 
 function adminPidAddEntryTriggerHtml(type) {
@@ -591,6 +608,7 @@ function adminPidAddEntryTriggerHtml(type) {
 
 function toggleAdminPidAddEntry(type) {
     adminPidAddEntryOpenType = adminPidAddEntryOpenType === type ? null : type;
+    if (adminPidAddEntryOpenType !== null) adminPidBulkPasteOpen = false;
     renderAdminPricingDetail();
 }
 
@@ -598,6 +616,120 @@ function closeAdminPidAddEntry() {
     if (adminPidAddEntryOpenType === null) return;
     adminPidAddEntryOpenType = null;
     renderAdminPricingDetail();
+}
+
+function adminPidBulkPasteTriggerHtml() {
+    const isOpen = adminPidBulkPasteOpen;
+
+    return `
+        <div class="admin-pid-add-entry-wrap admin-pid-bulk-paste-wrap">
+            <button class="admin-pid-add-entry-toggle ${isOpen ? 'open' : ''}" title="Paste bulk sales from TCGPlayer"
+                    onclick="toggleAdminPidBulkPaste()">&#9113;</button>
+            ${isOpen ? adminPidBulkPasteFormHtml() : ''}
+        </div>
+    `;
+}
+
+function toggleAdminPidBulkPaste() {
+    adminPidBulkPasteOpen = !adminPidBulkPasteOpen;
+    if (adminPidBulkPasteOpen) adminPidAddEntryOpenType = null;
+    renderAdminPricingDetail();
+}
+
+function closeAdminPidBulkPaste() {
+    if (!adminPidBulkPasteOpen) return;
+    adminPidBulkPasteOpen = false;
+    renderAdminPricingDetail();
+}
+
+function adminPidBulkPasteFormHtml() {
+    return `
+        <div class="admin-pid-add-entry-menu admin-pid-bulk-paste-menu">
+            <span class="admin-pid-bulk-paste-hint">
+                Highlight and copy the sales history table straight off TCGPlayer, then paste it here —
+                works around the ~5-row cap when scraping while logged out.
+            </span>
+            <textarea class="admin-pid-bulk-paste-textarea" id="admin-pid-bulk-paste-textarea"
+                      placeholder="7/9/26&#10;NM&#10;1&#9;$0.05"></textarea>
+            <div class="admin-pid-add-entry-actions">
+                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-bulk-paste-btn"
+                        onclick="submitAdminPidBulkPasteSales()">Import</button>
+                <span class="admin-pid-add-entry-status" id="admin-pid-bulk-paste-status"></span>
+            </div>
+        </div>
+    `;
+}
+
+async function submitAdminPidBulkPasteSales() {
+    const editionId = adminPidDetailSelected;
+    if (!editionId || adminPidBulkPastePending) return;
+
+    const btn = document.getElementById('admin-pid-bulk-paste-btn');
+    const status = document.getElementById('admin-pid-bulk-paste-status');
+    const textarea = document.getElementById('admin-pid-bulk-paste-textarea');
+    const text = textarea.value.trim();
+
+    if (!text) {
+        status.textContent = 'Paste some sales data first.';
+        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+        return;
+    }
+
+    adminPidBulkPastePending = true;
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    status.textContent = '';
+    status.className = 'admin-pid-add-entry-status';
+
+    try {
+        const res = await fetch(`/api/admin/pricing/${editionId}/import-sales`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({text}),
+        });
+        const data = await res.json();
+
+        adminPidBulkPastePending = false;
+        if (adminPidDetailSelected !== editionId) return;
+
+        if (!res.ok) {
+            btn.disabled = false;
+            btn.textContent = 'Import';
+            status.textContent = data.detail || 'Failed to import sales.';
+            status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+            return;
+        }
+
+        const parts = [`Imported ${data.stored} sale(s)`];
+        if (data.skipped_duplicate) parts.push(`${data.skipped_duplicate} already recorded`);
+        if (data.skipped_today) parts.push(`${data.skipped_today} from today excluded`);
+        if (data.skipped_unrecognized) parts.push(`${data.skipped_unrecognized} unrecognized variant(s)`);
+        if (data.parse_errors && data.parse_errors.length) parts.push(`${data.parse_errors.length} line(s) unparsed`);
+
+        await loadAdminPricingDetailHistory();
+
+        const freshStatus = document.getElementById('admin-pid-bulk-paste-status');
+        if (freshStatus) {
+            freshStatus.textContent = parts.join(' · ');
+            freshStatus.className = `admin-pid-add-entry-status admin-pid-refresh-${data.stored > 0 ? 'done' : 'error'}`;
+        }
+
+        const freshTextarea = document.getElementById('admin-pid-bulk-paste-textarea');
+        if (freshTextarea) freshTextarea.value = '';
+
+        const freshBtn = document.getElementById('admin-pid-bulk-paste-btn');
+        if (freshBtn) {
+            freshBtn.disabled = false;
+            freshBtn.textContent = 'Import';
+        }
+    } catch (err) {
+        adminPidBulkPastePending = false;
+        if (adminPidDetailSelected !== editionId) return;
+        btn.disabled = false;
+        btn.textContent = 'Import';
+        status.textContent = 'Request failed.';
+        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+    }
 }
 
 function adminPidTodayIso() {
@@ -825,11 +957,11 @@ function adminPidDetailHistoryTableHtml(rows, loaded) {
     `).join('');
 
     return `
-        <div class="admin-pid-detail-table">
-            <div class="admin-pid-detail-row admin-pid-detail-row-header">
-                <span>Date</span><span>Condition</span><span>Price</span><span>Qty</span>
-            </div>
-            ${rowsHtml}
+        <div class="admin-pid-detail-row admin-pid-detail-row-header">
+            <span>Date</span><span>Condition</span><span>Price</span><span>Qty</span>
+        </div>
+        <div class="admin-pid-detail-table-scroll">
+            <div class="admin-pid-detail-table">${rowsHtml}</div>
         </div>
     `;
 }
@@ -850,12 +982,15 @@ function initAdmin() {
     adminPidAddEntryFoilId = null;
     adminPidAddEntryCondition = null;
     adminPidAddEntryPending = false;
+    adminPidBulkPasteOpen = false;
+    adminPidBulkPastePending = false;
     document.querySelector('.footer')?.classList.add('footer-hidden');
     loadAdminPricingIds();
 }
 
 document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-add-entry-wrap')) closeAdminPidAddEntry();
+    if (!e.target.closest('.admin-pid-bulk-paste-wrap')) closeAdminPidBulkPaste();
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
     if (!e.target.closest('#admin-pid-table-header .set-dropdown-wrap')) closeAdminPidSetFilter();

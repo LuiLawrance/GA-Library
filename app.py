@@ -7,8 +7,9 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, scrape_batch_tcg_by_editions, \
-    scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
+from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, import_pasted_sales_tcg_by_edition, \
+    scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, \
+    scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from user import JSON_USERS, user_create, user_login
 from util_file import new_json
@@ -883,6 +884,30 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid foil_id for this edition")
 
     return JSONResponse({"ok": True, "entry": entry})
+
+
+@app.post("/api/admin/pricing/{edition_id}/import-sales")
+async def api_admin_pricing_import_sales(edition_id: str, request: Request):
+    require_admin(request)
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    body = await request.json()
+    raw_text = body.get("text", "")
+
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="Pasted text is required")
+
+    result = import_pasted_sales_tcg_by_edition(edition_id, raw_text)
+
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return JSONResponse(result)
 
 
 @app.get("/api/sets/search")

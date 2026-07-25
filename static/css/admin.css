@@ -266,7 +266,11 @@
 .admin-pricing-detail {
     flex: 1;
     min-width: 0;
-    overflow-y: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow: hidden;
     padding-left: 4px;
 }
 
@@ -285,23 +289,23 @@
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar,
-.admin-pricing-detail::-webkit-scrollbar {
+.admin-pid-detail-table-scroll::-webkit-scrollbar {
     width: 8px;
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar-track,
-.admin-pricing-detail::-webkit-scrollbar-track {
+.admin-pid-detail-table-scroll::-webkit-scrollbar-track {
     background: var(--bg);
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar-thumb,
-.admin-pricing-detail::-webkit-scrollbar-thumb {
+.admin-pid-detail-table-scroll::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 8px;
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar-thumb:hover,
-.admin-pricing-detail::-webkit-scrollbar-thumb:hover {
+.admin-pid-detail-table-scroll::-webkit-scrollbar-thumb:hover {
     background: var(--border-focus);
 }
 
@@ -494,7 +498,14 @@
 }
 
 .admin-pid-detail-section {
-    margin-bottom: 20px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    overflow: hidden;
 }
 
 .admin-pid-detail-section-title {
@@ -507,10 +518,17 @@
 }
 
 .admin-pid-detail-section-header {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-bottom: 8px;
+}
+
+.admin-pid-section-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .admin-pid-add-entry-wrap {
@@ -558,6 +576,54 @@
     flex-direction: column;
     gap: 8px;
     animation: dropdownReveal 0.2s ease forwards;
+}
+
+.admin-pid-bulk-paste-menu {
+    width: 320px;
+    z-index: 1000;
+}
+
+/* Temporarily lifts the panel's own scroll-clipping while the bulk-paste
+   popup is open, so it isn't cut off — restored the instant it closes. Kept
+   as a plain CSS override (position/top/right/left still come from the
+   shared .admin-pid-add-entry-menu rule) rather than JS-computed coordinates,
+   since this page's global `zoom` scale doesn't compose correctly with
+   manually-set position values. */
+.admin-pricing-detail.admin-pid-popover-open,
+.admin-pid-detail-section.admin-pid-popover-open {
+    overflow: visible;
+}
+
+.admin-pid-bulk-paste-hint {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.admin-pid-bulk-paste-textarea {
+    width: 100%;
+    height: 280px;
+    resize: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.admin-pid-bulk-paste-textarea::-webkit-scrollbar {
+    display: none;
+}
+
+.admin-pid-bulk-paste-textarea:focus {
+    outline: none;
+    border-color: var(--border-focus);
 }
 
 /* ── Add-entry dropdowns (foil, condition) — mirrors .dga-fmt-dropdown-btn / .set-dropdown-btn rotating-arrow style ── */
@@ -734,12 +800,15 @@
     font-size: 0.78rem;
 }
 
+.admin-pid-detail-table-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
 .admin-pid-detail-table {
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
 }
 
 .admin-pid-detail-row {
@@ -756,6 +825,7 @@
 }
 
 .admin-pid-detail-row-header {
+    flex-shrink: 0;
     font-family: 'DM Mono', monospace;
     font-size: 0.68rem;
     letter-spacing: 0.06em;

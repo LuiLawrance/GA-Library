@@ -3,6 +3,7 @@ from util_file import new_json
 
 import api_tcgplayer
 import json
+import re
 
 JSON_LISTINGS = "DATA_GA/PRICING_GA/LISTINGS.json"
 JSON_SALES = "DATA_GA/PRICING_GA/SALES.json"
@@ -522,6 +523,95 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
         )
 
     return entry
+
+
+_PASTE_CONDITION_RE = re.compile(r"^(NM|LP|MP|HP|DMG)(\s+Foil)?$", re.IGNORECASE)
+_PASTE_QTY_PRICE_RE = re.compile(r"^(\d+)\s+\$?([\d,]+\.?\d*)$")
+
+
+def parse_pasted_sales(text: str) -> tuple[list[dict], list[str]]:
+    """Parses sales data copy-pasted directly from TCGPlayer's sales history
+    table — a workaround for the scraper being capped at ~5 rows while logged
+    out. Expects date / condition / qty+price repeating in groups of three
+    lines, exactly as it appears when the table is selected and copied.
+    Returns (parsed_entries, error_lines) — error_lines holds any input that
+    didn't fit the expected shape, for surfacing back to the admin."""
+    lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n")]
+    lines = [ln for ln in lines if ln]
+
+    entries = []
+    errors = []
+    i = 0
+
+    while i < len(lines):
+        date_line = lines[i]
+
+        try:
+            datetime.strptime(date_line, "%m/%d/%y")
+        except ValueError:
+            errors.append(date_line)
+            i += 1
+            continue
+
+        if i + 2 >= len(lines):
+            errors.append(date_line)
+            break
+
+        condition_line = lines[i + 1]
+        qty_price_line = lines[i + 2]
+        condition_match = _PASTE_CONDITION_RE.match(condition_line)
+        qty_price_match = _PASTE_QTY_PRICE_RE.match(qty_price_line)
+
+        if not condition_match or not qty_price_match:
+            errors.append(f"{date_line} / {condition_line} / {qty_price_line}")
+            i += 1
+            continue
+
+        condition_abbr = condition_match.group(1).upper()
+        is_foil = bool(condition_match.group(2))
+        condition = api_tcgplayer.CONDITION_MAP.get(condition_abbr, condition_abbr)
+
+        if is_foil:
+            condition += " Foil"
+            foil_kind = "FOIL"
+        else:
+            foil_kind = "NONFOIL"
+
+        quantity_str, price_str = qty_price_match.groups()
+
+        entries.append({
+            "date": date_line,
+            "condition": condition,
+            "foil_kind": foil_kind,
+            "quantity": int(quantity_str),
+            "price": float(price_str.replace(",", "")),
+        })
+
+        i += 3
+
+    return entries, errors
+
+
+def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bool = False) -> dict:
+    """Stores sales data an admin copy-pasted directly from TCGPlayer's sales
+    history table, exactly like a scrape would — a workaround for the scraper
+    being capped at ~5 rows while logged out of TCGPlayer."""
+    entries, errors = parse_pasted_sales(raw_text)
+
+    if not entries:
+        return {"ok": False, "error": "Could not parse any sales entries from the pasted text."}
+
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, entries, debug)
+    api_tcgplayer.set_last_sales(edition_id, debug)
+
+    return {
+        "ok": True,
+        "stored": stored,
+        "skipped_today": skipped_today,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_unrecognized": skipped_unrecognized,
+        "parse_errors": errors,
+    }
 
 
 def _listings_gate_result(edition_id: str) -> dict | None:
