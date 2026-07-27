@@ -80,10 +80,16 @@
 
 .admin-pid-controls {
     display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+}
+
+.admin-pid-controls-row {
+    display: flex;
     align-items: center;
     gap: 16px;
-    margin-bottom: 12px;
-    flex-shrink: 0;
 }
 
 .admin-pid-search {
@@ -152,6 +158,41 @@
     gap: 8px;
 }
 
+.admin-pid-tcg-btn {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: 'Sora', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: border-color 0.15s, opacity 0.15s;
+}
+
+.admin-pid-tcg-btn:hover:not(:disabled) {
+    border-color: var(--border-focus);
+}
+
+.admin-pid-tcg-btn:disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.admin-pid-tcg-icon {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
 .admin-pid-refresh-btn {
     font-family: 'Sora', sans-serif;
     font-size: 0.82rem;
@@ -193,12 +234,11 @@
     color: var(--text-muted);
 }
 
-.admin-pid-status-row {
+.admin-pid-status-group {
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 16px;
-    flex-shrink: 0;
+    min-width: 0;
 }
 
 .admin-pid-summary {

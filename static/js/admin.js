@@ -7,7 +7,6 @@ let adminPidRefreshing = false;
 let adminPidSetFilter = new Set();
 let adminPidSetFilterOpen = false;
 let adminPidFindingIds = new Set();
-let adminPidBulkFinding = false;
 
 let adminPidDetailSelected = null;
 let adminPidDetailHistory = null;
@@ -279,6 +278,22 @@ function updateAdminPidRefreshButton() {
         : 'Refresh Selected';
 }
 
+function updateAdminPidTcgButton() {
+    const btn = document.getElementById('admin-pid-tcg-btn');
+    if (btn) btn.disabled = !adminPidDetailSelected;
+}
+
+function openAdminPidTcgPlayer() {
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    if (!record) return;
+
+    const url = record.product_id
+        ? `https://www.tcgplayer.com/product/${encodeURIComponent(record.product_id)}`
+        : `https://www.tcgplayer.com/search/grand-archive/product?q=${encodeURIComponent(record.name)}&productLineName=grand-archive`;
+
+    window.open(url, '_blank', 'noopener');
+}
+
 async function saveAdminProductId(input) {
     const editionId = input.dataset.editionId;
     const value = input.value.trim();
@@ -371,58 +386,6 @@ async function findAdminProductId(editionId) {
     adminPidFindingIds.delete(editionId);
     renderAdminPricingIds();
     if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
-}
-
-async function findMissingAdminProductIds() {
-    if (adminPidBulkFinding) return;
-
-    const missingIds = adminPidData.filter(e => !e.product_id).map(e => e.edition_id);
-    if (!missingIds.length) return;
-
-    adminPidBulkFinding = true;
-    missingIds.forEach(id => adminPidFindingIds.add(id));
-
-    const btn = document.getElementById('admin-pid-find-ids-btn');
-    if (btn) btn.disabled = true;
-    const progress = document.getElementById('admin-pid-progress');
-    renderAdminPricingIds();
-
-    if (progress) {
-        progress.classList.remove('hidden');
-        progress.textContent = `Finding 0 of ${missingIds.length}…`;
-    }
-
-    let found = 0;
-
-    try {
-        await runProductIdJob(missingIds, (eid, result) => {
-            adminPidFindingIds.delete(eid);
-            const record = adminPidData.find(e => e.edition_id === eid);
-            if (record && result.ok) {
-                record.product_id = result.product_id;
-                found += 1;
-            }
-            if (progress) {
-                const done = missingIds.length - adminPidFindingIds.size;
-                progress.textContent = `Finding ${done} of ${missingIds.length}…`;
-            }
-            renderAdminPricingIds();
-            if (adminPidDetailSelected === eid) renderAdminPricingDetailAll();
-        });
-    } catch (err) {
-        // Whatever finished stays applied; leave the rest for a retry.
-    }
-
-    adminPidFindingIds.clear();
-    adminPidBulkFinding = false;
-    if (btn) btn.disabled = false;
-
-    if (progress) {
-        progress.textContent = `Found ${found} of ${missingIds.length} missing product ID(s).`;
-        setTimeout(() => progress.classList.add('hidden'), 4000);
-    }
-
-    renderAdminPricingIds();
 }
 
 async function refreshSelectedAdminPricing(target) {
@@ -556,6 +519,7 @@ async function selectAdminPricingDetail(editionId) {
 
     renderAdminPricingIds();
     renderAdminPricingDetailAll();
+    updateAdminPidTcgButton();
 
     imageCol?.classList.remove('fade-out');
     detail?.classList.remove('fade-out');
@@ -1106,6 +1070,7 @@ function initAdmin() {
     adminPidBulkPasteOpen = false;
     adminPidBulkPastePending = false;
     document.querySelector('.footer')?.classList.add('footer-hidden');
+    updateAdminPidTcgButton();
     loadAdminPricingIds();
 }
 

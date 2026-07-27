@@ -30,6 +30,7 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 480))
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
+app.mount("/marketplaces", StaticFiles(directory="assets/MARKETPLACES"), name="marketplaces")
 
 _set_search_cache = {}
 
