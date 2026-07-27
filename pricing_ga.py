@@ -86,6 +86,42 @@ def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict) ->
     return card_id
 
 
+def delete_entry(edition_id: str, foil_id: str, entry_type: str, index: int) -> dict:
+    """Removes a single sale/listing record by its position within its own
+    foil's list — the position an admin sees it at in the flattened, sorted
+    /history response, since raw entries have no id of their own."""
+    from api_ga import JSON_EDITIONS
+
+    if entry_type not in ("sales", "listings"):
+        return {"ok": False, "error": "entry_type must be 'sales' or 'listings'."}
+
+    editions_file = new_json(JSON_EDITIONS)
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        return {"ok": False, "error": "Edition not found."}
+
+    card_id = editions_data[edition_id]["card_id"]
+    file_path = JSON_SALES if entry_type == "sales" else JSON_LISTINGS
+    target_file = new_json(file_path)
+
+    with target_file.open("r", encoding="utf-8") as f:
+        target_data = json.load(f)
+
+    records = target_data.get(card_id, {}).get(edition_id, {}).get(foil_id)
+
+    if records is None or not (0 <= index < len(records)):
+        return {"ok": False, "error": "Entry not found."}
+
+    records.pop(index)
+
+    with target_file.open("w", encoding="utf-8") as f:
+        json.dump(target_data, f, indent=4, ensure_ascii=False)
+
+    return {"ok": True}
+
+
 def _build_edition_options(info_data: dict, card_id: str) -> list[tuple[str, str, str, str]]:
     options = []
 
@@ -492,12 +528,43 @@ def add_sale(card_name: str, debug: bool = False) -> None:
     _prompt_entry(card_name, JSON_SALES, debug)
 
 
+def _foil_kind_for_id(foils: dict, foil_id: str) -> str | None:
+    for fid, finfo in foils.items():
+        if fid == foil_id:
+            return finfo.get("kind")
+        for vid, vinfo in finfo.get("variants", {}).items():
+            if vid == foil_id:
+                return vinfo.get("kind")
+    return None
+
+
 def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: float, quantity: int = 1,
                       info: str = "", marketplace: str = "Manual", entry_date: str | None = None,
                       debug: bool = False) -> dict:
     """Web-safe core: appends a single sale/listing entry without interactive
     prompts, for the admin console's manual-entry form."""
+    from api_ga import JSON_EDITIONS, JSON_INFO
+
     file_path = JSON_SALES if entry_type == "sales" else JSON_LISTINGS
+
+    # Match the "<condition> Foil" convention scraped/pasted entries already use
+    # (see _store_sales_tcg / parse_pasted_sales) — otherwise a manually-added
+    # foil sale is stored under the right foil_id but reads identically to a
+    # nonfoil one in the combined history list, since "info" is all that's shown.
+    editions_file = new_json(JSON_EDITIONS)
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    info_file = new_json(JSON_INFO)
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    card_id_lookup = editions_data.get(edition_id, {}).get("card_id")
+    foils = info_data.get(card_id_lookup, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
+    foil_kind = _foil_kind_for_id(foils, foil_id)
+
+    if foil_kind and foil_kind.strip().upper() == "FOIL" and not info.strip().lower().endswith("foil"):
+        info = f"{info} Foil".strip()
 
     entry = {
         "date": entry_date or date.today().isoformat(),

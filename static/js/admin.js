@@ -71,10 +71,42 @@ async function loadAdminPricingIds() {
 }
 
 function renderAdminPricingIds() {
-    const summary = document.getElementById('admin-pid-summary');
     const header = document.getElementById('admin-pid-table-header');
+    if (!header) return;
+
+    // header.innerHTML below rebuilds the set-filter dropdown from scratch, which
+    // would otherwise silently reset its option list back to the top (and replay
+    // its open animation) — save/restore its scroll position across the rebuild.
+    const prevSetMenu = header.querySelector('.set-dropdown-menu');
+    const setMenuScrollTop = prevSetMenu ? prevSetMenu.scrollTop : 0;
+
+    header.innerHTML = `
+        <div class="admin-pid-row admin-pid-row-header">
+            <span class="admin-pid-col-check">
+                <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
+            </span>
+            <span class="admin-pid-col-name">Card</span>
+            <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
+            <span class="admin-pid-col-status">Product ID</span>
+            <span class="admin-pid-col-refresh">Refresh Status</span>
+        </div>
+    `;
+
+    const newSetMenu = header.querySelector('.set-dropdown-menu');
+    if (newSetMenu) newSetMenu.scrollTop = setMenuScrollTop;
+
+    renderAdminPidRows();
+}
+
+// Rebuilds just the row list (and summary/select-all/refresh-button state that
+// depend on it) without touching the header — toggling a single set in the Set
+// filter calls this directly instead of renderAdminPricingIds() so the dropdown
+// menu itself is never recreated, which would otherwise reset its scroll and
+// replay its open animation (a visible "flash") on every checkbox click.
+function renderAdminPidRows() {
+    const summary = document.getElementById('admin-pid-summary');
     const table = document.getElementById('admin-pid-table');
-    if (!summary || !header || !table) return;
+    if (!summary || !table) return;
 
     const withId = adminPidData.filter(e => e.product_id).length;
     const query = (document.getElementById('admin-pid-search')?.value || '').trim().toLowerCase();
@@ -112,18 +144,6 @@ function renderAdminPricingIds() {
             <span class="admin-pid-col-refresh">${adminPidRefreshStatusMarkup(e.edition_id)}</span>
         </div>
     `).join('');
-
-    header.innerHTML = `
-        <div class="admin-pid-row admin-pid-row-header">
-            <span class="admin-pid-col-check">
-                <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
-            </span>
-            <span class="admin-pid-col-name">Card</span>
-            <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
-            <span class="admin-pid-col-status">Product ID</span>
-            <span class="admin-pid-col-refresh">Refresh Status</span>
-        </div>
-    `;
 
     table.innerHTML = rows || '<div class="admin-pid-empty">No editions match.</div>';
 
@@ -163,7 +183,7 @@ function adminPidSetFilterHtml() {
     const sets = [...new Set(adminPidData.map(e => e.set_prefix).filter(Boolean))].sort();
 
     const optionsHtml = sets.map(set => `
-        <div class="set-dropdown-option ${adminPidSetFilter.has(set) ? 'selected' : ''}"
+        <div class="set-dropdown-option ${adminPidSetFilter.has(set) ? 'selected' : ''}" data-set="${escapeHtml(set)}"
              onclick="event.stopPropagation(); toggleAdminPidSetFilterOption('${escapeHtml(set)}')">
             <span>${escapeHtml(set)}</span>
             <div class="set-toggle"></div>
@@ -201,7 +221,15 @@ function toggleAdminPidSetFilterOption(set) {
     } else {
         adminPidSetFilter.add(set);
     }
-    renderAdminPricingIds();
+
+    // Flip this option's own checkmark in place instead of going through
+    // renderAdminPricingIds() — rebuilding the header would recreate the whole
+    // dropdown menu and replay its open animation on every click.
+    document.querySelectorAll('#admin-pid-table-header .set-dropdown-option').forEach(opt => {
+        if (opt.dataset.set === set) opt.classList.toggle('selected', adminPidSetFilter.has(set));
+    });
+
+    renderAdminPidRows();
 }
 
 function adminPidRefreshStatusMarkup(editionId) {
@@ -657,14 +685,14 @@ function renderAdminPricingDetail() {
                     ${adminPidAddEntryTriggerHtml('sales')}
                 </div>
             </div>
-            ${adminPidDetailHistoryTableHtml(salesRows, historyLoaded)}
+            ${adminPidDetailHistoryTableHtml(salesRows, historyLoaded, 'sales')}
         </div>
         <div class="admin-pid-detail-section" id="admin-pid-section-listings">
             <div class="admin-pid-detail-section-header">
                 <span class="admin-pid-detail-section-title">Listings</span>
                 ${adminPidAddEntryTriggerHtml('listings')}
             </div>
-            ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded)}
+            ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded, 'listings')}
         </div>
     `;
 
@@ -1028,7 +1056,7 @@ async function submitAdminPricingManualEntry(type) {
     }
 }
 
-function adminPidDetailHistoryTableHtml(rows, loaded) {
+function adminPidDetailHistoryTableHtml(rows, loaded, type) {
     if (!loaded) return '<div class="admin-pid-detail-loading">Loading…</div>';
     if (!rows.length) return '<div class="admin-pid-detail-empty-small">No records.</div>';
 
@@ -1038,17 +1066,47 @@ function adminPidDetailHistoryTableHtml(rows, loaded) {
             <span>${escapeHtml(r.info || '')}</span>
             <span>$${Number(r.price).toFixed(2)}</span>
             <span>×${escapeHtml(String(r.quantity))}</span>
+            <button type="button" class="admin-pid-detail-delete-btn" title="Delete entry"
+                    onclick="deleteAdminPidEntry('${type}', '${escapeHtml(r.foil_id)}', ${r.index}, this)">&times;</button>
         </div>
     `).join('');
 
     return `
         <div class="admin-pid-detail-row admin-pid-detail-row-header">
-            <span>Date</span><span>Condition</span><span>Price</span><span>Qty</span>
+            <span>Date</span><span>Condition</span><span>Price</span><span>Qty</span><span></span>
         </div>
         <div class="admin-pid-detail-table-scroll">
             <div class="admin-pid-detail-table">${rowsHtml}</div>
         </div>
     `;
+}
+
+async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
+    const editionId = adminPidDetailSelected;
+    if (!editionId) return;
+
+    if (!confirm(`Delete this ${entryType === 'sales' ? 'sale' : 'listing'} entry?`)) return;
+
+    btnEl.disabled = true;
+
+    try {
+        const res = await fetch(`/api/admin/pricing/${editionId}/entry`, {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({foil_id: foilId, entry_type: entryType, index}),
+        });
+
+        if (!res.ok) {
+            btnEl.disabled = false;
+            return;
+        }
+
+        if (adminPidDetailSelected === editionId) {
+            await loadAdminPricingDetailHistory();
+        }
+    } catch (err) {
+        btnEl.disabled = false;
+    }
 }
 
 function initAdmin() {

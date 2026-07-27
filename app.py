@@ -7,7 +7,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, find_product_ids_by_editions, \
+from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, delete_entry, find_product_ids_by_editions, \
     import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
@@ -905,8 +905,13 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
         entries = []
 
         for foil_id, records in by_foil.items():
-            for record in records:
-                entries.append({**record, "foil_kind": foil_kind_by_id.get(foil_id, "")})
+            for index, record in enumerate(records):
+                entries.append({
+                    **record,
+                    "foil_kind": foil_kind_by_id.get(foil_id, ""),
+                    "foil_id": foil_id,
+                    "index": index,
+                })
 
         entries.sort(key=lambda r: r["date"], reverse=True)
         return entries
@@ -1003,6 +1008,31 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid foil_id for this edition")
 
     return JSONResponse({"ok": True, "entry": entry})
+
+
+@app.delete("/api/admin/pricing/{edition_id}/entry")
+async def api_admin_pricing_delete_entry(edition_id: str, request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    entry_type = body.get("entry_type")
+    foil_id = body.get("foil_id", "").strip()
+    index = body.get("index")
+
+    if not foil_id or index is None:
+        raise HTTPException(status_code=400, detail="foil_id and index are required")
+
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="index must be a whole number")
+
+    result = delete_entry(edition_id, foil_id, entry_type, index)
+
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/admin/pricing/{edition_id}/import-sales")
