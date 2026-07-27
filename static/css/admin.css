@@ -400,6 +400,52 @@
     background: color-mix(in srgb, var(--error) 12%, var(--bg-card));
 }
 
+.admin-pid-pid-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.admin-pid-pid-wrap .admin-pid-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-pid-find-btn {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.admin-pid-find-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.admin-pid-find-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.admin-pid-find-btn.finding {
+    color: var(--accent);
+    font-family: 'DM Mono', monospace;
+}
+
 .admin-pid-empty {
     padding: 20px 16px;
     text-align: center;

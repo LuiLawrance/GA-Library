@@ -854,6 +854,72 @@ def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: boo
     return results
 
 
+def find_product_ids_by_editions(edition_ids: list[str], debug: bool = False,
+                                  headless: bool = False, progress_callback=None) -> dict[str, dict]:
+    """Looks up TCGPlayer product IDs for many editions using a single shared
+    browser session, matching each edition's card name + collector number
+    against TCGPlayer's search results. Persists any confident match via
+    api_tcgplayer.set_product_id(). progress_callback(edition_id, result), if
+    given, is called after each edition finishes.
+
+    `result` is {"ok": bool, "product_id": str | None, "error": str | None}."""
+    from api_ga import _build_collector_map, JSON_EDITIONS, JSON_INFO, JSON_SLUGS
+    from playwright.sync_api import sync_playwright
+
+    editions_file = new_json(JSON_EDITIONS)
+    with editions_file.open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    slug_file = new_json(JSON_SLUGS)
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+    name_by_card_id = {entry["card_id"]: entry["name"] for entry in slug_data.values()}
+
+    info_file = new_json(JSON_INFO)
+    with info_file.open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    collector_map = _build_collector_map()
+
+    results = {}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=headless)
+        page = browser.new_page()
+
+        for edition_id in edition_ids:
+            card_id = editions_data.get(edition_id, {}).get("card_id")
+            card_name = name_by_card_id.get(card_id)
+            collector_number = collector_map.get(edition_id)
+            set_name = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("set_name", "")
+
+            if not card_name or not collector_number:
+                result = {"ok": False, "product_id": None, "error": "Missing card name or collector number."}
+            else:
+                try:
+                    product_id = api_tcgplayer.find_product_id(
+                        card_name, collector_number, set_name, debug=debug, headless=headless, page=page
+                    )
+                except Exception as e:
+                    product_id = None
+                    result = {"ok": False, "product_id": None, "error": f"Unexpected error: {e}"}
+                else:
+                    if product_id:
+                        api_tcgplayer.set_product_id(edition_id, product_id, debug)
+                        result = {"ok": True, "product_id": product_id, "error": None}
+                    else:
+                        result = {"ok": False, "product_id": None, "error": "No confident match found."}
+
+            results[edition_id] = result
+
+            if progress_callback:
+                progress_callback(edition_id, result)
+
+        browser.close()
+
+    return results
+
+
 def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:
     edition_id = _select_edition(card_name)
 

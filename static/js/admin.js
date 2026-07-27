@@ -6,6 +6,8 @@ let adminPidRefreshStatus = {};
 let adminPidRefreshing = false;
 let adminPidSetFilter = new Set();
 let adminPidSetFilterOpen = false;
+let adminPidFindingIds = new Set();
+let adminPidBulkFinding = false;
 
 let adminPidDetailSelected = null;
 let adminPidDetailHistory = null;
@@ -106,12 +108,7 @@ function renderAdminPricingIds() {
             <span class="admin-pid-col-name">${escapeHtml(e.name)}</span>
             <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
             <span class="admin-pid-col-status" onclick="event.stopPropagation()">
-                <input type="text" class="admin-pid-input ${e.product_id ? 'admin-pid-input-filled' : ''}"
-                       data-edition-id="${escapeHtml(e.edition_id)}"
-                       value="${escapeHtml(e.product_id || '')}"
-                       placeholder="Missing"
-                       onkeydown="if (event.key === 'Enter') this.blur()"
-                       onblur="saveAdminProductId(this)">
+                ${adminPidProductIdFieldHtml(e)}
             </span>
             <span class="admin-pid-col-refresh">${adminPidRefreshStatusMarkup(e.edition_id)}</span>
         </div>
@@ -141,6 +138,26 @@ function renderAdminPricingIds() {
     }
 
     updateAdminPidRefreshButton();
+}
+
+function adminPidProductIdFieldHtml(e) {
+    const finding = adminPidFindingIds.has(e.edition_id);
+
+    return `
+        <div class="admin-pid-pid-wrap">
+            <input type="text" class="admin-pid-input ${e.product_id ? 'admin-pid-input-filled' : ''}"
+                   data-edition-id="${escapeHtml(e.edition_id)}"
+                   value="${escapeHtml(e.product_id || '')}"
+                   placeholder="Missing"
+                   ${finding ? 'disabled' : ''}
+                   onkeydown="if (event.key === 'Enter') this.blur()"
+                   onblur="saveAdminProductId(this)">
+            <button type="button" class="admin-pid-find-btn ${finding ? 'finding' : ''}"
+                    title="Auto-detect from TCGPlayer"
+                    ${finding ? 'disabled' : ''}
+                    onclick="findAdminProductId('${escapeHtml(e.edition_id)}')">${finding ? '…' : '🔍'}</button>
+        </div>
+    `;
 }
 
 function adminPidSetFilterHtml() {
@@ -297,6 +314,115 @@ async function saveAdminProductId(input) {
         input.classList.add('admin-pid-input-error');
         setTimeout(() => input.classList.remove('admin-pid-input-error'), 3000);
     }
+}
+
+// Starts a product-ID lookup job and polls it to completion, invoking
+// onResult(editionId, {ok, product_id, error}) as each edition finishes.
+async function runProductIdJob(editionIds, onResult) {
+    const startRes = await fetch('/api/admin/pricing/find-product-ids/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({edition_ids: editionIds}),
+    });
+
+    if (!startRes.ok) {
+        const errData = await startRes.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to start lookup');
+    }
+
+    const {job_id} = await startRes.json();
+    const seen = new Set();
+
+    while (true) {
+        await new Promise(r => setTimeout(r, 1200));
+
+        const statusRes = await fetch(`/api/admin/pricing/find-product-ids/status/${job_id}`);
+        if (!statusRes.ok) throw new Error('Lost track of lookup job');
+
+        const job = await statusRes.json();
+
+        for (const [editionId, result] of Object.entries(job.results || {})) {
+            if (seen.has(editionId)) continue;
+            seen.add(editionId);
+            onResult(editionId, result);
+        }
+
+        if (job.status === 'error') throw new Error(job.error || 'Unknown error');
+        if (job.status === 'done') break;
+    }
+}
+
+async function findAdminProductId(editionId) {
+    if (adminPidFindingIds.has(editionId)) return;
+
+    adminPidFindingIds.add(editionId);
+    renderAdminPricingIds();
+    if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
+
+    try {
+        await runProductIdJob([editionId], (eid, result) => {
+            const record = adminPidData.find(e => e.edition_id === eid);
+            if (record && result.ok) record.product_id = result.product_id;
+        });
+    } catch (err) {
+        // Leave the field as-is — the admin can still type it in manually.
+    }
+
+    adminPidFindingIds.delete(editionId);
+    renderAdminPricingIds();
+    if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
+}
+
+async function findMissingAdminProductIds() {
+    if (adminPidBulkFinding) return;
+
+    const missingIds = adminPidData.filter(e => !e.product_id).map(e => e.edition_id);
+    if (!missingIds.length) return;
+
+    adminPidBulkFinding = true;
+    missingIds.forEach(id => adminPidFindingIds.add(id));
+
+    const btn = document.getElementById('admin-pid-find-ids-btn');
+    if (btn) btn.disabled = true;
+    const progress = document.getElementById('admin-pid-progress');
+    renderAdminPricingIds();
+
+    if (progress) {
+        progress.classList.remove('hidden');
+        progress.textContent = `Finding 0 of ${missingIds.length}…`;
+    }
+
+    let found = 0;
+
+    try {
+        await runProductIdJob(missingIds, (eid, result) => {
+            adminPidFindingIds.delete(eid);
+            const record = adminPidData.find(e => e.edition_id === eid);
+            if (record && result.ok) {
+                record.product_id = result.product_id;
+                found += 1;
+            }
+            if (progress) {
+                const done = missingIds.length - adminPidFindingIds.size;
+                progress.textContent = `Finding ${done} of ${missingIds.length}…`;
+            }
+            renderAdminPricingIds();
+            if (adminPidDetailSelected === eid) renderAdminPricingDetailAll();
+        });
+    } catch (err) {
+        // Whatever finished stays applied; leave the rest for a retry.
+    }
+
+    adminPidFindingIds.clear();
+    adminPidBulkFinding = false;
+    if (btn) btn.disabled = false;
+
+    if (progress) {
+        progress.textContent = `Found ${found} of ${missingIds.length} missing product ID(s).`;
+        setTimeout(() => progress.classList.add('hidden'), 4000);
+    }
+
+    renderAdminPricingIds();
 }
 
 async function refreshSelectedAdminPricing(target) {
@@ -529,12 +655,7 @@ function renderAdminPricingImageCol() {
         </div>
         <div class="admin-pid-detail-pid-row">
             <label class="admin-pid-detail-label">Product ID</label>
-            <input type="text" class="admin-pid-input ${record.product_id ? 'admin-pid-input-filled' : ''}"
-                   data-edition-id="${escapeHtml(record.edition_id)}"
-                   value="${escapeHtml(record.product_id || '')}"
-                   placeholder="Missing"
-                   onkeydown="if (event.key === 'Enter') this.blur()"
-                   onblur="saveAdminProductId(this)">
+            ${adminPidProductIdFieldHtml(record)}
         </div>
     `;
 

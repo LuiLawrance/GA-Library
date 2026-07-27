@@ -4,6 +4,7 @@ from tqdm import tqdm
 from util_file import new_dir, new_json
 
 import json
+import os
 import re
 import requests
 
@@ -288,6 +289,23 @@ def _sort_collector_number(collector_number: str, debug: bool = False) -> tuple:
         )
 
     return float("inf"), collector_number
+
+
+def _build_collector_map() -> dict:
+    """edition_id → collector_number, across all set files."""
+    result = {}
+    if os.path.exists(DIR_SETS):
+        for f in os.scandir(DIR_SETS):
+            if not f.name.endswith(".json"):
+                continue
+            with open(f.path, "r", encoding="utf-8") as fh:
+                set_data = json.load(fh)
+            for num, eids in set_data.items():
+                if isinstance(eids, str):
+                    eids = [eids]
+                for eid in eids:
+                    result[eid] = num
+    return result
 
 
 def _update_edition(card_data: dict, debug: bool = False) -> None:

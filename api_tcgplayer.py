@@ -3,8 +3,11 @@ from playwright.sync_api import sync_playwright
 from util_file import new_json
 
 import json
+import re
+import urllib.parse
 
 BASE_URL = "https://www.tcgplayer.com/product/"
+SEARCH_URL = "https://www.tcgplayer.com/search/grand-archive/product"
 
 JSON_IDS = "DATA_GA/PRICING_GA/ID_TCGPLAYER.json"
 
@@ -316,6 +319,99 @@ def fetch_sales_and_listings(url: str, debug: bool = False, headless: bool = Fal
         print(f"Fetch Error | url={url} | {e}")
 
     return sales, listings
+
+
+def _search_product_id_page(page, card_name: str, collector_number: str, set_name: str = "",
+                             debug: bool = False) -> str | None:
+    """Runs a TCGPlayer product search for `card_name` and picks the result
+    whose collector number matches. Collector number alone isn't a safe
+    disambiguator — different sets reuse the same number (e.g. "Dawn of Ashes
+    1st Edition #081" and "Dawn of Ashes Alter Edition #081" are different
+    cards) — so when more than one candidate shares the number, `set_name` is
+    used as a fuzzy tiebreaker, since TCGPlayer's set names don't always match
+    our own wording exactly (e.g. "1st Edition" vs our "First Edition")."""
+    from rapidfuzz import fuzz
+
+    url = f"{SEARCH_URL}?q={urllib.parse.quote(card_name)}&productLineName=grand-archive"
+    page.goto(url)
+    page.wait_for_load_state("networkidle")
+
+    target_num = collector_number.strip().upper().lstrip("#")
+    target_name = card_name.strip().lower()
+
+    results = page.locator(".product-card__content")
+    candidates = []  # (product_id, tcg_set_name)
+
+    for i in range(results.count()):
+        result = results.nth(i)
+
+        title = result.locator(".product-card__title").inner_text().strip()
+        if not title.lower().startswith(target_name):
+            continue
+
+        rarity_text = result.locator(".product-card__rarity__variant").inner_text().strip()
+        num_match = re.search(r"#(\S+)", rarity_text)
+        if not num_match or num_match.group(1).upper() != target_num:
+            continue
+
+        href = result.locator("a[href*='/product/']").first.get_attribute("href") or ""
+        pid_match = re.search(r"/product/(\d+)", href)
+        if not pid_match:
+            continue
+
+        tcg_set_name = result.locator(".product-card__set-name__variant").inner_text().strip()
+        candidates.append((pid_match.group(1), tcg_set_name))
+
+    if debug:
+        print(f"Product ID search | name={card_name} | num={collector_number} | candidates={candidates}")
+
+    if len(candidates) == 1:
+        return candidates[0][0]
+
+    if len(candidates) > 1 and set_name:
+        scored = sorted(
+            ((fuzz.token_sort_ratio(set_name.lower(), tcg_set.lower()), pid, tcg_set) for pid, tcg_set in candidates),
+            key=lambda t: t[0], reverse=True
+        )
+
+        if debug:
+            print(f"Product ID disambiguation | set_name={set_name} | scored={scored}")
+
+        best_score = scored[0][0]
+        if best_score >= 60 and (len(scored) == 1 or scored[1][0] < best_score):
+            return scored[0][1]
+
+    return None
+
+
+def find_product_id(card_name: str, collector_number: str, set_name: str = "", debug: bool = False,
+                     headless: bool = False, page=None) -> str | None:
+    """If `page` is given, searches against it directly and leaves its browser
+    lifecycle to the caller (used when batching many editions through one
+    shared browser). Otherwise opens and closes its own browser as before."""
+    from api_ga import _log_error
+
+    if page is not None:
+        try:
+            return _search_product_id_page(page, card_name, collector_number, set_name, debug)
+        except Exception as e:
+            _log_error(SEARCH_URL, e, debug)
+            print(f"Fetch Error | url={SEARCH_URL} | {e}")
+            return None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            owned_page = browser.new_page()
+            result = _search_product_id_page(owned_page, card_name, collector_number, set_name, debug)
+            browser.close()
+
+    except Exception as e:
+        _log_error(SEARCH_URL, e, debug)
+        print(f"Fetch Error | url={SEARCH_URL} | {e}")
+        return None
+
+    return result
 
 
 def prompt_product_id(edition_id: str, debug: bool = False) -> str:

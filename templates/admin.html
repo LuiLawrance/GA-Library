@@ -26,6 +26,8 @@
                     <input type="checkbox" id="admin-pid-missing-only" onchange="renderAdminPricingIds()">
                     Missing only
                 </label>
+                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-find-ids-btn"
+                        onclick="findMissingAdminProductIds()">Find Missing IDs</button>
                 <div class="admin-pid-refresh-group">
                     <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-sales"
                             onclick="refreshSelectedAdminPricing('sales')" disabled>Refresh Sales</button>
