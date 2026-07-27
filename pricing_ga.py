@@ -594,13 +594,24 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
 
 _PASTE_CONDITION_RE = re.compile(r"^(NM|LP|MP|HP|DMG)(\s+Foil)?$", re.IGNORECASE)
 _PASTE_QTY_PRICE_RE = re.compile(r"^(\d+)\s+\$?([\d,]+\.?\d*)$")
+_PASTE_FULL_CONDITION_NAMES = {name.lower() for name in api_tcgplayer.CONDITION_MAP.values()}
+
+
+def _is_full_condition_line(line: str) -> bool:
+    """True for a bare condition name like "Near Mint" or "Near Mint Foil" —
+    TCGPlayer's copy sometimes repeats the abbreviation's full name on its own
+    line right after it (e.g. "NM" then "Near Mint")."""
+    base = line[:-5].strip().lower() if line.lower().endswith(" foil") else line.strip().lower()
+    return base in _PASTE_FULL_CONDITION_NAMES
 
 
 def parse_pasted_sales(text: str) -> tuple[list[dict], list[str]]:
     """Parses sales data copy-pasted directly from TCGPlayer's sales history
     table — a workaround for the scraper being capped at ~5 rows while logged
-    out. Expects date / condition / qty+price repeating in groups of three
-    lines, exactly as it appears when the table is selected and copied.
+    out. Expects date / condition / qty+price repeating in groups, exactly as
+    it appears when the table is selected and copied — TCGPlayer sometimes
+    inserts an extra line repeating the condition's full name (e.g. "NM" then
+    "Near Mint") right before the qty+price line, which is skipped if present.
     Returns (parsed_entries, error_lines) — error_lines holds any input that
     didn't fit the expected shape, for surfacing back to the admin."""
     lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n")]
@@ -625,11 +636,25 @@ def parse_pasted_sales(text: str) -> tuple[list[dict], list[str]]:
             break
 
         condition_line = lines[i + 1]
-        qty_price_line = lines[i + 2]
         condition_match = _PASTE_CONDITION_RE.match(condition_line)
+
+        if not condition_match:
+            errors.append(f"{date_line} / {condition_line}")
+            i += 1
+            continue
+
+        qty_price_index = i + 2
+        if qty_price_index < len(lines) and _is_full_condition_line(lines[qty_price_index]):
+            qty_price_index += 1
+
+        if qty_price_index >= len(lines):
+            errors.append(f"{date_line} / {condition_line}")
+            break
+
+        qty_price_line = lines[qty_price_index]
         qty_price_match = _PASTE_QTY_PRICE_RE.match(qty_price_line)
 
-        if not condition_match or not qty_price_match:
+        if not qty_price_match:
             errors.append(f"{date_line} / {condition_line} / {qty_price_line}")
             i += 1
             continue
@@ -654,7 +679,7 @@ def parse_pasted_sales(text: str) -> tuple[list[dict], list[str]]:
             "price": float(price_str.replace(",", "")),
         })
 
-        i += 3
+        i = qty_price_index + 1
 
     return entries, errors
 
