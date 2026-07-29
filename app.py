@@ -827,6 +827,7 @@ async def api_admin_pricing_product_ids(request: Request):
         slugs_data = json.load(f)
 
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
+    collector_map = _build_collector_map()
 
     results = []
 
@@ -840,6 +841,7 @@ async def api_admin_pricing_product_ids(request: Request):
             "name": name_by_card_id.get(card_id, "Unknown"),
             "set_prefix": edition_info.get("set_prefix"),
             "set_name": edition_info.get("set_name"),
+            "collector_number": collector_map.get(edition_id),
             "product_id": get_product_id(edition_id),
         })
 

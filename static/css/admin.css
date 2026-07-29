@@ -531,6 +531,11 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    transition: transform 0.2s;
+}
+
+.admin-pid-detail-image-wrap:hover {
+    transform: scale(1.03);
 }
 
 .admin-pid-detail-image {
@@ -541,11 +546,6 @@
     display: block;
     border-radius: 18px;
     cursor: pointer;
-    transition: opacity 0.15s;
-}
-
-.admin-pid-detail-image:hover {
-    opacity: 0.85;
 }
 
 .admin-pid-detail-header {
@@ -559,12 +559,6 @@
     font-size: 1.1rem;
     font-weight: 500;
     color: var(--text);
-}
-
-.admin-pid-detail-set {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.78rem;
-    color: var(--text-muted);
 }
 
 .admin-pid-detail-pid-row {

@@ -630,7 +630,7 @@ function renderAdminPricingImageCol() {
     col.innerHTML = `
         <div class="admin-pid-detail-header">
             <span class="admin-pid-detail-name">${escapeHtml(record.name)}</span>
-            <span class="admin-pid-detail-set">${escapeHtml(record.set_name || record.set_prefix || '—')}</span>
+            <span class="drawer-set">${drawerSetLineHTML(record)}</span>
         </div>
         <div class="admin-pid-detail-image-wrap">
             <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}">
