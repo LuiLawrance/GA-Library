@@ -260,6 +260,10 @@
     gap: 8px;
 }
 
+.collector-edition-stats {
+    grid-template-columns: 1fr 1fr;
+}
+
 .drawer-stat {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -570,14 +574,6 @@
     color: var(--accent);
     border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.collector-illustrator {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.82rem;
-    color: var(--text);
-    padding: 2px 0 4px;
-    text-align: center;
 }
 
 .drawer-tab-info {

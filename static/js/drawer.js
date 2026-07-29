@@ -46,6 +46,13 @@ function parseEffect(text, cardName) {
 
 const THEMA_CATEGORIES = ['charm', 'ferocity', 'grace', 'mystique', 'valor'];
 
+function formatCollectorDate(isoDate) {
+    const [year, month, day] = isoDate.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric'
+    });
+}
+
 function buildCollectorHTML(foils) {
     if (!foils || Object.keys(foils).length === 0) {
         return `<div class="thema-empty">No population data available for this edition.</div>`;
@@ -203,17 +210,27 @@ function buildTabThemaPanel(edition) {
     const thema = edition?.thema || {};
     const illustrator = edition?.illustrator || null;
 
-    const illustratorHTML = illustrator
+    const editionStats = [];
+    if (edition?.date_created) editionStats.push({label: 'Released', value: formatCollectorDate(edition.date_created)});
+    if (illustrator) editionStats.push({label: 'Illustrator', value: illustrator});
+
+    const editionStatsHTML = editionStats.length
         ? `<div class="collector-thema-divider"></div>
-           <div class="collector-section-label">Illustrator</div>
-           <div class="collector-illustrator">${illustrator}</div>`
+           <div class="drawer-stats collector-edition-stats">
+               ${editionStats.map(s => `
+                   <div class="drawer-stat">
+                       <span class="drawer-stat-label">${s.label}</span>
+                       <span class="drawer-stat-value">${s.value}</span>
+                   </div>
+               `).join('')}
+           </div>`
         : '';
 
     return buildCollectorHTML(foils)
         + `<div class="collector-thema-divider"></div>`
         + `<div class="collector-section-label">Thema</div>`
         + buildThemaHTML(thema)
-        + illustratorHTML;
+        + editionStatsHTML;
 }
 
 const PRICING_CHART_W = 400;

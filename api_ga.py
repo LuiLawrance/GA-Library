@@ -25,6 +25,13 @@ JSON_UPDATE = "DATA_GA/CARDS_GA/UPDATE.json"
 
 UPDATE_THRESHOLD = 30
 
+# Synthetic foil_id for an edition whose API payload has no circulation data
+# yet (typically a very recently released, low-print special/promo card).
+# Lets the edition stay selectable everywhere a real foil_id normally would
+# be required; _migrate_temp_foil() swaps it for the real one once the API
+# reports it on a later sync.
+TEMP_FOIL_ID = "temp"
+
 
 def _api_search(slug: str, debug: bool = False) -> dict:
     try:
@@ -336,6 +343,76 @@ def _update_edition(card_data: dict, debug: bool = False) -> None:
         )
 
 
+def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: bool = False) -> None:
+    """Moves sales, listings, and every user's inventory data for this edition
+    off the TEMP_FOIL_ID placeholder and onto the real foil_id the API just
+    reported. Called once per edition, right as the placeholder is about to
+    be dropped from INFO.json."""
+    from pricing_ga import JSON_LISTINGS, JSON_SALES
+
+    moved_records = 0
+
+    for json_path in (JSON_SALES, JSON_LISTINGS):
+        target_file = new_json(json_path)
+
+        with target_file.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        temp_records = data.get(card_id, {}).get(edition_id, {}).pop(TEMP_FOIL_ID, None)
+
+        if temp_records:
+            data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(real_foil_id, [])
+            data[card_id][edition_id][real_foil_id].extend(temp_records)
+            moved_records += len(temp_records)
+
+            with target_file.open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+
+    inv_dir = "DATA_GA/INV_GA"
+    moved_inventory = 0
+
+    if os.path.exists(inv_dir):
+        for entry in os.scandir(inv_dir):
+            if not entry.name.endswith(".json"):
+                continue
+
+            with open(entry.path, "r", encoding="utf-8") as f:
+                inv_data = json.load(f)
+
+            changed = False
+
+            for bin_info in inv_data.values():
+                for cards in bin_info.get("sections", {}).values():
+                    qty = cards.get(card_id, {}).get(edition_id, {}).pop(TEMP_FOIL_ID, None)
+
+                    if qty:
+                        cards.setdefault(card_id, {}).setdefault(edition_id, {})
+                        cards[card_id][edition_id][real_foil_id] = (
+                                cards[card_id][edition_id].get(real_foil_id, 0) + qty
+                        )
+                        changed = True
+                        moved_inventory += 1
+
+                    if card_id in cards and edition_id in cards[card_id] and not cards[card_id][edition_id]:
+                        del cards[card_id][edition_id]
+                    if card_id in cards and not cards[card_id]:
+                        del cards[card_id]
+
+            if changed:
+                with open(entry.path, "w", encoding="utf-8") as f:
+                    json.dump(inv_data, f, indent=4, ensure_ascii=False)
+
+    if debug:
+        print(
+            f"Migrated temp foil | "
+            f"card_id={card_id} | "
+            f"edition_id={edition_id} | "
+            f"real_foil_id={real_foil_id} | "
+            f"sales/listings_records={moved_records} | "
+            f"inventory_entries={moved_inventory}"
+        )
+
+
 def _update_info(card_data: dict, debug: bool = False) -> None:
     card_id = card_data["editions"][0]["card_id"]
 
@@ -480,6 +557,23 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
                 }
 
                 variant_count += 1
+
+        # No circulation data yet from the API (common for a very recently
+        # released special/promo card) — give it a synthetic foil so it's
+        # still selectable. If real foil(s) show up on a later sync, migrate
+        # anything stored under the placeholder over and drop it.
+        foils = editions[edition_id]["foils"]
+
+        if not foils:
+            foils[TEMP_FOIL_ID] = {"kind": "NONFOIL", "population": None, "printing": None, "variants": {}}
+        elif TEMP_FOIL_ID in foils and len(foils) > 1:
+            real_foil_id = next(
+                (fid for fid, finfo in foils.items()
+                 if fid != TEMP_FOIL_ID and (finfo.get("kind") or "").upper() == "NONFOIL"),
+                next(fid for fid in foils if fid != TEMP_FOIL_ID)
+            )
+            _migrate_temp_foil(card_id, edition_id, real_foil_id, debug)
+            del foils[TEMP_FOIL_ID]
 
         if debug:
             print(
