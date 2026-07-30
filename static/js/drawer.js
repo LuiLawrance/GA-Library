@@ -281,6 +281,12 @@ function pricingConditionColor(type, condition) {
     return rank === -1 ? PRICING_UNKNOWN_COLOR : palette[rank];
 }
 
+// Stable, attribute-safe identifier for a (type, condition) series — used to
+// tie a legend toggle to its line/dots/end-label so they can be hidden together.
+function pricingSeriesKey(type, condition) {
+    return `${type}-${condition}`.toLowerCase().replace(/\s+/g, '-');
+}
+
 // Groups entries by their normalized condition, then orders the groups
 // Near Mint → Damaged (unrecognized conditions sort last) so lines and
 // legend entries always read best-to-worst.
@@ -388,9 +394,9 @@ function hidePricingTooltip() {
 }
 
 function buildPricingSeriesMarks(series, xAt, yAt) {
-    const {label, color, entries} = series;
+    const {label, color, entries, key} = series;
 
-    if (!entries.length) return {linePath: '', dotsHTML: '', last: null, color};
+    if (!entries.length) return {linePath: '', dotsHTML: '', last: null, color, key};
 
     // The line traces one vertex per date — its average price when more than
     // one entry shares that date, its actual price otherwise. Every individual
@@ -420,6 +426,7 @@ function buildPricingSeriesMarks(series, xAt, yAt) {
     const dotsHTML = points.map(p => `
         <g class="pricing-chart-point"
            data-series="${escapeHtml(label)}"
+           data-series-key="${escapeHtml(key)}"
            data-color="${escapeHtml(color)}"
            data-date="${escapeHtml(p.date)}"
            data-condition="${escapeHtml(p.info || '')}"
@@ -427,7 +434,8 @@ function buildPricingSeriesMarks(series, xAt, yAt) {
            data-price="${Number(p.price).toFixed(2)}"
            onmouseenter="showPricingTooltip(event)"
            onmouseleave="hidePricingTooltip()">
-            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="12" class="pricing-chart-hit" />
+            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="8" class="pricing-chart-hit" />
+            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="7" class="pricing-chart-dot-ring" style="stroke:${color}" />
             <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="4" class="pricing-chart-dot" style="fill:${color}" />
         </g>`).join('');
 
@@ -439,6 +447,7 @@ function buildPricingSeriesMarks(series, xAt, yAt) {
             return `
         <g class="pricing-chart-point"
            data-series="${escapeHtml(label)} Average"
+           data-series-key="${escapeHtml(key)}"
            data-color="${escapeHtml(color)}"
            data-date="${escapeHtml(v.date)}"
            data-condition="Average of ${v.group.length}"
@@ -446,15 +455,16 @@ function buildPricingSeriesMarks(series, xAt, yAt) {
            data-price="${Number(v.price).toFixed(2)}"
            onmouseenter="showPricingTooltip(event)"
            onmouseleave="hidePricingTooltip()">
-            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="14" class="pricing-chart-hit" />
+            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="9" class="pricing-chart-hit" />
+            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="8" class="pricing-chart-dot-ring" style="stroke:${color}" />
             <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="5" class="pricing-chart-avg-dot" style="stroke:${color}" />
         </g>`;
         }).join('');
 
-    return {linePath, dotsHTML: dotsHTML + avgDotsHTML, last: vertexPoints[vertexPoints.length - 1], color};
+    return {linePath, dotsHTML: dotsHTML + avgDotsHTML, last: vertexPoints[vertexPoints.length - 1], color, key};
 }
 
-function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_POINTS, heightPx = null) {
+function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_POINTS, widthPx = null, heightPx = null) {
     // Split into one series per (type, condition) pair — "Near Mint Sales" and
     // "Lightly Played Sales" never share a line, same for listings — so each
     // grade's trend is readable on its own instead of averaged together.
@@ -464,6 +474,7 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
             condition,
             label: `${condition} Sales`,
             color: pricingConditionColor('sales', condition),
+            key: pricingSeriesKey('sales', condition),
             entries: [...entries].sort((a, b) => a.date.localeCompare(b.date)).slice(-maxPoints),
         })),
         ...groupPricingByCondition(listings || []).map(([condition, entries]) => ({
@@ -471,9 +482,18 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
             condition,
             label: `${condition} Listings`,
             color: pricingConditionColor('listings', condition),
+            key: pricingSeriesKey('listings', condition),
             entries: [...entries].sort((a, b) => a.date.localeCompare(b.date)).slice(-maxPoints),
         })),
     ];
+
+    // The Prices page's graph panel (maxPoints=Infinity, i.e. full-history
+    // mode) shows the legend as a toggle menu beside the chart instead of a
+    // static strip above it — tied to maxPoints rather than widthPx/heightPx
+    // so the very first render (before those are measured) already uses the
+    // row layout, giving showPriceGraph a .pricing-chart-canvas to measure.
+    // The drawer's compact ≤5-point chart keeps the plain static legend.
+    const useLegendMenu = !Number.isFinite(maxPoints);
 
     const legendHTML = `
         <div class="pricing-legend">
@@ -483,24 +503,35 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
                 </span>`).join('')}
         </div>`;
 
+    const legendMenuHTML = `
+        <div class="pricing-legend-menu">
+            ${series.map((s, i) => {
+                // Series are built sales-first then listings (see above), so
+                // a type change only ever happens once — right at that
+                // boundary — and only when both actually appear.
+                const separator = i > 0 && series[i - 1].type !== s.type ? '<div class="pricing-legend-separator"></div>' : '';
+                return `${separator}
+                <div class="pricing-legend-toggle" data-series-key="${escapeHtml(s.key)}" onclick="togglePricingSeries(this)">
+                    <span class="pricing-legend-swatch" style="background:${s.color}"></span>
+                    <span class="pricing-legend-toggle-label">${escapeHtml(s.label)}</span>
+                </div>`;
+            }).join('')}
+        </div>`;
+
     const all = series.flatMap(s => s.entries);
 
     if (all.length === 0) {
-        return legendHTML + `<div class="pricing-empty">No pricing data available.</div>`;
+        return useLegendMenu
+            ? `<div class="pricing-empty">No pricing data available.</div>`
+            : legendHTML + `<div class="pricing-empty">No pricing data available.</div>`;
     }
 
-    // Full-history charts (maxPoints=Infinity, used by the Prices page) size
-    // their viewBox to real, measured pixels — width from data density, height
-    // from the caller's measured container — so 1 viewBox unit is exactly 1
-    // rendered pixel in both directions. That's what keeps dots circular and
-    // text undistorted instead of preserveAspectRatio="none" non-uniformly
-    // stretching a fixed 400×140 box to fit whatever CSS box it's given. The
-    // drawer's own ≤5-point charts never pass these and keep the old sizing.
-    const isFullHistory = !Number.isFinite(maxPoints);
-    const uniqueDateCount = new Set(all.map(e => e.date)).size;
-    const minSpacingPx = 60;
-
-    const w = isFullHistory ? Math.max(1, uniqueDateCount) * minSpacingPx : PRICING_CHART_W;
+    // When the caller supplies its own measured pixel size (the Prices page's
+    // graph panel), the viewBox matches it exactly — 1 viewBox unit = 1
+    // rendered pixel — so the chart fills the panel without preserveAspectRatio
+    // non-uniformly stretching a fixed box and distorting dots/text. The
+    // drawer's own charts don't pass these and keep the fixed 400×140 sizing.
+    const w = Number.isFinite(widthPx) ? widthPx : PRICING_CHART_W;
     const h = Number.isFinite(heightPx) ? heightPx : PRICING_CHART_H;
     const pad = PRICING_CHART_PAD;
     const plotW = w - pad.left - pad.right;
@@ -542,7 +573,7 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
         endLabelsHTML = withLast.map(m => {
             const p = m.last;
             const anchor = p.cx > w - pad.right - 30 ? 'end' : 'middle';
-            return `<text x="${p.cx.toFixed(1)}" y="${(p.cy - 10).toFixed(1)}" class="pricing-chart-end-label" text-anchor="${anchor}">$${Number(p.price).toFixed(2)}</text>`;
+            return `<text x="${p.cx.toFixed(1)}" y="${(p.cy - 10).toFixed(1)}" class="pricing-chart-end-label" data-series-key="${escapeHtml(m.key)}" text-anchor="${anchor}">$${Number(p.price).toFixed(2)}</text>`;
         }).join('');
     }
 
@@ -553,15 +584,13 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
         <text x="${pad.left}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="start">${escapeHtml(firstDate)}</text>
         ${firstDate !== lastDate ? `<text x="${(w - pad.right).toFixed(1)}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="end">${escapeHtml(lastDate)}</text>` : ''}`;
 
-    const linesHTML = marks.map(m => `<path d="${m.linePath}" style="stroke:${m.color}" class="pricing-chart-line" fill="none" />`).join('');
+    const linesHTML = marks.map(m => `<path d="${m.linePath}" style="stroke:${m.color}" class="pricing-chart-line" data-series-key="${escapeHtml(m.key)}" fill="none" />`).join('');
     const dotsHTML = marks.map(m => m.dotsHTML).join('');
 
-    // Explicit pixel width/height (not percentages) so the rendered box always
-    // matches the viewBox 1:1 — wrapped in a scrollable/draggable container
-    // when it's wider than its panel, instead of being squeezed or stretched
-    // to fit. The drawer's own ≤5-point charts skip this and keep the old
-    // width:100%/height:auto CSS sizing.
-    const svgStyle = isFullHistory ? ` style="width:${w}px;height:${h}px"` : '';
+    // Explicit pixel width/height (not the default width:100%/height:auto CSS)
+    // so the rendered box matches the viewBox exactly instead of deriving
+    // height from width via the fixed aspect ratio.
+    const svgStyle = (Number.isFinite(widthPx) || Number.isFinite(heightPx)) ? ` style="width:${w}px;height:${h}px"` : '';
 
     const svgHTML = `
         <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${svgStyle}>
@@ -572,32 +601,29 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
             ${dateLabelsHTML}
         </svg>`;
 
-    return isFullHistory
-        ? `${legendHTML}<div class="pricing-chart-scroll">${svgHTML}</div>`
-        : `${legendHTML}${svgHTML}`;
+    if (useLegendMenu) {
+        return `
+            <div class="pricing-chart-row">
+                <div class="pricing-chart-canvas">${svgHTML}</div>
+                ${legendMenuHTML}
+            </div>`;
+    }
+
+    return `${legendHTML}${svgHTML}`;
 }
 
-// Click-and-drag horizontal panning for full-history charts wider than their
-// container. Uses pointer capture so the drag keeps tracking correctly even
-// if the pointer moves faster than the scroll or leaves the element's bounds.
-function makePricingChartDraggable(container) {
-    if (!container) return;
-    let startX = 0;
-    let startScroll = 0;
-
-    container.addEventListener('pointerdown', e => {
-        container.setPointerCapture(e.pointerId);
-        container.classList.add('dragging');
-        startX = e.clientX;
-        startScroll = container.scrollLeft;
+// Hides/shows a series' line, dots, and end-label together by toggling a
+// shared data-series-key attribute — cheaper and simpler than re-running the
+// whole chart-building pipeline just to remove one line from view.
+function togglePricingSeries(toggleEl) {
+    const key = toggleEl.dataset.seriesKey;
+    toggleEl.classList.toggle('off');
+    const isOff = toggleEl.classList.contains('off');
+    const canvas = toggleEl.closest('.pricing-chart-row')?.querySelector('.pricing-chart-canvas');
+    if (!canvas || !key) return;
+    canvas.querySelectorAll(`[data-series-key="${key}"]`).forEach(el => {
+        el.classList.toggle('pricing-series-hidden', isOff);
     });
-    container.addEventListener('pointermove', e => {
-        if (!container.classList.contains('dragging')) return;
-        container.scrollLeft = startScroll - (e.clientX - startX);
-    });
-    const stopDrag = () => container.classList.remove('dragging');
-    container.addEventListener('pointerup', stopDrag);
-    container.addEventListener('pointercancel', stopDrag);
 }
 
 function buildPricingStats(sales, listings) {

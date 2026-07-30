@@ -99,9 +99,29 @@ def require_admin(request: Request) -> str:
     return user
 
 
+_STATIC_ASSET_RE = re.compile(r'(src|href)="(/static/[^"]+)"')
+
+
+def _bust_static_cache(html: str) -> str:
+    # Appends each asset's own mtime as a query string so the browser treats
+    # an edited file as a new URL and re-fetches it, instead of relying on
+    # HTTP heuristic caching (no explicit Cache-Control is set for /static)
+    # and silently serving a stale JS/CSS file after a code change.
+    def replace(match: re.Match) -> str:
+        attr, path = match.group(1), match.group(2)
+        try:
+            mtime = int(os.path.getmtime(path.lstrip("/")))
+        except OSError:
+            return match.group(0)
+        return f'{attr}="{path}?v={mtime}"'
+
+    return _STATIC_ASSET_RE.sub(replace, html)
+
+
 def serve_index():
     with open("templates/index.html", encoding="utf-8") as f:
-        return HTMLResponse(f.read())
+        html = f.read()
+    return HTMLResponse(_bust_static_cache(html))
 
 
 @app.get("/", response_class=HTMLResponse)

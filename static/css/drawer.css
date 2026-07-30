@@ -641,18 +641,24 @@
     stroke-linejoin: round;
 }
 
-.pricing-chart-point {
-    /* SVG shape elements (<circle>) don't respond to CSS transform in this
-       renderer, so the hover-grow effect scales the whole point group instead
-       — the invisible hit-circle shares the dot's cx/cy, so scaling around
-       the fill-box center keeps the dot visually anchored in place. */
-    transform-box: fill-box;
-    transform-origin: center;
-    transition: transform 0.15s ease;
+/* Hover indicator: a static ring that just fades in, rather than resizing
+   anything. CSS transform doesn't apply to nested <g>/<circle> elements in
+   this renderer (only a top-level SVG child does), so scaling the hit-circle
+   or the dot directly isn't reliable — and scaling the hit-circle itself
+   (an earlier version of this) let its hover geometry grow mid-transition
+   into neighboring points' space, causing flickery hover swaps on dense
+   charts. Opacity is unaffected by that limitation and the hit-circle's
+   geometry now never changes. */
+.pricing-chart-dot-ring {
+    fill: none;
+    stroke-width: 2;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
 }
 
-.pricing-chart-point:hover {
-    transform: scale(1.5);
+.pricing-chart-point:hover .pricing-chart-dot-ring {
+    opacity: 0.6;
 }
 
 .pricing-chart-dot {
@@ -668,6 +674,13 @@
 .pricing-chart-hit {
     fill: transparent;
     cursor: pointer;
+}
+
+/* Toggled off via the legend menu on the Prices page (see togglePricingSeries
+   in drawer.js) — shared here since it applies to lines/dots/end-labels
+   regardless of which page rendered the chart. */
+.pricing-series-hidden {
+    display: none;
 }
 
 .pricing-chart-end-label {

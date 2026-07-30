@@ -23,6 +23,14 @@ async function initPrices() {
 
     guest.classList.add('hidden');
     content.classList.remove('hidden');
+
+    // The page's DOM is rebuilt fresh every time this route loads, but this
+    // module-level state isn't — without resetting it here, a row from a
+    // previous visit would still show as selected (and the graph panel would
+    // stay on its empty placeholder instead of re-triggering the auto-select)
+    // even though nothing on the new page actually points to that card.
+    priceGraphCard = null;
+
     await loadWatchlist();
 }
 
@@ -142,16 +150,18 @@ async function showPriceGraph(cardId, editionId, foilId, cardName) {
                 <div class="prices-graph-meta">${escapeHtml(edition?.set_prefix || '—')} · #${escapeHtml(edition?.collector_number || '?')} · ${escapeHtml(foilLabel)}</div>`;
         }
 
-        // Render once to let the legend + flex layout settle, then measure the
-        // real available height and re-render at that exact size — this is
-        // what lets the chart plot at its true pixel scale instead of a fixed
-        // viewBox getting non-uniformly stretched to fit.
+        // Render once so the row layout settles — .pricing-chart-canvas's
+        // width/height are determined by CSS flex (flex:1 next to the fixed-
+        // width legend menu), not by the chart's own content, so they're
+        // already correct even on this first pass. Re-render at that exact
+        // size so the chart fills the panel instead of a fixed-aspect box
+        // getting stretched or leaving empty space.
         body.innerHTML = buildPricingComboChart(pricing.sales || [], pricing.listings || [], Infinity);
-        const scrollEl = body.querySelector('.pricing-chart-scroll');
-        if (scrollEl) {
-            const measuredHeight = Math.max(60, scrollEl.clientHeight);
-            body.innerHTML = buildPricingComboChart(pricing.sales || [], pricing.listings || [], Infinity, measuredHeight);
-            makePricingChartDraggable(body.querySelector('.pricing-chart-scroll'));
+        const canvasEl = body.querySelector('.pricing-chart-canvas');
+        if (canvasEl) {
+            const availableWidth = canvasEl.clientWidth;
+            const availableHeight = canvasEl.clientHeight;
+            body.innerHTML = buildPricingComboChart(pricing.sales || [], pricing.listings || [], Infinity, availableWidth, availableHeight);
         }
     } catch {
         body.innerHTML = `<div class="prices-graph-empty"><span class="inv-empty-icon">⚠️</span><p>Failed to load price history.</p></div>`;

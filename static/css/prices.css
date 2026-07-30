@@ -30,7 +30,7 @@
 .prices-content {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 2fr;
     grid-template-rows: 1fr 1fr;
     grid-template-areas:
         "watchlist graph"
@@ -287,7 +287,12 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    /* The chart is explicitly sized in JS to fit this exact box (see
+       showPriceGraph), so overflow should never happen — hidden here is a
+       hard guarantee against a scrollbar ever appearing from a rounding or
+       measurement edge case, rather than relying on the sizing being pixel
+       perfect every time. */
+    overflow: hidden;
     min-height: 0;
 }
 
@@ -314,32 +319,68 @@
     font-size: 0.8rem;
 }
 
-/* Full-history chart fills the remaining panel height; its scroll wrapper
-   handles horizontal drag/pan when there are more points than fit legibly. */
-.prices-graph-body .pricing-chart-scroll {
+/* Chart + legend-as-toggle-menu side by side, replacing the legend-above-chart
+   stack the drawer's own compact chart still uses. */
+.pricing-chart-row {
+    display: flex;
+    flex-direction: row;
     flex: 1;
     min-height: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    cursor: grab;
-    touch-action: pan-x;
+    gap: 12px;
 }
 
-.prices-graph-body .pricing-chart-scroll.dragging {
-    cursor: grabbing;
+.pricing-chart-canvas {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
 }
 
-.prices-graph-body .pricing-chart-scroll::-webkit-scrollbar {
-    height: 8px;
+.pricing-legend-menu {
+    flex-shrink: 0;
+    width: 130px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
 }
 
-.prices-graph-body .pricing-chart-scroll::-webkit-scrollbar-track {
-    background: var(--bg);
+.pricing-legend-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    transition: opacity 0.15s;
 }
 
-.prices-graph-body .pricing-chart-scroll::-webkit-scrollbar-thumb {
+.pricing-legend-toggle:hover {
+    color: var(--text);
+}
+
+.pricing-legend-toggle.off {
+    opacity: 0.35;
+}
+
+.pricing-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.pricing-legend-toggle-label {
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.pricing-legend-separator {
+    height: 1px;
     background: var(--border);
-    border-radius: 8px;
+    flex-shrink: 0;
 }
 
 .prices-graph-title {
