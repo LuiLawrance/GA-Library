@@ -214,8 +214,11 @@
     font-size: 0.62rem;
     letter-spacing: 0.04em;
     color: var(--price-green);
-    background: rgba(34, 197, 94, 0.1);
-    border: 1px solid rgba(34, 197, 94, 0.25);
+    /* Solid dark backing (like .inv-price-badge) rather than a faint tinted
+       one, so the badge stays readable over any bin banner art behind it,
+       not just the plain tile background. */
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid rgba(34, 197, 94, 0.35);
     border-radius: 3px;
     padding: 2px 6px;
     white-space: nowrap;
@@ -223,14 +226,13 @@
 
 .inv-bin-value-badge.inv-bin-value-loading {
     color: var(--text-muted);
-    background: transparent;
+    background: rgba(0, 0, 0, 0.75);
     border-color: var(--border);
 }
 
 .inv-bin-value-badge.inv-bin-value-partial {
-    color: var(--accent);
-    background: rgba(200, 169, 110, 0.08);
-    border-color: rgba(200, 169, 110, 0.3);
+    color: var(--price-green);
+    border-color: rgba(34, 197, 94, 0.35);
 }
 
 .inv-bin-default-badge {
