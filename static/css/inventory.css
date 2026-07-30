@@ -195,20 +195,27 @@
     min-height: calc(0.68rem * 1.5 * 2);
 }
 
+.inv-bin-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: auto;
+}
+
 .inv-bin-meta {
     font-family: 'DM Mono', monospace;
     font-size: 0.68rem;
     color: var(--text-muted);
-    margin-top: auto;
 }
 
 .inv-bin-value-badge {
     font-family: 'DM Mono', monospace;
     font-size: 0.62rem;
     letter-spacing: 0.04em;
-    color: var(--series-sales);
-    background: rgba(25, 158, 112, 0.1);
-    border: 1px solid rgba(25, 158, 112, 0.25);
+    color: var(--price-green);
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.25);
     border-radius: 3px;
     padding: 2px 6px;
     white-space: nowrap;
@@ -760,7 +767,7 @@
     top: 10px;
     right: 10px;
     background: rgba(0, 0, 0, 0.75);
-    color: var(--series-sales);
+    color: var(--price-green);
     font-family: 'DM Mono', monospace;
     font-size: 0.75rem;
     font-weight: 700;

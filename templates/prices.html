@@ -1,4 +1,141 @@
-<div class="hero">
-    <span class="hero-label">Prices</span>
-    <p class="hero-sub">Coming soon.</p>
+<div class="prices-page" id="prices-page">
+    <div class="page-header">
+        <span class="page-label">Prices</span>
+    </div>
+
+    <div class="prices-guest hidden" id="prices-guest">
+        <span class="prices-guest-icon">📈</span>
+        <p>Log in to build a watchlist and track card prices.</p>
+        <a href="/login" data-link class="btn-login">Log In</a>
+    </div>
+
+    <div class="prices-content hidden" id="prices-content">
+        <div class="prices-panel prices-watchlist-panel">
+            <div class="prices-controls">
+                <span class="prices-summary" id="prices-summary"></span>
+                <button class="prices-add-btn" onclick="openWatchlistModal()">+ Add to Watchlist</button>
+            </div>
+
+            <div class="prices-table-header">
+                <span class="prices-col-card">Card</span>
+                <span class="prices-col-price">Price</span>
+                <span class="prices-col-change">Change</span>
+                <span class="prices-col-date">Last Sale</span>
+                <span class="prices-col-remove"></span>
+            </div>
+            <div class="prices-table" id="prices-table"></div>
+        </div>
+
+        <div class="prices-panel prices-graph-panel">
+            <div class="prices-panel-header">
+                <div id="price-graph-header">
+                    <span class="prices-panel-title">Price History</span>
+                </div>
+            </div>
+            <div class="prices-graph-body" id="price-graph-body">
+                <div class="prices-graph-placeholder">
+                    <span class="inv-empty-icon">📈</span>
+                    <p>Select a card from your watchlist or search below to view its full price history.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="prices-panel prices-search-panel">
+            <div class="prices-panel-header">
+                <span class="prices-panel-title">Card Search</span>
+            </div>
+            <div class="prices-search-body">
+                <div class="inv-add-search-wrap">
+                    <div class="autocomplete-wrap" style="flex:1">
+                        <input type="text" id="price-search-input" class="inv-text-input"
+                               placeholder="Search cards..."
+                               onkeydown="handlePriceSearchKeydown(event)"
+                               oninput="fetchPriceSearchSuggestions(this.value)"
+                               autocomplete="off">
+                        <div id="price-search-autocomplete" class="autocomplete-list hidden"></div>
+                    </div>
+                    <button class="btn-search" onclick="searchPriceCards()">Search</button>
+                </div>
+                <div class="prices-search-results" id="price-search-results">
+                    <div class="inv-search-placeholder">
+                        <span class="inv-empty-icon">⬡</span>
+                        <p>Search for a card to view its price history.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add to Watchlist modal -->
+    <div id="watchlist-add-modal" class="inv-modal-overlay hidden" onclick="closeWatchlistModal()">
+        <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+            <div class="inv-modal-header inv-add-modal-header">
+                <button class="inv-btn-back-arrow hidden" id="watchlist-back-btn" onclick="watchlistBackToSearch()">‹</button>
+                <span class="inv-modal-title">Add to Watchlist</span>
+                <button class="inv-modal-close" onclick="closeWatchlistModal()">✕</button>
+            </div>
+
+            <!-- Search step -->
+            <div id="watchlist-step-search">
+                <div class="inv-add-search-wrap">
+                    <div class="autocomplete-wrap" style="flex:1">
+                        <input type="text" id="watchlist-card-search" class="inv-text-input"
+                               placeholder="Search cards..."
+                               onkeydown="handleWatchlistSearchKeydown(event)"
+                               oninput="fetchWatchlistSuggestions(this.value)"
+                               autocomplete="off">
+                        <div id="watchlist-card-autocomplete" class="autocomplete-list hidden"></div>
+                    </div>
+                    <button class="btn-search" onclick="searchWatchlistCards()">Search</button>
+                </div>
+                <div class="inv-add-results" id="watchlist-card-results">
+                    <div class="inv-search-placeholder" style="padding:30px 0">
+                        <span class="inv-empty-icon">⬡</span>
+                        <p>Search for a card to watch.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Foil step (hidden until card selected) -->
+            <div id="watchlist-step-foil" class="hidden">
+                <div class="inv-foil-step-body">
+                    <img class="inv-modal-img-large" id="watchlist-modal-img" src="" alt="">
+                    <div class="inv-foil-step-right">
+                        <div class="inv-foil-step-top">
+                            <div>
+                                <div class="inv-modal-title" id="watchlist-modal-name"></div>
+                                <div class="inv-modal-set" id="watchlist-modal-set"></div>
+                            </div>
+                            <div class="inv-modal-foils" id="watchlist-modal-foils"></div>
+                        </div>
+                        <div class="inv-foil-step-bottom">
+                            <button class="inv-modal-submit" id="watchlist-modal-submit"
+                                    onclick="submitAddToWatchlist()" disabled>
+                                Add to Watchlist
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-drawer hidden" id="card-drawer">
+        <div class="drawer-inner">
+            <div id="drawer-content"></div>
+        </div>
+    </div>
+    <div class="drawer-sidebar hidden" id="drawer-sidebar">
+        <button class="drawer-sidebar-close" onclick="closeCardDrawer()">&#x2715;</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
+                title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                title="Thema">🏷️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+                title="Pricing">💵
+        </button>
+    </div>
 </div>

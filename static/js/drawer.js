@@ -237,12 +237,68 @@ const PRICING_CHART_W = 400;
 const PRICING_CHART_H = 140;
 const PRICING_CHART_PAD = {top: 14, right: 10, bottom: 20, left: 46};
 
-// Fixed series identity → color assignment. Never reassigned by data
-// presence or rank — Sales is always the blue slot, Listings always orange.
-const PRICING_SERIES = {
-    sales: {label: 'Sales', cssClass: 'pricing-series-sales'},
-    listings: {label: 'Listings', cssClass: 'pricing-series-listings'}
-};
+// The drawer's chart is a brief, at-a-glance snapshot — cap each series to its
+// most recent points rather than plotting a card's entire trade history. Full
+// history stays available from the Prices page's watchlist.
+const PRICING_CHART_MAX_POINTS = 5;
+
+// Best-to-worst condition order, matching CONDITION_MAP in api_tcgplayer.py —
+// used both to sort each chart's legend/lines and to rank how much a line's
+// color is lightened (Near Mint stays full-strength, worse grades fade out).
+const PRICING_CONDITION_ORDER = ['Near Mint', 'Lightly Played', 'Moderately Played', 'Heavily Played', 'Damaged'];
+
+// A sale/listing's "info" carries the raw condition text, which for foil
+// entries ends in " Foil" (e.g. "Near Mint Foil") — stripped here since the
+// chart is already scoped to one foil's own section, so the suffix is redundant.
+function normalizePricingCondition(info) {
+    return (info || '').replace(/\s+Foil$/i, '').trim() || 'Unknown';
+}
+
+// Each condition gets its own hue rather than a lightened tint of one base
+// color — sales step through the cool half of the spectrum (green → blue →
+// indigo → violet → plum), listings through the warm half (red → orange →
+// gold → rust → maroon), so e.g. Near Mint Sales (green) and Near Mint
+// Listings (red) never read as "the same line, different shade."
+const PRICING_SALES_COLORS = [
+    'hsl(140, 55%, 45%)',  // Near Mint — green
+    'hsl(210, 65%, 55%)',  // Lightly Played — blue
+    'hsl(255, 55%, 62%)',  // Moderately Played — indigo
+    'hsl(280, 45%, 55%)',  // Heavily Played — violet
+    'hsl(305, 35%, 45%)',  // Damaged — plum
+];
+const PRICING_LISTINGS_COLORS = [
+    'hsl(0, 70%, 55%)',   // Near Mint — red
+    'hsl(30, 80%, 55%)',  // Lightly Played — orange
+    'hsl(48, 80%, 50%)',  // Moderately Played — gold
+    'hsl(20, 55%, 45%)',  // Heavily Played — rust
+    'hsl(0, 45%, 35%)',   // Damaged — maroon
+];
+const PRICING_UNKNOWN_COLOR = 'hsl(0, 0%, 55%)';
+
+function pricingConditionColor(type, condition) {
+    const palette = type === 'sales' ? PRICING_SALES_COLORS : PRICING_LISTINGS_COLORS;
+    const rank = PRICING_CONDITION_ORDER.indexOf(condition);
+    return rank === -1 ? PRICING_UNKNOWN_COLOR : palette[rank];
+}
+
+// Groups entries by their normalized condition, then orders the groups
+// Near Mint → Damaged (unrecognized conditions sort last) so lines and
+// legend entries always read best-to-worst.
+function groupPricingByCondition(entries) {
+    const groups = new Map();
+
+    for (const e of entries) {
+        const condition = normalizePricingCondition(e.info);
+        if (!groups.has(condition)) groups.set(condition, []);
+        groups.get(condition).push(e);
+    }
+
+    return [...groups.entries()].sort((a, b) => {
+        const rankA = PRICING_CONDITION_ORDER.indexOf(a[0]);
+        const rankB = PRICING_CONDITION_ORDER.indexOf(b[0]);
+        return (rankA === -1 ? 99 : rankA) - (rankB === -1 ? 99 : rankB);
+    });
+}
 
 function escapeHtml(str) {
     return String(str)
@@ -270,7 +326,8 @@ function showPricingTooltip(evt) {
     headerEl.className = 'pricing-tooltip-header';
 
     const keyEl = document.createElement('span');
-    keyEl.className = `pricing-tooltip-key ${g.dataset.seriesClass}`;
+    keyEl.className = 'pricing-tooltip-key';
+    keyEl.style.background = g.dataset.color;
     headerEl.appendChild(keyEl);
 
     const seriesEl = document.createElement('span');
@@ -290,24 +347,50 @@ function showPricingTooltip(evt) {
     tooltip.appendChild(metaEl);
 
     tooltip.classList.remove('hidden');
-    movePricingTooltip(evt);
+    anchorPricingTooltip(g, tooltip);
 }
 
-function movePricingTooltip(evt) {
-    const tooltip = document.getElementById('pricing-tooltip');
-    if (!tooltip) return;
-    tooltip.style.left = `${evt.clientX + 14}px`;
-    tooltip.style.top = `${evt.clientY + 14}px`;
+function anchorPricingTooltip(g, tooltip) {
+    const dot = g.querySelector('.pricing-chart-dot, .pricing-chart-avg-dot');
+    if (!dot) return;
+
+    // Anchor to the hovered point's own screen position (not the cursor) so the
+    // tooltip stays put over the point regardless of where in its hit-radius
+    // the mouse sits. Everything here is computed in real/rendered viewport
+    // pixels — the same space getBoundingClientRect() and window.innerWidth/
+    // Height use — so it can be compared and clamped directly.
+    const dotRect = dot.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const margin = 8;
+
+    const fitsAbove = dotRect.top - 10 - tooltipRect.height >= margin;
+    let top = fitsAbove ? dotRect.top - 10 - tooltipRect.height : dotRect.bottom + 10;
+    let left = dotRect.left + dotRect.width / 2 - tooltipRect.width / 2;
+
+    // Clamp so the tooltip never runs off any edge of the browser window,
+    // even when the point sits near a corner of the chart.
+    top = Math.min(Math.max(top, margin), window.innerHeight - margin - tooltipRect.height);
+    left = Math.min(Math.max(left, margin), window.innerWidth - margin - tooltipRect.width);
+
+    // getBoundingClientRect() already reflects the page's `zoom` CSS property
+    // (see main.css), but assigning that same value back to a position:fixed
+    // element's inline left/top applies the zoom a second time. Divide it out
+    // so the tooltip lands exactly where computed instead of drifting toward
+    // the top-left corner.
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+
+    tooltip.style.left = `${left / zoom}px`;
+    tooltip.style.top = `${top / zoom}px`;
 }
 
 function hidePricingTooltip() {
     document.getElementById('pricing-tooltip')?.classList.add('hidden');
 }
 
-function buildPricingSeriesMarks(entries, seriesKey, xAt, yAt) {
-    const series = PRICING_SERIES[seriesKey];
+function buildPricingSeriesMarks(series, xAt, yAt) {
+    const {label, color, entries} = series;
 
-    if (!entries.length) return {linePath: '', dotsHTML: '', last: null};
+    if (!entries.length) return {linePath: '', dotsHTML: '', last: null, color};
 
     // The line traces one vertex per date — its average price when more than
     // one entry shares that date, its actual price otherwise. Every individual
@@ -336,17 +419,16 @@ function buildPricingSeriesMarks(entries, seriesKey, xAt, yAt) {
 
     const dotsHTML = points.map(p => `
         <g class="pricing-chart-point"
-           data-series="${escapeHtml(series.label)}"
-           data-series-class="${series.cssClass}"
+           data-series="${escapeHtml(label)}"
+           data-color="${escapeHtml(color)}"
            data-date="${escapeHtml(p.date)}"
            data-condition="${escapeHtml(p.info || '')}"
            data-quantity="${p.quantity ?? 1}"
            data-price="${Number(p.price).toFixed(2)}"
            onmouseenter="showPricingTooltip(event)"
-           onmousemove="movePricingTooltip(event)"
            onmouseleave="hidePricingTooltip()">
             <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="12" class="pricing-chart-hit" />
-            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="4" class="pricing-chart-dot ${series.cssClass}" />
+            <circle cx="${p.cx.toFixed(1)}" cy="${p.cy.toFixed(1)}" r="4" class="pricing-chart-dot" style="fill:${color}" />
         </g>`).join('');
 
     // Hollow marker at the average, only where a date actually grouped more than one entry.
@@ -356,39 +438,71 @@ function buildPricingSeriesMarks(entries, seriesKey, xAt, yAt) {
             const totalQuantity = v.group.reduce((sum, e) => sum + (e.quantity ?? 1), 0);
             return `
         <g class="pricing-chart-point"
-           data-series="${escapeHtml(series.label)} Average"
-           data-series-class="${series.cssClass}"
+           data-series="${escapeHtml(label)} Average"
+           data-color="${escapeHtml(color)}"
            data-date="${escapeHtml(v.date)}"
            data-condition="Average of ${v.group.length}"
            data-quantity="${totalQuantity}"
            data-price="${Number(v.price).toFixed(2)}"
            onmouseenter="showPricingTooltip(event)"
-           onmousemove="movePricingTooltip(event)"
            onmouseleave="hidePricingTooltip()">
             <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="14" class="pricing-chart-hit" />
-            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="5" class="pricing-chart-avg-dot ${series.cssClass}" />
+            <circle cx="${v.cx.toFixed(1)}" cy="${v.cy.toFixed(1)}" r="5" class="pricing-chart-avg-dot" style="stroke:${color}" />
         </g>`;
         }).join('');
 
-    return {linePath, dotsHTML: dotsHTML + avgDotsHTML, last: vertexPoints[vertexPoints.length - 1]};
+    return {linePath, dotsHTML: dotsHTML + avgDotsHTML, last: vertexPoints[vertexPoints.length - 1], color};
 }
 
-function buildPricingComboChart(sales, listings) {
-    const salesSorted = [...(sales || [])].sort((a, b) => a.date.localeCompare(b.date));
-    const listingsSorted = [...(listings || [])].sort((a, b) => a.date.localeCompare(b.date));
-    const all = [...salesSorted, ...listingsSorted];
+function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_POINTS, heightPx = null) {
+    // Split into one series per (type, condition) pair — "Near Mint Sales" and
+    // "Lightly Played Sales" never share a line, same for listings — so each
+    // grade's trend is readable on its own instead of averaged together.
+    const series = [
+        ...groupPricingByCondition(sales || []).map(([condition, entries]) => ({
+            type: 'sales',
+            condition,
+            label: `${condition} Sales`,
+            color: pricingConditionColor('sales', condition),
+            entries: [...entries].sort((a, b) => a.date.localeCompare(b.date)).slice(-maxPoints),
+        })),
+        ...groupPricingByCondition(listings || []).map(([condition, entries]) => ({
+            type: 'listings',
+            condition,
+            label: `${condition} Listings`,
+            color: pricingConditionColor('listings', condition),
+            entries: [...entries].sort((a, b) => a.date.localeCompare(b.date)).slice(-maxPoints),
+        })),
+    ];
 
     const legendHTML = `
         <div class="pricing-legend">
-            <span class="pricing-legend-item"><span class="pricing-legend-key pricing-series-sales"></span>Sales</span>
-            <span class="pricing-legend-item"><span class="pricing-legend-key pricing-series-listings"></span>Listings</span>
+            ${series.map(s => `
+                <span class="pricing-legend-item">
+                    <span class="pricing-legend-key" style="background:${s.color}"></span>${escapeHtml(s.label)}
+                </span>`).join('')}
         </div>`;
+
+    const all = series.flatMap(s => s.entries);
 
     if (all.length === 0) {
         return legendHTML + `<div class="pricing-empty">No pricing data available.</div>`;
     }
 
-    const w = PRICING_CHART_W, h = PRICING_CHART_H, pad = PRICING_CHART_PAD;
+    // Full-history charts (maxPoints=Infinity, used by the Prices page) size
+    // their viewBox to real, measured pixels — width from data density, height
+    // from the caller's measured container — so 1 viewBox unit is exactly 1
+    // rendered pixel in both directions. That's what keeps dots circular and
+    // text undistorted instead of preserveAspectRatio="none" non-uniformly
+    // stretching a fixed 400×140 box to fit whatever CSS box it's given. The
+    // drawer's own ≤5-point charts never pass these and keep the old sizing.
+    const isFullHistory = !Number.isFinite(maxPoints);
+    const uniqueDateCount = new Set(all.map(e => e.date)).size;
+    const minSpacingPx = 60;
+
+    const w = isFullHistory ? Math.max(1, uniqueDateCount) * minSpacingPx : PRICING_CHART_W;
+    const h = Number.isFinite(heightPx) ? heightPx : PRICING_CHART_H;
+    const pad = PRICING_CHART_PAD;
     const plotW = w - pad.left - pad.right;
     const plotH = h - pad.top - pad.bottom;
 
@@ -416,19 +530,17 @@ function buildPricingComboChart(sales, listings) {
             <text x="${(pad.left - 6).toFixed(1)}" y="${gy.toFixed(1)}" class="pricing-chart-axis-label" text-anchor="end" dominant-baseline="middle">$${price.toFixed(2)}</text>`;
     }).join('');
 
-    const salesMarks = buildPricingSeriesMarks(salesSorted, 'sales', xAt, yAt);
-    const listingsMarks = buildPricingSeriesMarks(listingsSorted, 'listings', xAt, yAt);
+    const marks = series.map(s => buildPricingSeriesMarks(s, xAt, yAt));
 
-    // Direct end-labels, skipped when the two series' last points would collide vertically —
-    // the legend + tooltip already carry identity, so dropping them here is a safe fallback.
-    const candidates = [
-        salesMarks.last && {...salesMarks.last, cssClass: PRICING_SERIES.sales.cssClass},
-        listingsMarks.last && {...listingsMarks.last, cssClass: PRICING_SERIES.listings.cssClass}
-    ].filter(Boolean);
-
+    // Direct end-labels only when there are just one or two lines total — the
+    // legend + tooltip already carry identity, so once a card has several
+    // condition lines, per-line price labels would just clutter the chart.
     let endLabelsHTML = '';
-    if (!(candidates.length === 2 && Math.abs(candidates[0].cy - candidates[1].cy) < 12)) {
-        endLabelsHTML = candidates.map(p => {
+    const withLast = marks.filter(m => m.last);
+    if (withLast.length > 0 && withLast.length <= 2 &&
+        !(withLast.length === 2 && Math.abs(withLast[0].last.cy - withLast[1].last.cy) < 12)) {
+        endLabelsHTML = withLast.map(m => {
+            const p = m.last;
             const anchor = p.cx > w - pad.right - 30 ? 'end' : 'middle';
             return `<text x="${p.cx.toFixed(1)}" y="${(p.cy - 10).toFixed(1)}" class="pricing-chart-end-label" text-anchor="${anchor}">$${Number(p.price).toFixed(2)}</text>`;
         }).join('');
@@ -441,17 +553,51 @@ function buildPricingComboChart(sales, listings) {
         <text x="${pad.left}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="start">${escapeHtml(firstDate)}</text>
         ${firstDate !== lastDate ? `<text x="${(w - pad.right).toFixed(1)}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="end">${escapeHtml(lastDate)}</text>` : ''}`;
 
-    return `
-        ${legendHTML}
-        <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    const linesHTML = marks.map(m => `<path d="${m.linePath}" style="stroke:${m.color}" class="pricing-chart-line" fill="none" />`).join('');
+    const dotsHTML = marks.map(m => m.dotsHTML).join('');
+
+    // Explicit pixel width/height (not percentages) so the rendered box always
+    // matches the viewBox 1:1 — wrapped in a scrollable/draggable container
+    // when it's wider than its panel, instead of being squeezed or stretched
+    // to fit. The drawer's own ≤5-point charts skip this and keep the old
+    // width:100%/height:auto CSS sizing.
+    const svgStyle = isFullHistory ? ` style="width:${w}px;height:${h}px"` : '';
+
+    const svgHTML = `
+        <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${svgStyle}>
             ${gridlinesHTML}
-            <path d="${salesMarks.linePath}" class="pricing-chart-line ${PRICING_SERIES.sales.cssClass}" fill="none" />
-            <path d="${listingsMarks.linePath}" class="pricing-chart-line ${PRICING_SERIES.listings.cssClass}" fill="none" />
-            ${salesMarks.dotsHTML}
-            ${listingsMarks.dotsHTML}
+            ${linesHTML}
+            ${dotsHTML}
             ${endLabelsHTML}
             ${dateLabelsHTML}
         </svg>`;
+
+    return isFullHistory
+        ? `${legendHTML}<div class="pricing-chart-scroll">${svgHTML}</div>`
+        : `${legendHTML}${svgHTML}`;
+}
+
+// Click-and-drag horizontal panning for full-history charts wider than their
+// container. Uses pointer capture so the drag keeps tracking correctly even
+// if the pointer moves faster than the scroll or leaves the element's bounds.
+function makePricingChartDraggable(container) {
+    if (!container) return;
+    let startX = 0;
+    let startScroll = 0;
+
+    container.addEventListener('pointerdown', e => {
+        container.setPointerCapture(e.pointerId);
+        container.classList.add('dragging');
+        startX = e.clientX;
+        startScroll = container.scrollLeft;
+    });
+    container.addEventListener('pointermove', e => {
+        if (!container.classList.contains('dragging')) return;
+        container.scrollLeft = startScroll - (e.clientX - startX);
+    });
+    const stopDrag = () => container.classList.remove('dragging');
+    container.addEventListener('pointerup', stopDrag);
+    container.addEventListener('pointercancel', stopDrag);
 }
 
 function buildPricingStats(sales, listings) {

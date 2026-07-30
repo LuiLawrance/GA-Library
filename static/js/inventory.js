@@ -107,7 +107,10 @@ function buildBinTile(name, bin, index, total = 1) {
         </div>
         <div class="inv-bin-name">${name}</div>
         <div class="inv-bin-desc">${bin.desc || ''}</div>
-        <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
+        <div class="inv-bin-meta-row">
+            <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}</div>
+            <span class="inv-bin-value-badge inv-bin-value-loading">…</span>
+        </div>`;
     if (bin.banner) {
         tile.classList.add('has-banner');
         const bg = document.createElement('div');
@@ -120,6 +123,7 @@ function buildBinTile(name, bin, index, total = 1) {
         e.preventDefault();
         openBinContextMenu(e, name);
     });
+    loadBinValue(name, tile.querySelector('.inv-bin-value-badge'));
     return tile;
 }
 

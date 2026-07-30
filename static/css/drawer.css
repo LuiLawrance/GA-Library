@@ -632,18 +632,27 @@
     fill: var(--text-muted);
 }
 
+/* Line/dot colors are set inline per condition (see pricingConditionColor()
+   in drawer.js) since the set of possible series isn't fixed to just
+   sales/listings anymore — only shape/structure stays here. */
 .pricing-chart-line {
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
 }
 
-.pricing-chart-line.pricing-series-sales {
-    stroke: var(--series-sales);
+.pricing-chart-point {
+    /* SVG shape elements (<circle>) don't respond to CSS transform in this
+       renderer, so the hover-grow effect scales the whole point group instead
+       — the invisible hit-circle shares the dot's cx/cy, so scaling around
+       the fill-box center keeps the dot visually anchored in place. */
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: transform 0.15s ease;
 }
 
-.pricing-chart-line.pricing-series-listings {
-    stroke: var(--series-listings);
+.pricing-chart-point:hover {
+    transform: scale(1.5);
 }
 
 .pricing-chart-dot {
@@ -651,25 +660,9 @@
     stroke-width: 2;
 }
 
-.pricing-chart-dot.pricing-series-sales {
-    fill: var(--series-sales);
-}
-
-.pricing-chart-dot.pricing-series-listings {
-    fill: var(--series-listings);
-}
-
 .pricing-chart-avg-dot {
     fill: var(--bg-card);
     stroke-width: 2;
-}
-
-.pricing-chart-avg-dot.pricing-series-sales {
-    stroke: var(--series-sales);
-}
-
-.pricing-chart-avg-dot.pricing-series-listings {
-    stroke: var(--series-listings);
 }
 
 .pricing-chart-hit {
@@ -686,7 +679,9 @@
 
 .pricing-legend {
     display: flex;
-    gap: 14px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    column-gap: 12px;
     margin-bottom: 8px;
 }
 
@@ -706,15 +701,10 @@
     border-radius: 1px;
 }
 
-.pricing-legend-key.pricing-series-sales {
-    background: var(--series-sales);
-}
-
-.pricing-legend-key.pricing-series-listings {
-    background: var(--series-listings);
-}
-
 .pricing-tooltip {
+    /* left/top are computed in JS as the tooltip's actual top-left corner
+       (already clamped to stay within the window), not an offset from the
+       point — so no positioning transform is needed here. */
     position: fixed;
     z-index: 1000;
     background: var(--bg-card);
@@ -737,14 +727,6 @@
     width: 10px;
     height: 2px;
     border-radius: 1px;
-}
-
-.pricing-tooltip-key.pricing-series-sales {
-    background: var(--series-sales);
-}
-
-.pricing-tooltip-key.pricing-series-listings {
-    background: var(--series-listings);
 }
 
 .pricing-tooltip-series {

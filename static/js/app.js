@@ -120,6 +120,12 @@ async function navigate(path, pushState = true) {
             window.initAdmin();
         }
     }
+
+    if (pathname === '/prices') {
+        if (typeof window.initPrices === 'function') {
+            await window.initPrices();
+        }
+    }
 }
 
 function sleep(ms) {

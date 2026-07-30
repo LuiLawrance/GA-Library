@@ -1,0 +1,378 @@
+.prices-page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+}
+
+/* ── Guest prompt ── */
+.prices-guest {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.prices-guest-icon {
+    font-size: 2.4rem;
+}
+
+.prices-guest p {
+    font-size: 0.9rem;
+}
+
+/* ── Content ── */
+.prices-content {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    grid-template-areas:
+        "watchlist graph"
+        "watchlist search";
+    gap: 16px;
+    overflow: hidden;
+    min-height: 0;
+    padding: 32px;
+}
+
+.prices-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.prices-watchlist-panel {
+    grid-area: watchlist;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+}
+
+.prices-graph-panel {
+    grid-area: graph;
+    padding: 18px 22px;
+}
+
+.prices-search-panel {
+    grid-area: search;
+    padding: 18px 22px;
+}
+
+.prices-panel-header {
+    flex-shrink: 0;
+    margin-bottom: 12px;
+}
+
+.prices-panel-title {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.prices-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+}
+
+.prices-summary {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.prices-add-btn {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--bg);
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.prices-add-btn:hover {
+    opacity: 0.85;
+}
+
+/* ── Ticker table ── */
+.prices-table-header,
+.prices-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 110px 110px 36px;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+}
+
+.prices-table-header {
+    flex-shrink: 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.prices-col-price,
+.prices-col-change,
+.prices-col-date {
+    text-align: right;
+    font-family: 'DM Mono', monospace;
+}
+
+.prices-table {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.prices-table::-webkit-scrollbar {
+    width: 8px;
+}
+
+.prices-table::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+.prices-table::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+
+.prices-table::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
+.prices-row {
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+}
+
+.prices-row:last-child {
+    border-bottom: none;
+}
+
+.prices-row:hover {
+    background: var(--bg-hover);
+}
+
+.prices-col-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.prices-row-img {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.prices-row-info {
+    min-width: 0;
+}
+
+.prices-row-name {
+    font-size: 0.85rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prices-row-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.prices-col-price {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.prices-change {
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.prices-change--up {
+    color: var(--series-sales);
+}
+
+.prices-change--down {
+    color: var(--error);
+}
+
+.prices-change--flat {
+    color: var(--text-muted);
+}
+
+.prices-col-remove {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.prices-remove-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    line-height: 1;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+}
+
+.prices-remove-btn:hover {
+    color: var(--error);
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+
+.prices-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 60px 0;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.prices-row.selected {
+    background: var(--bg-hover);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* ── Graph panel ── */
+.prices-graph-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.prices-graph-placeholder,
+.prices-graph-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 20px;
+}
+
+.prices-graph-loading {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+}
+
+/* Full-history chart fills the remaining panel height; its scroll wrapper
+   handles horizontal drag/pan when there are more points than fit legibly. */
+.prices-graph-body .pricing-chart-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    cursor: grab;
+    touch-action: pan-x;
+}
+
+.prices-graph-body .pricing-chart-scroll.dragging {
+    cursor: grabbing;
+}
+
+.prices-graph-body .pricing-chart-scroll::-webkit-scrollbar {
+    height: 8px;
+}
+
+.prices-graph-body .pricing-chart-scroll::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+.prices-graph-body .pricing-chart-scroll::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+
+.prices-graph-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+.prices-graph-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* ── Search panel ── */
+.prices-search-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Same tile grid as the regular Cards page (.card-grid) — identical tile
+   size, just scoped to this panel's own scroll container instead of the
+   full page, so it naturally shows fewer columns. */
+.prices-search-results {
+    flex: 1;
+    overflow-y: auto;
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 255px);
+    gap: 20px;
+    align-content: start;
+}

@@ -7,12 +7,13 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, add_manual_entry, delete_entry, find_product_ids_by_editions, \
-    import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
-    scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
+from pricing_ga import JSON_LISTINGS, JSON_SALES, _foil_kind_for_id, add_manual_entry, delete_entry, \
+    find_product_ids_by_editions, import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, \
+    scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from user import JSON_USERS, user_create, user_login
 from util_file import new_json
+from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
 import json
 import os
@@ -1239,6 +1240,127 @@ async def fragment_login():
 async def fragment_prices():
     with open("templates/prices.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+# ════════════════════════════════════════
+# ── Watchlist API ──
+# ════════════════════════════════════════
+
+def _price_and_change(sales_data: dict, card_id: str, edition_id: str, foil_id: str):
+    """Returns (last_price, change_pct, last_sale_date) from a foil's sale
+    history — change_pct compares the latest sale to the one before it, like
+    a stock's move since its previous trade."""
+    records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+
+    if not records:
+        return None, None, None
+
+    ordered = sorted(records, key=lambda r: r["date"], reverse=True)
+    last_price = ordered[0]["price"]
+    last_sale_date = ordered[0]["date"]
+    change_pct = None
+
+    if len(ordered) > 1 and ordered[1]["price"]:
+        change_pct = round((last_price - ordered[1]["price"]) / ordered[1]["price"] * 100, 2)
+
+    return last_price, change_pct, last_sale_date
+
+
+@app.get("/api/watchlist")
+async def api_watchlist_list(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    rows = watchlist_list(user)
+
+    with open(JSON_EDITIONS, encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    with open(JSON_INFO, encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    with open(JSON_SLUGS, encoding="utf-8") as f:
+        slugs_data = json.load(f)
+
+    with open(JSON_SALES, encoding="utf-8") as f:
+        sales_data = json.load(f)
+
+    with open(JSON_LISTINGS, encoding="utf-8") as f:
+        listings_data = json.load(f)
+
+    name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
+    collector_map = _build_collector_map()
+
+    results = []
+
+    for card_id, edition_id, foil_id, added in rows:
+        if edition_id not in editions_data:
+            continue
+
+        edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
+        foils = edition_info.get("foils", {})
+
+        last_price, change_pct, last_sale_date = _price_and_change(sales_data, card_id, edition_id, foil_id)
+        listing_records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+        lowest_listing = min((r["price"] for r in listing_records), default=None)
+
+        results.append({
+            "card_id": card_id,
+            "edition_id": edition_id,
+            "foil_id": foil_id,
+            "name": name_by_card_id.get(card_id, "Unknown"),
+            "set_prefix": edition_info.get("set_prefix"),
+            "set_name": edition_info.get("set_name"),
+            "collector_number": collector_map.get(edition_id),
+            "rarity": edition_info.get("rarity"),
+            "foil_kind": _foil_kind_for_id(foils, foil_id),
+            "price": last_price,
+            "change_pct": change_pct,
+            "last_sale_date": last_sale_date,
+            "lowest_listing": lowest_listing,
+            "added": added,
+        })
+
+    results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
+
+    return JSONResponse({"watchlist": results})
+
+
+@app.post("/api/watchlist")
+async def api_watchlist_add(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    card_id = (body.get("card_id") or "").strip()
+    edition_id = (body.get("edition_id") or "").strip()
+    foil_id = (body.get("foil_id") or "").strip()
+
+    if not card_id or not edition_id or not foil_id:
+        raise HTTPException(status_code=400, detail="card_id, edition_id, and foil_id are required")
+
+    added = watchlist_add(user, card_id, edition_id, foil_id)
+    return JSONResponse({"ok": True, "added": added})
+
+
+@app.delete("/api/watchlist")
+async def api_watchlist_delete(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    body = await request.json()
+    card_id = (body.get("card_id") or "").strip()
+    edition_id = (body.get("edition_id") or "").strip()
+    foil_id = (body.get("foil_id") or "").strip()
+
+    if not card_id or not edition_id or not foil_id:
+        raise HTTPException(status_code=400, detail="card_id, edition_id, and foil_id are required")
+
+    removed = watchlist_remove(user, card_id, edition_id, foil_id)
+    return JSONResponse({"ok": True, "removed": removed})
 
 
 # ════════════════════════════════════════
