@@ -39,6 +39,29 @@
     overflow: hidden;
     min-height: 0;
     padding: 32px;
+    transition: grid-template-rows 0.25s ease;
+}
+
+/* Toggled by JS (see setupPricesSearchExpand in prices.js) rather than a
+   plain :hover/:focus-within selector — entering is instant, but leaving is
+   delayed by JS to outlast this transition, so the graph panel's legend menu
+   (below) doesn't regain scrolling while it's still mid-resize. A CSS-only
+   transition-delay on overflow-y was tried first and doesn't reliably delay
+   in this browser, hence the JS. */
+.prices-content.prices-search-active {
+    grid-template-rows: 0.35fr 1.65fr;
+}
+
+/* At that squeezed-down height the graph's legend menu would otherwise
+   start scrolling in a sliver of space — instead of that, just disable
+   the whole graph panel until the search panel isn't in use anymore. */
+.prices-content.prices-search-active .prices-graph-panel {
+    pointer-events: none;
+    opacity: 0.4;
+}
+
+.prices-content.prices-search-active .pricing-legend-menu {
+    overflow-y: hidden;
 }
 
 .prices-panel {
@@ -56,12 +79,17 @@
     background: transparent;
     border: none;
     border-radius: 0;
+    /* No top padding: .prices-table-header already draws its own border,
+       so its top edge needs to sit flush with the grid row's top — the
+       same place the graph/search panels' own borders sit — rather than
+       being inset like this panel's borderless background is. */
     padding: 0;
 }
 
 .prices-graph-panel {
     grid-area: graph;
     padding: 18px 22px;
+    transition: opacity 0.2s ease;
 }
 
 .prices-search-panel {
@@ -80,36 +108,6 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--text-muted);
-}
-
-.prices-controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-    flex-shrink: 0;
-}
-
-.prices-summary {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-
-.prices-add-btn {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: var(--bg);
-    background: var(--accent);
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 8px 16px;
-    cursor: pointer;
-    transition: opacity 0.15s;
-}
-
-.prices-add-btn:hover {
-    opacity: 0.85;
 }
 
 /* ── Ticker table ── */
@@ -346,6 +344,23 @@
     border-left: 1px solid var(--border);
 }
 
+.pricing-legend-menu::-webkit-scrollbar {
+    width: 8px;
+}
+
+.pricing-legend-menu::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+.pricing-legend-menu::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+
+.pricing-legend-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
 .pricing-legend-toggle {
     display: flex;
     align-items: center;
@@ -405,15 +420,52 @@
     min-height: 0;
 }
 
-/* Same tile grid as the regular Cards page (.card-grid) — identical tile
-   size, just scoped to this panel's own scroll container instead of the
-   full page, so it naturally shows fewer columns. */
+/* Smaller than the Cards page's tile grid (.card-grid uses 255px) — this
+   panel is often the width of one grid column, and now that a single search
+   can return every printing of a card (see all_prints), a bigger, denser
+   grid keeps them from spilling into a tall scroll. */
 .prices-search-results {
     flex: 1;
     overflow-y: auto;
+    /* Reserves the scrollbar's gutter whether or not it's actually needed,
+       so a scrollbar appearing/disappearing as this panel's row resizes
+       never changes the available width — which would otherwise reflow
+       the auto-fill columns and make the tiles visibly rescale/rewrap
+       mid-resize instead of just revealing more already-laid-out rows. */
+    scrollbar-gutter: stable;
     margin-top: 12px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, 255px);
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, 130px);
+    gap: 12px;
     align-content: start;
+}
+
+.prices-search-results::-webkit-scrollbar {
+    width: 8px;
+}
+
+.prices-search-results::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+.prices-search-results::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+
+.prices-search-results::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
+/* Distinguishes same-card tiles now that search returns every printing
+   instead of one randomly chosen edition. */
+.prices-tile-caption {
+    margin-top: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

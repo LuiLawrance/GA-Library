@@ -181,7 +181,7 @@ def _last_sale_price(sales_data: dict, card_id: str, edition_id: str, foils: dic
 
 
 @app.get("/api/cards/search")
-async def api_cards_search(request: Request, q: str = ""):
+async def api_cards_search(request: Request, q: str = "", all_prints: bool = False):
     set_params = request.query_params.getlist("set")
     set_filters = [s.strip().lower().replace(" ", "_") for s in set_params]
 
@@ -204,6 +204,7 @@ async def api_cards_search(request: Request, q: str = ""):
             edition_info = card_info.get("editions", {}).get(card["edition_id"], {})
             card["element"] = card_info.get("element") or ""
             set_prefix = edition_info.get("set_prefix", "")
+            card["set_prefix"] = set_prefix
             key = set_prefix.lower().replace(" ", "_")
             if key not in set_file_cache:
                 path = f"DATA_GA/SETS_GA/{key}.json"
@@ -243,7 +244,7 @@ async def api_cards_search(request: Request, q: str = ""):
                 else:
                     candidate_editions = list(all_editions.keys())
 
-                for edition_id in (candidate_editions if set_filters else [
+                for edition_id in (candidate_editions if (set_filters or all_prints) else [
                     random.choice(candidate_editions)] if candidate_editions else []):
                     rarity = all_editions.get(edition_id, {}).get("rarity")
                     cards.append({
@@ -284,7 +285,7 @@ async def api_cards_search(request: Request, q: str = ""):
                     else:
                         candidate_editions = list(all_editions.keys())
 
-                    for edition_id in (candidate_editions if set_filters else [
+                    for edition_id in (candidate_editions if (set_filters or all_prints) else [
                         random.choice(candidate_editions)] if candidate_editions else []):
                         rarity = all_editions.get(edition_id, {}).get("rarity")
                         cards.append({
@@ -342,8 +343,8 @@ async def api_cards_search(request: Request, q: str = ""):
             else:
                 editions = list(card_info.get("editions", {}).keys())
 
-                if editions:
-                    edition_id = random.choice(editions)
+                for edition_id in (editions if all_prints else [
+                    random.choice(editions)] if editions else []):
                     rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                     cards.append({
                         "card_id": card_id,
@@ -351,6 +352,8 @@ async def api_cards_search(request: Request, q: str = ""):
                         "name": data["name"],
                         "rarity": rarity,
                     })
+
+                if editions:
                     existing_card_ids.add(card_id)
 
         if set_filters and cards:
@@ -397,8 +400,8 @@ async def api_cards_search(request: Request, q: str = ""):
             card_info = info_data.get(card_id, {})
             editions = list(card_info.get("editions", {}).keys())
 
-            if editions:
-                edition_id = random.choice(editions)
+            for edition_id in (editions if all_prints else [
+                random.choice(editions)] if editions else []):
                 rarity = card_info.get("editions", {}).get(edition_id, {}).get("rarity")
                 cards.append({
                     "card_id": card_id,

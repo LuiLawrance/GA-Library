@@ -31,15 +31,41 @@ async function initPrices() {
     // even though nothing on the new page actually points to that card.
     priceGraphCard = null;
 
+    setupPricesSearchExpand(content);
+
     await loadWatchlist();
+}
+
+// Toggles .prices-search-active, which grows the search panel over the graph
+// panel's row (see prices.css) while the search panel is in use. Driven from
+// JS rather than a plain :hover/:focus-within selector so leaving can be
+// delayed to outlast the row-resize transition — otherwise the graph panel's
+// legend menu regains scrolling while still mid-resize and briefly too short
+// for its content, flashing a scrollbar (a CSS transition-delay on
+// overflow-y was tried first, but this browser doesn't reliably honor it).
+function setupPricesSearchExpand(content) {
+    const searchPanel = content.querySelector('.prices-search-panel');
+    if (!searchPanel) return;
+
+    let collapseTimer = null;
+    const expand = () => {
+        clearTimeout(collapseTimer);
+        content.classList.add('prices-search-active');
+    };
+    const collapse = () => {
+        clearTimeout(collapseTimer);
+        collapseTimer = setTimeout(() => content.classList.remove('prices-search-active'), 260);
+    };
+
+    searchPanel.addEventListener('mouseenter', expand);
+    searchPanel.addEventListener('mouseleave', collapse);
+    searchPanel.addEventListener('focusin', expand);
+    searchPanel.addEventListener('focusout', collapse);
 }
 
 async function loadWatchlist() {
     const table = document.getElementById('prices-table');
-    const summary = document.getElementById('prices-summary');
-    if (!table || !summary) return;
-
-    summary.textContent = 'Loading...';
+    if (!table) return;
 
     try {
         const res = await fetch('/api/watchlist');
@@ -48,17 +74,17 @@ async function loadWatchlist() {
         watchlistData = data.watchlist || [];
         renderWatchlist();
     } catch {
-        summary.textContent = 'Failed to load watchlist.';
-        table.innerHTML = '';
+        table.innerHTML = `
+            <div class="prices-empty">
+                <span class="inv-empty-icon">⚠️</span>
+                <p>Failed to load watchlist.</p>
+            </div>`;
     }
 }
 
 function renderWatchlist() {
     const table = document.getElementById('prices-table');
-    const summary = document.getElementById('prices-summary');
-    if (!table || !summary) return;
-
-    summary.textContent = `${watchlistData.length} card${watchlistData.length !== 1 ? 's' : ''} watched`;
+    if (!table) return;
 
     if (!watchlistData.length) {
         table.innerHTML = `
@@ -372,6 +398,10 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName) {
         const foilList = document.getElementById('watchlist-modal-foils');
         foilList.innerHTML = '';
         let firstOpt = null;
+        // If the caller identified a specific printing (e.g. a tile clicked in
+        // the all-editions search results), preselect that one instead of
+        // always defaulting to the first in collector-number order.
+        let matchOpt = null;
 
         editions.forEach(([eid, einfo]) => {
             const rarityMap = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
@@ -379,6 +409,7 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName) {
             Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
                 const opt = buildWatchlistFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false);
                 if (!firstOpt) firstOpt = {opt, eid, fid};
+                if (!matchOpt && eid === editionId) matchOpt = {opt, eid, fid};
                 foilList.appendChild(opt);
                 Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
                     const vopt = buildWatchlistFoilOption(eid, vid, vinfo.kind, einfo.set_prefix, rarity, einfo.collector_number, true);
@@ -387,7 +418,8 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName) {
             });
         });
 
-        if (firstOpt) selectWatchlistFoilOption(firstOpt.opt, firstOpt.eid, firstOpt.fid);
+        const initialOpt = matchOpt || firstOpt;
+        if (initialOpt) selectWatchlistFoilOption(initialOpt.opt, initialOpt.eid, initialOpt.fid);
     } catch {
         document.getElementById('watchlist-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
     }
@@ -542,7 +574,7 @@ async function searchPriceCards() {
     results.innerHTML = `<div class="inv-search-placeholder"><span class="inv-empty-icon">⬡</span><p>Searching...</p></div>`;
 
     try {
-        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}&all_prints=1`);
         const data = await res.json();
 
         if (!data.cards?.length) {
@@ -550,15 +582,17 @@ async function searchPriceCards() {
             return;
         }
 
-        const seen = new Set();
-        const uniqueCards = data.cards.filter(card => {
-            if (seen.has(card.card_id)) return false;
-            seen.add(card.card_id);
-            return true;
+        // One tile per printing now (all_prints=1), so group same-name cards
+        // together and order their printings by collector number.
+        const cards = [...data.cards].sort((a, b) => {
+            if (a.name !== b.name) return a.name.localeCompare(b.name);
+            const [nA, sA] = _sortCollectorNumber(a.collector_number);
+            const [nB, sB] = _sortCollectorNumber(b.collector_number);
+            return nA !== nB ? nA - nB : sA.localeCompare(sB);
         });
 
         results.innerHTML = '';
-        uniqueCards.forEach((card, i) => results.appendChild(buildPriceSearchTile(card, i, uniqueCards.length)));
+        cards.forEach((card, i) => results.appendChild(buildPriceSearchTile(card, i, cards.length)));
     } catch {
         results.innerHTML = `<div class="inv-search-placeholder"><span class="inv-empty-icon">⬡</span><p>Search failed.</p></div>`;
     }
@@ -576,13 +610,17 @@ function buildPriceSearchTile(card, index, total = 1) {
     const maxDelay = 400;
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * maxDelay));
     tile.style.animationDelay = `${delay}ms`;
+    const caption = (card.set_prefix || card.collector_number)
+        ? `<div class="prices-tile-caption">${escapeHtml(card.set_prefix || '—')} · #${escapeHtml(card.collector_number || '?')}</div>`
+        : '';
     tile.innerHTML = `
         <div class="edition-tile-wrap">
             <img src="/images/${card.edition_id}.jpg" alt="${escapeHtml(card.name)}"
                 onerror="this.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${escapeHtml(card.name)}</div>'">
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}
         </div>
-        ${card.last_price != null ? `<span class="inv-price-badge">$${Number(card.last_price).toFixed(2)}</span>` : ''}`;
+        ${card.last_price != null ? `<span class="inv-price-badge">$${Number(card.last_price).toFixed(2)}</span>` : ''}
+        ${caption}`;
     tile.onclick = () => openWatchlistModalToFoilStep(card.card_id, card.edition_id, card.name);
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
     return tile;
