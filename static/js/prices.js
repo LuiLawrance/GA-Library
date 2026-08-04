@@ -84,22 +84,36 @@ function renderWatchlist() {
             <div class="prices-watch-tile card-tile card-tile--authed"
                  style="animation-delay:${Math.min(i, 20) * 30}ms"
                  data-card-id="${row.card_id}" data-edition-id="${row.edition_id}" data-foil-id="${row.foil_id}"
-                 title="${escapeHtml(row.name)} — ${escapeHtml(meta)}"
-                 onclick="showPriceGraph('${row.card_id}', '${row.edition_id}', '${row.foil_id}', '${escapeHtml(row.name)}')">
+                 data-name="${escapeHtml(row.name)}"
+                 title="${escapeHtml(row.name)} — ${escapeHtml(meta)}">
                 <div class="prices-watch-tile-media">
                     <div class="edition-tile-wrap">
                         <img src="/images/${row.edition_id}.jpg" alt="${escapeHtml(row.name)}">
                     </div>
                 </div>
                 ${priceText ? `<span class="inv-price-badge">${priceText}</span>` : ''}
-                <button class="prices-watch-remove" title="Remove from watchlist"
-                        onclick="event.stopPropagation(); removeFromWatchlist('${row.card_id}', '${row.edition_id}', '${row.foil_id}')">&times;</button>
+                <button class="prices-watch-remove" title="Remove from watchlist">&times;</button>
                 <div class="prices-watch-tile-info">
                     <div class="prices-watch-tile-name">${escapeHtml(row.name)}</div>
                     ${changeHTML}
                 </div>
             </div>`;
     }).join('');
+
+    // Bound from the tile's own data-* attributes rather than interpolated into
+    // an inline onclick string — card names can contain characters (e.g. the
+    // apostrophe in "Apothecary's Harvest") that survive escapeHtml's HTML
+    // escaping but still reintroduce a raw quote once the browser HTML-decodes
+    // the onclick attribute back into JS source, breaking the string literal
+    // and silently no-op'ing the click.
+    table.querySelectorAll('.prices-watch-tile').forEach(tile => {
+        const {cardId, editionId, foilId, name} = tile.dataset;
+        tile.addEventListener('click', () => showPriceGraph(cardId, editionId, foilId, name));
+        tile.querySelector('.prices-watch-remove')?.addEventListener('click', e => {
+            e.stopPropagation();
+            removeFromWatchlist(cardId, editionId, foilId);
+        });
+    });
 
     highlightSelectedWatchlistRow();
 

@@ -31,7 +31,9 @@
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 2fr;
-    grid-template-rows: 1fr 1fr;
+    /* Search panel gets a bit less than an even split at rest — it still
+       grows to 1.65fr on hover/focus (see below), just starts smaller. */
+    grid-template-rows: 1.2fr 0.8fr;
     grid-template-areas:
         "watchlist graph"
         "watchlist search";

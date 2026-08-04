@@ -646,9 +646,39 @@
     stroke-width: 1;
 }
 
+/* Short tick mark tying each x-axis date label to its exact point position
+   (see buildPricingComboChart's dateLabelsHTML). */
+.pricing-chart-tick {
+    stroke: var(--border-focus);
+    stroke-width: 1;
+}
+
 .pricing-chart-axis-label {
     font-family: 'DM Mono', monospace;
     font-size: 11px;
+    fill: var(--text-muted);
+}
+
+/* Vertical line marking a month boundary, spanning the full plot height —
+   a background time reference sitting behind the price lines/dots (see
+   monthDividersHTML in buildPricingComboChart), dashed so it doesn't compete
+   with the solid price lines that render on top of it. */
+.pricing-chart-month-divider {
+    stroke: var(--border);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+}
+
+/* Titles the band a month divider marks off (see monthDividersHTML). Sits in
+   its own row below the day-number ticks — bolder and uppercased so it
+   reads as a heading for that stretch of the axis rather than another tick
+   value. */
+.pricing-chart-month-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     fill: var(--text-muted);
 }
 

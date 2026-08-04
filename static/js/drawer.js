@@ -235,7 +235,14 @@ function buildTabThemaPanel(edition) {
 
 const PRICING_CHART_W = 400;
 const PRICING_CHART_H = 140;
-const PRICING_CHART_PAD = {top: 14, right: 10, bottom: 20, left: 46};
+// bottom has room for two label rows: day-number ticks, then month titles
+// underneath (see buildPricingComboChart's dateLabelsHTML/monthDividersHTML).
+const PRICING_CHART_PAD = {top: 14, right: 10, bottom: 32, left: 46};
+
+// Horizontal margin reserved inside the plot area so the first/last data
+// points (and their axis ticks) sit a bit clear of the plot's left/right
+// edges instead of flush against them — see timeToX in buildPricingComboChart.
+const PRICING_CHART_X_INSET = 16;
 
 // The drawer's chart is a brief, at-a-glance snapshot — cap each series to its
 // most recent points rather than plotting a card's entire trade history. Full
@@ -550,7 +557,13 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
     const maxPrice = rawMax + span * 0.15;
 
     const singleTime = minTime === maxTime;
-    const xAt = date => singleTime ? pad.left + plotW / 2 : pad.left + ((new Date(date).getTime() - minTime) / timeSpan) * plotW;
+
+    // Guards a very narrow chart from having the inset eat the whole plot
+    // width (and, in turn, xAt/timeToX dividing by a zero or negative span).
+    const insetX = Math.min(PRICING_CHART_X_INSET, plotW / 4);
+    const dataPlotW = plotW - insetX * 2;
+    const timeToX = time => pad.left + insetX + ((time - minTime) / timeSpan) * dataPlotW;
+    const xAt = date => singleTime ? pad.left + plotW / 2 : timeToX(new Date(date).getTime());
     const yAt = price => pad.top + plotH - ((price - minPrice) / (maxPrice - minPrice)) * plotH;
 
     const gridlinesHTML = [0, 0.5, 1].map(t => {
@@ -578,11 +591,123 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
     }
 
     const firstDate = all.reduce((min, e) => e.date < min ? e.date : min, all[0].date);
-    const lastDate = all.reduce((max, e) => e.date > max ? e.date : max, all[0].date);
 
-    const dateLabelsHTML = `
-        <text x="${pad.left}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="start">${escapeHtml(firstDate)}</text>
-        ${firstDate !== lastDate ? `<text x="${(w - pad.right).toFixed(1)}" y="${(h - 4).toFixed(1)}" class="pricing-chart-axis-label" text-anchor="end">${escapeHtml(lastDate)}</text>` : ''}`;
+    // Data-point ticks now show only the day of month — the month itself is
+    // carried by the divider titles below (monthDividersHTML), so repeating
+    // it on every tick would be redundant. Pure string slicing rather than
+    // Date parsing, same reasoning as the old shortDate() this replaces:
+    // avoids any UTC/local timezone reinterpretation of the "YYYY-MM-DD"
+    // string shifting the displayed day.
+    const dayOnly = date => String(parseInt(date.slice(8, 10), 10));
+    const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    const axisY = (h - pad.bottom).toFixed(1);
+    const tickBottomY = (h - pad.bottom + 4).toFixed(1);
+    const dayLabelY = (h - pad.bottom + 12).toFixed(1);
+    const monthLabelY = (h - 4).toFixed(1);
+
+    // Rather than only ever labeling the two endpoint dates (which doesn't
+    // reflect how the points in between are actually distributed in time),
+    // pick a handful of ticks spread evenly across the real time range, each
+    // snapped to its nearest actual data point so every label still names a
+    // real date. A short tick line ties each label to the exact x position
+    // of that point instead of just floating near it. Candidates closer
+    // together than minGapPx are dropped (favoring the most recent date
+    // over a too-close neighbor) so dates bunched close together don't
+    // produce overlapping labels.
+    const dateLabelsHTML = (() => {
+        if (singleTime) {
+            return `<text x="${(pad.left + plotW / 2).toFixed(1)}" y="${dayLabelY}" class="pricing-chart-axis-label" text-anchor="middle">${escapeHtml(dayOnly(firstDate))}</text>`;
+        }
+
+        const desiredCount = Math.max(2, Math.min(6, Math.floor(plotW / 60) + 1));
+        const candidates = [];
+        for (let i = 0; i < desiredCount; i++) {
+            const targetTime = minTime + timeSpan * (i / (desiredCount - 1));
+            let bestIdx = 0;
+            let bestDiff = Infinity;
+            for (let j = 0; j < times.length; j++) {
+                const diff = Math.abs(times[j] - targetTime);
+                if (diff < bestDiff) {
+                    bestDiff = diff;
+                    bestIdx = j;
+                }
+            }
+            candidates.push({date: all[bestIdx].date, x: xAt(all[bestIdx].date)});
+        }
+
+        // A bare day number is much narrower than the old "MM-DD" label, so
+        // ticks can sit closer together before overlapping.
+        const minGapPx = 24;
+        const kept = [];
+        for (const c of candidates) {
+            const last = kept[kept.length - 1];
+            if (last && last.date === c.date) continue;
+            if (last && c.x - last.x < minGapPx) {
+                if (c === candidates[candidates.length - 1]) {
+                    kept.pop();
+                } else {
+                    continue;
+                }
+            }
+            kept.push(c);
+        }
+
+        return kept.map(c => {
+            const anchor = c.x <= pad.left + 12 ? 'start' : c.x >= w - pad.right - 12 ? 'end' : 'middle';
+            return `
+                <line x1="${c.x.toFixed(1)}" y1="${axisY}" x2="${c.x.toFixed(1)}" y2="${tickBottomY}" class="pricing-chart-tick" />
+                <text x="${c.x.toFixed(1)}" y="${dayLabelY}" class="pricing-chart-axis-label" text-anchor="${anchor}">${escapeHtml(dayOnly(c.date))}</text>`;
+        }).join('');
+    })();
+
+    // Vertical dividers marking every month boundary in view, each band
+    // titled with its month name so the day-only ticks above still have
+    // context. Boundaries are calendar month-starts, not data points, so
+    // they're placed by real time (via timeSpan) rather than snapped to the
+    // nearest entry the way the day ticks are. UTC getters/Date.UTC are used
+    // throughout (matching how minTime/maxTime/xAt already parse the
+    // "YYYY-MM-DD" strings as UTC midnight) so a boundary always lands
+    // exactly at the 1st of its month regardless of the viewer's own
+    // timezone offset.
+    const monthDividersHTML = (() => {
+        if (singleTime) {
+            const month = MONTH_NAMES[new Date(firstDate).getUTCMonth()];
+            return `<text x="${(pad.left + plotW / 2).toFixed(1)}" y="${monthLabelY}" class="pricing-chart-month-label" text-anchor="middle">${month}</text>`;
+        }
+
+        const boundaries = [];
+        const start = new Date(minTime);
+        let cursorTime = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1);
+        while (cursorTime < maxTime) {
+            boundaries.push(cursorTime);
+            const c = new Date(cursorTime);
+            cursorTime = Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + 1, 1);
+        }
+
+        const dividersHTML = boundaries.map(t => {
+            const x = timeToX(t).toFixed(1);
+            return `<line x1="${x}" y1="${pad.top.toFixed(1)}" x2="${x}" y2="${axisY}" class="pricing-chart-month-divider" />`;
+        }).join('');
+
+        // Each band — from one boundary to the next, chart edges standing in
+        // for the first/last — gets one title, centered on the band so it
+        // reads as naming that whole stretch rather than crowding the line.
+        const edges = [minTime, ...boundaries, maxTime];
+        const minGapPx = 28;
+        let lastX = -Infinity;
+        const labelsHTML = edges.slice(0, -1).map((edgeStart, i) => {
+            const midTime = (edgeStart + edges[i + 1]) / 2;
+            const x = timeToX(midTime);
+            if (x - lastX < minGapPx) return '';
+            lastX = x;
+            const month = MONTH_NAMES[new Date(edgeStart).getUTCMonth()];
+            const anchor = x <= pad.left + 14 ? 'start' : x >= w - pad.right - 14 ? 'end' : 'middle';
+            return `<text x="${x.toFixed(1)}" y="${monthLabelY}" class="pricing-chart-month-label" text-anchor="${anchor}">${month}</text>`;
+        }).join('');
+
+        return dividersHTML + labelsHTML;
+    })();
 
     const linesHTML = marks.map(m => `<path d="${m.linePath}" style="stroke:${m.color}" class="pricing-chart-line" data-series-key="${escapeHtml(m.key)}" fill="none" />`).join('');
     const dotsHTML = marks.map(m => m.dotsHTML).join('');
@@ -595,6 +720,7 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
     const svgHTML = `
         <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${svgStyle}>
             ${gridlinesHTML}
+            ${monthDividersHTML}
             ${linesHTML}
             ${dotsHTML}
             ${endLabelsHTML}
