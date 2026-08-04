@@ -52,7 +52,7 @@
     gap: 4px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 8px;
     padding: 6px;
     z-index: 201;
     box-shadow: -4px 4px 16px rgba(0, 0, 0, 0.3);
@@ -346,10 +346,15 @@
     margin-bottom: 12px;
 }
 
+/* Matches the Prices watchlist grid (see prices.css): auto-fill columns
+   instead of a fixed count, and a padding buffer — more on top/left/right,
+   where a ring is most likely to sit flush against the edge — so the
+   selected-tile ring (below) isn't clipped by this grid's own edges. */
 .drawer-editions {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fill, 130px);
     gap: 12px;
+    padding: 6px 6px 3px;
 }
 
 .drawer-edition-tile {
@@ -360,6 +365,35 @@
 
 .edition-tile-wrap {
     position: relative;
+}
+
+/* Clips the image to its rounded corners — scoped to the drawer's own
+   edition tiles rather than added to the base .edition-tile-wrap rule
+   above, since that class is shared by the Cards/Inventory/Prices tiles
+   too (each opts into this via its own rule). */
+.drawer-edition-tile .edition-tile-wrap {
+    overflow: hidden;
+    border-radius: 8px;
+}
+
+/* Hover zoom and the selected-tile ring both live on this wrapper — not on
+   .edition-tile-wrap (which clips itself via overflow:hidden above, so an
+   outward ring there would self-clip) and not on .drawer-edition-tile
+   itself (which has its own reveal-animation transform, which would fight
+   a separately-declared hover transform). Putting both here keeps the ring
+   and the zoomed image moving as one unit, same as the Prices watchlist
+   tiles' .prices-watch-tile-media. */
+.drawer-edition-media {
+    border-radius: 8px;
+    transition: transform 0.2s;
+}
+
+.drawer-edition-tile:hover .drawer-edition-media {
+    transform: scale(1.03);
+}
+
+.drawer-edition-tile:has(img.edition-selected) .drawer-edition-media {
+    box-shadow: 0 0 0 2px var(--accent);
 }
 
 .edition-prefix-badge {
@@ -379,23 +413,9 @@
 
 .drawer-edition-tile img {
     width: 100%;
-    border-radius: 10px;
+    border-radius: 8px;
     display: block;
     cursor: pointer;
-    transition: transform 0.2s, opacity 0.2s;
-    opacity: 0.8;
-}
-
-.drawer-edition-tile img:hover {
-    transform: scale(1.05);
-    opacity: 1;
-}
-
-.drawer-edition-tile img.edition-selected {
-    opacity: 1;
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 10px;
 }
 
 .edition-rarity-badge {

@@ -39,29 +39,30 @@
     overflow: hidden;
     min-height: 0;
     padding: 32px;
-    transition: grid-template-rows 0.25s ease;
+    /* ease-out (not ease) so the reverse-on-hover-out reads as an immediate
+       stop-and-reverse rather than a slow wind-down — CSS transitions
+       already restart from whatever size the row is currently at when the
+       hover/focus state flips mid-animation, this just makes that feel
+       snappier. Shortened from 0.25s for the same reason. */
+    transition: grid-template-rows 0.18s ease-out;
 }
 
-/* Toggled by JS (see setupPricesSearchExpand in prices.js) rather than a
-   plain :hover/:focus-within selector — entering is instant, but leaving is
-   delayed by JS to outlast this transition, so the graph panel's legend menu
-   (below) doesn't regain scrolling while it's still mid-resize. A CSS-only
-   transition-delay on overflow-y was tried first and doesn't reliably delay
-   in this browser, hence the JS. */
-.prices-content.prices-search-active {
+/* While the search panel is being used — typing, or just hovered — grow it
+   into the graph panel's row for a bigger results view. Reverts the instant
+   focus/hover leaves, so the graph stays the default larger panel otherwise. */
+.prices-content:has(.prices-search-panel:hover),
+.prices-content:has(.prices-search-panel:focus-within) {
     grid-template-rows: 0.35fr 1.65fr;
 }
 
-/* At that squeezed-down height the graph's legend menu would otherwise
-   start scrolling in a sliver of space — instead of that, just disable
-   the whole graph panel until the search panel isn't in use anymore. */
-.prices-content.prices-search-active .prices-graph-panel {
+/* At that squeezed-down height the graph panel is too cramped to be useful
+   — disable it until the search panel isn't in use anymore. The legend menu
+   itself never scrolls (see .pricing-legend-menu), so there's no scrollbar
+   timing to worry about here anymore. */
+.prices-content:has(.prices-search-panel:hover) .prices-graph-panel,
+.prices-content:has(.prices-search-panel:focus-within) .prices-graph-panel {
     pointer-events: none;
     opacity: 0.4;
-}
-
-.prices-content.prices-search-active .pricing-legend-menu {
-    overflow-y: hidden;
 }
 
 .prices-panel {
@@ -76,20 +77,15 @@
 
 .prices-watchlist-panel {
     grid-area: watchlist;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    /* No top padding: .prices-table-header already draws its own border,
-       so its top edge needs to sit flush with the grid row's top — the
-       same place the graph/search panels' own borders sit — rather than
-       being inset like this panel's borderless background is. */
-    padding: 0;
+    padding: 18px 22px;
 }
 
 .prices-graph-panel {
     grid-area: graph;
     padding: 18px 22px;
-    transition: opacity 0.2s ease;
+    /* Matches .prices-content's grid-template-rows timing so the fade and
+       the resize always finish together, including when interrupted. */
+    transition: opacity 0.18s ease-out;
 }
 
 .prices-search-panel {
@@ -110,114 +106,149 @@
     color: var(--text-muted);
 }
 
-/* ── Ticker table ── */
-.prices-table-header,
-.prices-row {
-    display: grid;
-    grid-template-columns: 1fr 100px 110px 110px 36px;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
+/* ── Watchlist grid ── */
+.prices-watchlist-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
 }
 
-.prices-table-header {
-    flex-shrink: 0;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-
-.prices-col-price,
-.prices-col-change,
-.prices-col-date {
-    text-align: right;
-    font-family: 'DM Mono', monospace;
-}
-
-.prices-table {
+.prices-watchlist-grid {
     flex: 1;
     overflow-y: auto;
-    border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    scrollbar-gutter: stable;
+    margin-top: 12px;
+    display: grid;
+    /* auto-fit, not auto-fill — auto-fill keeps empty trailing tracks around
+       (so a partial row's tiles stay left-anchored within a track set that's
+       wider than the tiles actually occupy), which throws off centering
+       whenever there aren't enough tiles to fill a row. auto-fit collapses
+       those empty tracks so justify-content: center centers the tiles
+       themselves regardless of count. */
+    grid-template-columns: repeat(auto-fit, 130px);
+    gap: 12px;
+    align-content: start;
+    justify-content: center;
+    /* Room for the selected-tile ring (see .prices-watch-tile-media) to
+       paint outside a tile without being clipped by this container's own
+       overflow — setting overflow-y here also makes overflow-x compute to
+       auto rather than visible, so it clips at these edges too. Top/left/
+       right get more since those are the edges a ring is most likely to sit
+       flush against; bottom already has some breathing room before the
+       scroll boundary. */
+    padding: 6px 6px 3px;
 }
 
-.prices-table::-webkit-scrollbar {
+.prices-watchlist-grid::-webkit-scrollbar {
     width: 8px;
 }
 
-.prices-table::-webkit-scrollbar-track {
+.prices-watchlist-grid::-webkit-scrollbar-track {
     background: var(--bg);
 }
 
-.prices-table::-webkit-scrollbar-thumb {
+.prices-watchlist-grid::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 8px;
 }
 
-.prices-table::-webkit-scrollbar-thumb:hover {
+.prices-watchlist-grid::-webkit-scrollbar-thumb:hover {
     background: var(--border-focus);
 }
 
-.prices-row {
-    cursor: pointer;
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s;
+.prices-watch-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
 
-.prices-row:last-child {
-    border-bottom: none;
+/* The ring lives on this wrapper, not .edition-tile-wrap itself — that has
+   its own overflow:hidden (to clip the image to its rounded corners), which
+   would clip an outward box-shadow before it ever reached the grid's edge.
+   This wrapper has no overflow set, so the ring paints outward untouched. */
+.prices-watch-tile-media {
+    border-radius: 8px;
+    transition: transform 0.2s;
 }
 
-.prices-row:hover {
-    background: var(--bg-hover);
+/* The shared card-tile radius (tiles.css/cards.css) is 14px, sized for the
+   255px Cards-page tiles — at this 130px size that reads as too rounded and
+   cuts noticeably into the card art's corners. Scoped overrides here (and
+   the matching ones for the search-results tiles below) keep the smaller
+   tiles' image, clip, and ring all on the same, less-rounded curve without
+   touching the shared rule other pages still rely on. */
+.prices-watch-tile.card-tile .edition-tile-wrap {
+    border-radius: 8px;
 }
 
-.prices-col-card {
+.prices-watch-tile.card-tile img {
+    border-radius: 8px;
+}
+
+.prices-watch-tile.selected .prices-watch-tile-media {
+    box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* The shared card-tile hover zoom (see cards.css) scales .edition-tile-wrap
+   directly, which would leave the ring above fixed-size while the image
+   zooms past it. Move the zoom to this wrapper instead — same visual zoom
+   for the image (still clipped to .edition-tile-wrap's rounded corners),
+   but now the ring scales right along with it. The extra .card-tile--authed
+   qualifier just outweighs that shared rule's specificity. */
+.prices-watch-tile.card-tile--authed:hover .prices-watch-tile-media {
+    transform: scale(1.03);
+}
+
+.prices-watch-tile.card-tile--authed:hover .edition-tile-wrap {
+    transform: none;
+}
+
+.prices-watch-remove {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 20px;
+    height: 20px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    min-width: 0;
+    justify-content: center;
+    font-size: 0.95rem;
+    line-height: 1;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.65);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0;
+    z-index: 2;
+    transition: opacity 0.15s, background 0.15s;
 }
 
-.prices-row-img {
-    width: 36px;
-    height: 36px;
-    object-fit: cover;
-    border-radius: var(--radius-sm);
-    flex-shrink: 0;
+.prices-watch-tile:hover .prices-watch-remove {
+    opacity: 1;
 }
 
-.prices-row-info {
-    min-width: 0;
+.prices-watch-remove:hover {
+    background: var(--error);
 }
 
-.prices-row-name {
-    font-size: 0.85rem;
+.prices-watch-tile-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    text-align: center;
+}
+
+.prices-watch-tile-name {
+    font-size: 0.78rem;
     color: var(--text);
+    max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.prices-row-meta {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.prices-col-price {
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--text);
 }
 
 .prices-change {
@@ -237,33 +268,6 @@
     color: var(--text-muted);
 }
 
-.prices-col-remove {
-    display: flex;
-    justify-content: flex-end;
-}
-
-.prices-remove-btn {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1rem;
-    line-height: 1;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: color 0.15s, background 0.15s;
-}
-
-.prices-remove-btn:hover {
-    color: var(--error);
-    background: color-mix(in srgb, var(--error) 12%, transparent);
-}
-
 .prices-empty {
     display: flex;
     flex-direction: column;
@@ -273,11 +277,8 @@
     padding: 60px 0;
     color: var(--text-muted);
     text-align: center;
-}
-
-.prices-row.selected {
-    background: var(--bg-hover);
-    box-shadow: inset 2px 0 0 var(--accent);
+    /* Spans every column so it isn't squeezed into a single 130px cell. */
+    grid-column: 1 / -1;
 }
 
 /* ── Graph panel ── */
@@ -292,6 +293,14 @@
        perfect every time. */
     overflow: hidden;
     min-height: 0;
+    transition: opacity 0.18s ease;
+}
+
+/* Toggled in showPriceGraph (prices.js) while swapping to a different
+   card's chart, so switching between watchlist cards reads as a crossfade
+   instead of an abrupt content swap. */
+.prices-graph-body.switching {
+    opacity: 0;
 }
 
 .prices-graph-placeholder,
@@ -333,32 +342,20 @@
     min-height: 0;
 }
 
+/* Static — never scrolls, even if there are more toggles than fit. Avoids
+   a scrollbar ever needing to appear/disappear as the graph panel resizes
+   (see .prices-content's grid-template-rows) while the search panel is in
+   use, at the cost of clipping extra toggles in the rare case a card has
+   enough sale/listing series to overflow this height. */
 .pricing-legend-menu {
     flex-shrink: 0;
     width: 130px;
     display: flex;
     flex-direction: column;
     gap: 8px;
-    overflow-y: auto;
+    overflow-y: hidden;
     padding-left: 12px;
     border-left: 1px solid var(--border);
-}
-
-.pricing-legend-menu::-webkit-scrollbar {
-    width: 8px;
-}
-
-.pricing-legend-menu::-webkit-scrollbar-track {
-    background: var(--bg);
-}
-
-.pricing-legend-menu::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 8px;
-}
-
-.pricing-legend-menu::-webkit-scrollbar-thumb:hover {
-    background: var(--border-focus);
 }
 
 .pricing-legend-toggle {
@@ -430,14 +427,26 @@
     /* Reserves the scrollbar's gutter whether or not it's actually needed,
        so a scrollbar appearing/disappearing as this panel's row resizes
        never changes the available width — which would otherwise reflow
-       the auto-fill columns and make the tiles visibly rescale/rewrap
+       the auto-fit columns and make the tiles visibly rescale/rewrap
        mid-resize instead of just revealing more already-laid-out rows. */
     scrollbar-gutter: stable;
     margin-top: 12px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, 130px);
+    /* auto-fit, not auto-fill — same reasoning as the watchlist grid: fill
+       keeps empty trailing tracks around whenever there aren't enough tiles
+       to complete a row, which throws off centering. fit collapses those
+       empty tracks so justify-content: center centers the tiles themselves
+       regardless of count. */
+    grid-template-columns: repeat(auto-fit, 130px);
     gap: 12px;
     align-content: start;
+    justify-content: center;
+    /* Room for the tile hover-zoom (.card-tile--authed:hover scales
+       .edition-tile-wrap up 3%) to grow outward without being clipped by
+       this container's own overflow — most noticeable on the first row,
+       which has no row above it to borrow clearance from. Same top/left/
+       right-biased padding as the watchlist and drawer edition grids. */
+    padding: 6px 6px 3px;
 }
 
 .prices-search-results::-webkit-scrollbar {
@@ -455,6 +464,17 @@
 
 .prices-search-results::-webkit-scrollbar-thumb:hover {
     background: var(--border-focus);
+}
+
+/* Same reasoning as .prices-watch-tile above: less rounded than the shared
+   14px card-tile default, which was sized for the larger 255px Cards-page
+   tiles and looks too rounded at this panel's 130px size. */
+.prices-search-results .card-tile.card-tile--authed .edition-tile-wrap {
+    border-radius: 8px;
+}
+
+.prices-search-results .card-tile img {
+    border-radius: 8px;
 }
 
 /* Distinguishes same-card tiles now that search returns every printing

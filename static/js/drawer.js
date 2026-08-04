@@ -844,13 +844,15 @@ async function openCardDrawer(cardId, editionId, cardName) {
 
             return `
             <div class="drawer-edition-tile" style="animation-delay: ${i * 60}ms">
-                <div class="edition-tile-wrap">
-                    <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
-                        title="${einfo.set_name} (${einfo.set_prefix})"
-                        onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
-                        id="edition-tile-${eid}">
-                    <span class="edition-prefix-badge">${einfo.set_prefix}</span>
-                    <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>
+                <div class="drawer-edition-media">
+                    <div class="edition-tile-wrap">
+                        <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
+                            title="${einfo.set_name} (${einfo.set_prefix})"
+                            onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
+                            id="edition-tile-${eid}">
+                        <span class="edition-prefix-badge">${einfo.set_prefix}</span>
+                        <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>
+                    </div>
                 </div>
             </div>
         `

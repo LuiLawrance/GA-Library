@@ -31,36 +31,7 @@ async function initPrices() {
     // even though nothing on the new page actually points to that card.
     priceGraphCard = null;
 
-    setupPricesSearchExpand(content);
-
     await loadWatchlist();
-}
-
-// Toggles .prices-search-active, which grows the search panel over the graph
-// panel's row (see prices.css) while the search panel is in use. Driven from
-// JS rather than a plain :hover/:focus-within selector so leaving can be
-// delayed to outlast the row-resize transition — otherwise the graph panel's
-// legend menu regains scrolling while still mid-resize and briefly too short
-// for its content, flashing a scrollbar (a CSS transition-delay on
-// overflow-y was tried first, but this browser doesn't reliably honor it).
-function setupPricesSearchExpand(content) {
-    const searchPanel = content.querySelector('.prices-search-panel');
-    if (!searchPanel) return;
-
-    let collapseTimer = null;
-    const expand = () => {
-        clearTimeout(collapseTimer);
-        content.classList.add('prices-search-active');
-    };
-    const collapse = () => {
-        clearTimeout(collapseTimer);
-        collapseTimer = setTimeout(() => content.classList.remove('prices-search-active'), 260);
-    };
-
-    searchPanel.addEventListener('mouseenter', expand);
-    searchPanel.addEventListener('mouseleave', collapse);
-    searchPanel.addEventListener('focusin', expand);
-    searchPanel.addEventListener('focusout', collapse);
 }
 
 async function loadWatchlist() {
@@ -95,9 +66,10 @@ function renderWatchlist() {
         return;
     }
 
-    table.innerHTML = watchlistData.map(row => {
+    table.innerHTML = watchlistData.map((row, i) => {
         const foilLabel = row.foil_kind ? toFoilLabel(row.foil_kind) : 'Standard';
-        const priceText = row.price != null ? `$${row.price.toFixed(2)}` : '—';
+        const priceText = row.price != null ? `$${row.price.toFixed(2)}` : null;
+        const meta = `${row.set_prefix || '—'} · #${row.collector_number || '?'} · ${foilLabel}`;
 
         let changeHTML = '<span class="prices-change prices-change--flat">—</span>';
         if (row.change_pct != null) {
@@ -109,21 +81,22 @@ function renderWatchlist() {
         }
 
         return `
-            <div class="prices-row" data-card-id="${row.card_id}" data-edition-id="${row.edition_id}" data-foil-id="${row.foil_id}"
+            <div class="prices-watch-tile card-tile card-tile--authed"
+                 style="animation-delay:${Math.min(i, 20) * 30}ms"
+                 data-card-id="${row.card_id}" data-edition-id="${row.edition_id}" data-foil-id="${row.foil_id}"
+                 title="${escapeHtml(row.name)} — ${escapeHtml(meta)}"
                  onclick="showPriceGraph('${row.card_id}', '${row.edition_id}', '${row.foil_id}', '${escapeHtml(row.name)}')">
-                <div class="prices-col-card">
-                    <img class="prices-row-img" src="/images/${row.edition_id}.jpg" alt="${escapeHtml(row.name)}">
-                    <div class="prices-row-info">
-                        <div class="prices-row-name">${escapeHtml(row.name)}</div>
-                        <div class="prices-row-meta">${escapeHtml(row.set_prefix || '—')} · #${escapeHtml(row.collector_number || '?')} · ${escapeHtml(foilLabel)}</div>
+                <div class="prices-watch-tile-media">
+                    <div class="edition-tile-wrap">
+                        <img src="/images/${row.edition_id}.jpg" alt="${escapeHtml(row.name)}">
                     </div>
                 </div>
-                <div class="prices-col-price">${priceText}</div>
-                <div class="prices-col-change">${changeHTML}</div>
-                <div class="prices-col-date">${row.last_sale_date ? escapeHtml(row.last_sale_date) : '—'}</div>
-                <div class="prices-col-remove">
-                    <button class="prices-remove-btn" title="Remove from watchlist"
-                            onclick="event.stopPropagation(); removeFromWatchlist('${row.card_id}', '${row.edition_id}', '${row.foil_id}')">&times;</button>
+                ${priceText ? `<span class="inv-price-badge">${priceText}</span>` : ''}
+                <button class="prices-watch-remove" title="Remove from watchlist"
+                        onclick="event.stopPropagation(); removeFromWatchlist('${row.card_id}', '${row.edition_id}', '${row.foil_id}')">&times;</button>
+                <div class="prices-watch-tile-info">
+                    <div class="prices-watch-tile-name">${escapeHtml(row.name)}</div>
+                    ${changeHTML}
                 </div>
             </div>`;
     }).join('');
@@ -142,12 +115,12 @@ function renderWatchlist() {
 // ═══════════════════════════════════════
 
 function highlightSelectedWatchlistRow() {
-    document.querySelectorAll('.prices-row').forEach(row => {
+    document.querySelectorAll('.prices-watch-tile').forEach(tile => {
         const match = priceGraphCard
-            && row.dataset.cardId === priceGraphCard.cardId
-            && row.dataset.editionId === priceGraphCard.editionId
-            && row.dataset.foilId === priceGraphCard.foilId;
-        row.classList.toggle('selected', match);
+            && tile.dataset.cardId === priceGraphCard.cardId
+            && tile.dataset.editionId === priceGraphCard.editionId
+            && tile.dataset.foilId === priceGraphCard.foilId;
+        tile.classList.toggle('selected', match);
     });
 }
 
@@ -159,7 +132,14 @@ async function showPriceGraph(cardId, editionId, foilId, cardName) {
     const body = document.getElementById('price-graph-body');
     if (!body) return;
 
+    // Fade the previous card's chart out before swapping in the new one,
+    // rather than replacing it outright — matches .prices-graph-body's
+    // transition duration (see prices.css).
+    body.classList.add('switching');
+    await new Promise(r => setTimeout(r, 180));
+
     body.innerHTML = `<div class="prices-graph-loading">Loading chart...</div>`;
+    body.classList.remove('switching');
 
     try {
         const res = await fetch(`/api/cards/${cardId}`);
