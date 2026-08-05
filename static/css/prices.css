@@ -4,6 +4,13 @@
     flex-direction: column;
     overflow: hidden;
     height: 100%;
+    /* #card-drawer is `position: absolute; top: 0; height: 100%` (see
+       drawer.css) and needs a positioned ancestor to size against — without
+       one it falls back to the viewport as its containing block and covers
+       the topbar/navbar too. Every other page with a drawer (.cards-body,
+       .dga-cards-body, etc.) sets this on its own equivalent wrapper for the
+       same reason. */
+    position: relative;
 }
 
 /* ── Guest prompt ── */
@@ -51,18 +58,27 @@
 
 /* While the search panel is being used — typing, or just hovered — grow it
    into the graph panel's row for a bigger results view. Reverts the instant
-   focus/hover leaves, so the graph stays the default larger panel otherwise. */
+   focus/hover leaves, so the graph stays the default larger panel otherwise.
+   The third selector covers the Add to Watchlist modal (#watchlist-add-modal,
+   opened from a search result tile): it's a `position: fixed` overlay
+   covering the whole viewport, so while it's open the pointer is technically
+   hovering the overlay, not .prices-search-panel underneath it — without this,
+   the row would collapse for as long as the modal stays open and then
+   immediately re-expand (an unwanted collapse/re-expand flash) the moment it
+   closes back over a still-hovered search panel. */
 .prices-content:has(.prices-search-panel:hover),
-.prices-content:has(.prices-search-panel:focus-within) {
+.prices-content:has(.prices-search-panel:focus-within),
+.prices-page:has(#watchlist-add-modal:not(.hidden)) .prices-content {
     grid-template-rows: 0.35fr 1.65fr;
 }
 
 /* At that squeezed-down height the graph panel is too cramped to be useful
    — disable it until the search panel isn't in use anymore. The legend menu
    itself never scrolls (see .pricing-legend-menu), so there's no scrollbar
-   timing to worry about here anymore. */
+   timing to worry about here anymore. Same modal-open exception as above. */
 .prices-content:has(.prices-search-panel:hover) .prices-graph-panel,
-.prices-content:has(.prices-search-panel:focus-within) .prices-graph-panel {
+.prices-content:has(.prices-search-panel:focus-within) .prices-graph-panel,
+.prices-page:has(#watchlist-add-modal:not(.hidden)) .prices-content .prices-graph-panel {
     pointer-events: none;
     opacity: 0.4;
 }
@@ -123,13 +139,21 @@
     scrollbar-gutter: stable;
     margin-top: 12px;
     display: grid;
-    /* auto-fit, not auto-fill — auto-fill keeps empty trailing tracks around
-       (so a partial row's tiles stay left-anchored within a track set that's
-       wider than the tiles actually occupy), which throws off centering
-       whenever there aren't enough tiles to fill a row. auto-fit collapses
-       those empty tracks so justify-content: center centers the tiles
-       themselves regardless of count. */
-    grid-template-columns: repeat(auto-fit, 130px);
+    /* auto-fill, not auto-fit — auto-fit collapses any track with no items
+       in ANY row, which sizes the grid's own content box down to only
+       however many tracks are actually in use before justify-content:center
+       centers that. That's fine for a lone full row, but a lone PARTIAL row
+       or one that follows a full row would end up floating in the middle of
+       the container instead of starting from the left. auto-fill always
+       keeps as many tracks as the container can physically fit — a partial
+       row is just items filling the first few of those tracks, left-anchored
+       within them like any normal grid row, while justify-content:center
+       still centers the constant, container-width track set as a whole
+       (visible as a small even margin once the tracks don't divide the
+       container width exactly). Both a lone card and a full row read as
+       "anchored to the same left edge, with the same small margin" — never
+       one card floating alone in the middle. */
+    grid-template-columns: repeat(auto-fill, 130px);
     gap: 12px;
     align-content: start;
     justify-content: center;
@@ -429,17 +453,23 @@
     /* Reserves the scrollbar's gutter whether or not it's actually needed,
        so a scrollbar appearing/disappearing as this panel's row resizes
        never changes the available width — which would otherwise reflow
-       the auto-fit columns and make the tiles visibly rescale/rewrap
-       mid-resize instead of just revealing more already-laid-out rows. */
+       the grid columns and make the tiles visibly rescale/rewrap mid-resize
+       instead of just revealing more already-laid-out rows. */
     scrollbar-gutter: stable;
     margin-top: 12px;
     display: grid;
-    /* auto-fit, not auto-fill — same reasoning as the watchlist grid: fill
-       keeps empty trailing tracks around whenever there aren't enough tiles
-       to complete a row, which throws off centering. fit collapses those
-       empty tracks so justify-content: center centers the tiles themselves
-       regardless of count. */
-    grid-template-columns: repeat(auto-fit, 130px);
+    /* auto-fill, not auto-fit — same reasoning as the watchlist grid: fit
+       collapses any track with no items in ANY row, shrinking the grid's own
+       content box to only however many tracks are in use before
+       justify-content:center centers that — fine for a full row, but a
+       partial or lone row would float in the middle instead of starting
+       from the left. auto-fill always keeps as many tracks as the container
+       can fit, so a partial row is just items left-anchored within the
+       first few of that constant track set, while justify-content:center
+       still centers the set as a whole (a small even margin when the
+       container width doesn't divide evenly) — full or partial, first row
+       or last, everything anchors to the same left edge. */
+    grid-template-columns: repeat(auto-fill, 130px);
     gap: 12px;
     align-content: start;
     justify-content: center;
@@ -479,6 +509,34 @@
     border-radius: 8px;
 }
 
+/* Wraps .edition-tile-wrap so the selected-ring below has somewhere to paint
+   that isn't clipped by that element's own overflow:hidden — same reasoning
+   as .prices-watch-tile-media above. */
+.prices-search-tile-media {
+    border-radius: 8px;
+    transition: transform 0.2s;
+}
+
+/* Same ring treatment as .prices-watch-tile.selected — shows which search
+   result (if any) is the one currently driving the graph (see
+   highlightSelectedPriceCard in prices.js). */
+.prices-search-results .card-tile.selected .prices-search-tile-media {
+    box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* Same hover treatment as .prices-watch-tile-media in the watchlist grid,
+   for the same reason: the shared card-tile hover zoom (cards.css) scales
+   .edition-tile-wrap directly, which would leave the ring above fixed-size
+   while the image zooms past it. Moving the zoom to this wrapper instead
+   keeps the ring scaling right along with the image. */
+.prices-search-results .card-tile--authed:hover .prices-search-tile-media {
+    transform: scale(1.03);
+}
+
+.prices-search-results .card-tile--authed:hover .edition-tile-wrap {
+    transform: none;
+}
+
 /* Distinguishes same-card tiles now that search returns every printing
    instead of one randomly chosen edition. */
 .prices-tile-caption {
@@ -490,4 +548,46 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* "+" hover affordance (attachPriceSearchAddOverlay in prices.js). The dim
+   behind it is the shared .card-tile-dim layer (tiles.css) — this just
+   centers the button on top of it, over the image only (same footprint as
+   .edition-tile-wrap), not the caption/price badge below. Sized and shaped
+   like the inventory quantity "+" (.inv-tile-qty-add in inventory.css), just
+   white instead of green since this isn't a quantity action. */
+.prices-search-add-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    padding: 0;
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s, filter 0.15s;
+}
+
+.card-tile--authed:hover .prices-search-add-btn {
+    opacity: 1;
+}
+
+.prices-search-add-btn:hover {
+    background: rgba(255, 255, 255, 0.55);
+    border-color: rgba(255, 255, 255, 0.85);
+    filter: brightness(1.15);
 }
