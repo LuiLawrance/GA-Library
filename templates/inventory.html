@@ -87,30 +87,35 @@
                     </button>
                 </div>
             </div>
-            <div id="inv-card-drawer" class="card-drawer hidden">
-                <div class="drawer-inner">
-                    <div id="inv-drawer-content"></div>
-                </div>
-            </div>
-            <div id="inv-drawer-sidebar" class="drawer-sidebar hidden">
-                <button class="drawer-sidebar-close" onclick="closeInvDrawer()">&#x2715;</button>
-                <div class="drawer-sidebar-divider"></div>
-                <button class="drawer-sidebar-btn active" data-tab="info"
-                        onclick="switchDrawerTab('info', 'inv-card-drawer')" title="Info">ℹ️
-                </button>
-                <button class="drawer-sidebar-btn" data-tab="thema"
-                        onclick="switchDrawerTab('thema', 'inv-card-drawer')" title="Thema">🏷️
-                </button>
-                <button class="drawer-sidebar-btn" data-tab="pricing"
-                        onclick="switchDrawerTab('pricing', 'inv-card-drawer')" title="Pricing">💵
-                </button>
-            </div>
             <div class="inv-card-grid-wrap">
                 <div class="inv-card-grid" id="inv-card-grid"></div>
             </div>
         </div>
     </div>
 
+    <!-- ── Card drawer ──
+         A direct child of .inv-page (not nested in .inv-cards-body, and not
+         one of the flat top-level modals below — those sit outside
+         .inv-page entirely) so it sizes against the full page height,
+         matching Admin/Prices — see .inv-page in inventory.css. -->
+    <div id="inv-card-drawer" class="card-drawer hidden">
+        <div class="drawer-inner">
+            <div id="inv-drawer-content"></div>
+        </div>
+    </div>
+    <div id="inv-drawer-sidebar" class="drawer-sidebar hidden">
+        <button class="drawer-sidebar-close" onclick="closeInvDrawer()">&#x2715;</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn active" data-tab="info"
+                onclick="switchDrawerTab('info', 'inv-card-drawer')" title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="thema"
+                onclick="switchDrawerTab('thema', 'inv-card-drawer')" title="Thema">🏷️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="pricing"
+                onclick="switchDrawerTab('pricing', 'inv-card-drawer')" title="Pricing">💵
+        </button>
+    </div>
 </div>
 
 <!-- ── Bin context menu ── -->
@@ -408,4 +413,3 @@
             <button class="inv-modal-submit" id="export-copy-btn" onclick="copyExport()">Copy to Clipboard</button>
         </div>
     </div>
-</div>

@@ -5,6 +5,13 @@
     flex-direction: column;
     overflow: hidden;
     height: 100%;
+    /* #inv-card-drawer is now a direct child of this (see inventory.html),
+       not of .inv-cards-body, so it needs this to size against the full
+       page height — matching .admin-page/.prices-page, so all pages'
+       drawers share the same height instead of Inventory's being scoped to
+       just .inv-cards-body (the area below the bin's own header row) and
+       coming out shorter. */
+    position: relative;
 }
 
 .inv-label {

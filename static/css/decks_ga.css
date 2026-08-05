@@ -5,6 +5,12 @@
     flex-direction: column;
     overflow: hidden;
     height: 100%;
+    /* #card-drawer is now a direct child of this (see decks_ga.html), not of
+       .dga-cards-body, so it needs this to size against the full page height
+       — matching .admin-page/.prices-page, so all pages' drawers share the
+       same height instead of Decks' being scoped to just .dga-cards-body
+       (the area below the deck's own header row) and coming out shorter. */
+    position: relative;
 }
 
 /* ═══════════════════════════════════════

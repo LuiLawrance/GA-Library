@@ -119,25 +119,6 @@
                     </button>
                 </div>
             </div>
-            <!-- ── Card drawer ── -->
-            <div class="card-drawer hidden" id="card-drawer">
-                <div class="drawer-inner">
-                    <div id="drawer-content"></div>
-                </div>
-            </div>
-            <div class="drawer-sidebar hidden" id="drawer-sidebar">
-                <button class="drawer-sidebar-close" onclick="closeCardDrawer()">✕</button>
-                <div class="drawer-sidebar-divider"></div>
-                <button class="drawer-sidebar-btn active" data-tab="info"
-                        onclick="switchDrawerTab('info', 'card-drawer')" title="Info">ℹ️
-                </button>
-                <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
-                        title="Thema">🏷️
-                </button>
-                <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
-                        title="Pricing">💵
-                </button>
-            </div>
             <div class="dga-card-grid-wrap">
                 <div class="dga-card-grid" id="dga-card-grid"></div>
             </div>
@@ -370,6 +351,29 @@
                 <button class="inv-modal-submit" onclick="submitAddSectionModal()">Add Section</button>
             </div>
         </div>
+    </div>
+
+    <!-- ── Card drawer ──
+         A direct child of .dga-page (not nested in .dga-cards-body) so it
+         sizes against the full page height, matching Admin/Prices — see
+         .dga-page in decks_ga.css. -->
+    <div class="card-drawer hidden" id="card-drawer">
+        <div class="drawer-inner">
+            <div id="drawer-content"></div>
+        </div>
+    </div>
+    <div class="drawer-sidebar hidden" id="drawer-sidebar">
+        <button class="drawer-sidebar-close" onclick="closeCardDrawer()">✕</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn active" data-tab="info"
+                onclick="switchDrawerTab('info', 'card-drawer')" title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                title="Thema">🏷️
+        </button>
+        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+                title="Pricing">💵
+        </button>
     </div>
 
 </div>
