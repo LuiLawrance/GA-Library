@@ -50,27 +50,35 @@ function measureRestingGraphSize(canvasEl) {
 }
 
 async function initPrices() {
-    const guest = document.getElementById('prices-guest');
     const content = document.getElementById('prices-content');
-    if (!guest || !content) return;
-
-    if (!currentUser) {
-        guest.classList.remove('hidden');
-        content.classList.add('hidden');
-        return;
-    }
-
-    guest.classList.add('hidden');
-    content.classList.remove('hidden');
+    if (!content) return;
 
     // The page's DOM is rebuilt fresh every time this route loads, but this
-    // module-level state isn't — without resetting it here, a row from a
-    // previous visit would still show as selected (and the graph panel would
-    // stay on its empty placeholder instead of re-triggering the auto-select)
-    // even though nothing on the new page actually points to that card.
+    // module-level state isn't — without resetting it here, a card selected
+    // on a previous visit would still show as selected (ring on its tile)
+    // even though nothing on the new page actually points to it anymore.
     priceGraphCard = null;
 
-    await loadWatchlist();
+    // Only the watchlist itself needs an account — Card Search and the price
+    // graph both hit endpoints that don't require one, so guests get the
+    // full page except the watchlist grid, which shows a login prompt in
+    // its place instead of the whole page being replaced like it used to be.
+    if (currentUser) {
+        await loadWatchlist();
+    } else {
+        renderWatchlistGuestPrompt();
+    }
+}
+
+function renderWatchlistGuestPrompt() {
+    const table = document.getElementById('prices-table');
+    if (!table) return;
+    table.innerHTML = `
+        <div class="prices-empty">
+            <span class="inv-empty-icon">📈</span>
+            <p>Log in to build a watchlist and track card prices.</p>
+            <a href="/login" data-link class="btn-login">Log In</a>
+        </div>`;
 }
 
 async function loadWatchlist() {
@@ -169,12 +177,6 @@ function renderWatchlist() {
     });
 
     highlightSelectedPriceCard();
-
-    // Default to the first watched card so the graph panel isn't empty on load.
-    if (watchlistData.length && !priceGraphCard) {
-        const first = watchlistData[0];
-        showPriceGraph(first.card_id, first.edition_id, first.foil_id, first.name);
-    }
 }
 
 // ═══════════════════════════════════════
@@ -689,7 +691,12 @@ function buildPriceSearchTile(card, index, total = 1) {
     const rarityClass = `rarity-${rarity.toLowerCase()}`;
 
     const tile = document.createElement('div');
-    tile.className = 'card-tile card-tile--authed';
+    // Card Search works for guests too (only the watchlist itself needs an
+    // account) — matches buildCardTile() on the regular Cards page, which
+    // makes the same currentUser-based split for the same reason: the
+    // --authed hover treatment (dim + fading badges, see tiles.css) only
+    // makes sense when there's an add-to-watchlist button underneath it.
+    tile.className = currentUser ? 'card-tile card-tile--authed' : 'card-tile card-tile--guest';
     tile.dataset.cardId = card.card_id;
     tile.dataset.editionId = card.edition_id;
     const maxDelay = 400;
