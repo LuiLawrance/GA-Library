@@ -443,6 +443,7 @@ async def api_card_detail(card_id: str):
     thema_file = new_json(JSON_THEMA)
     listings_file = new_json(JSON_LISTINGS)
     sales_file = new_json(JSON_SALES)
+    slug_file = new_json(JSON_SLUGS)
 
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
@@ -456,10 +457,24 @@ async def api_card_detail(card_id: str):
     with sales_file.open("r", encoding="utf-8") as f:
         sales_data = json.load(f)
 
+    with slug_file.open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+
     card_info = info_data.get(card_id)
 
     if not card_info:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    # INFO.json entries don't carry a name — SLUGS.json is keyed by slug, not
+    # card_id, so this is a scan rather than a direct lookup. Fine here since
+    # it's one detail-page fetch, not a hot path like search. Needed so
+    # callers that only have a card_id (e.g. restoring a selection from a
+    # bookmarked ?card_id= URL, see the Prices page) can still show a name
+    # without a separate search round-trip.
+    card_info["name"] = next(
+        (data["name"] for data in slug_data.values() if data.get("card_id") == card_id),
+        None
+    )
 
     card_listings = listings_data.get(card_id, {})
     card_sales = sales_data.get(card_id, {})

@@ -990,7 +990,6 @@ async function openCardDrawer(cardId, editionId, cardName) {
         drawer.dataset.selectedEdition = editionId;
 
         const inner = document.createElement('div');
-        inner.className = 'drawer-content-animate';
         inner.innerHTML = `
             <div class="drawer-top">
                 <img class="drawer-card-image" src="/images/${editionId}.jpg" alt="${cardId}">
@@ -1072,18 +1071,47 @@ async function openCardDrawer(cardId, editionId, cardName) {
         if (drawerIsOpen) {
             const existing = drawerContent.firstElementChild;
             if (existing) {
-                existing.style.transition = 'opacity 0.15s ease';
+                // Switching cards while the drawer stays open reuses the
+                // app's own menu-to-menu transition (.content.fade-out/
+                // .fade-in in main.css — same opacity+translateY(8px) motion
+                // and timing) instead of the slide-in reveal below, which is
+                // meant to read as "the drawer arriving" on a fresh open and
+                // is too much motion for just swapping the card underneath it.
+                //
+                // If this is the first switch after a fresh open, `existing`
+                // still carries drawer-content-animate from its own opening
+                // animation. That animation's fill-mode:forwards keeps
+                // holding opacity:1/transform:none with higher cascade
+                // priority than the inline styles below for as long as the
+                // class is attached — even though the animation itself
+                // finished playing long ago — so the fade-out below would
+                // silently no-op unless the class comes off first. Removing
+                // the class and setting the transition/end-values in the same
+                // tick can then get coalesced into one style update with no
+                // separate "still opacity:1" frame in between — so the
+                // transition never has a from-state to animate from and just
+                // snaps straight to the end state. Reading offsetHeight forces
+                // the browser to commit the class removal as its own frame
+                // first, so the opacity/transform change right after is a
+                // real, detectable change the transition can animate.
+                existing.classList.remove('drawer-content-animate');
+                void existing.offsetHeight;
+                existing.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
                 existing.style.opacity = '0';
+                existing.style.transform = 'translateY(8px)';
 
                 setTimeout(() => {
                     doInsert();
                     inner.style.opacity = '0';
-                    inner.style.transition = 'opacity 0.2s ease';
+                    inner.style.transform = 'translateY(8px)';
+                    inner.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
                     requestAnimationFrame(() => requestAnimationFrame(() => {
                         inner.style.opacity = '1';
+                        inner.style.transform = 'translateY(0)';
                         setTimeout(() => {
                             inner.style.transition = '';
                             inner.style.opacity = '';
+                            inner.style.transform = '';
                         }, 220);
                     }));
                 }, 150);
@@ -1091,6 +1119,10 @@ async function openCardDrawer(cardId, editionId, cardName) {
                 doInsert();
             }
         } else {
+            // Fresh open — the fuller slide-in reveal (see .drawer-content-animate
+            // / @keyframes drawerContentReveal in drawer.css) is fine here since
+            // there's no previous card's content to visually collide with.
+            inner.className = 'drawer-content-animate';
             doInsert();
         }
 

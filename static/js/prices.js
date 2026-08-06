@@ -68,6 +68,18 @@ async function initPrices() {
     } else {
         renderWatchlistGuestPrompt();
     }
+
+    // Restore a selected card from the URL (?card_id=&edition_id=&foil_id=)
+    // — e.g. a shared or bookmarked link, or just the page being refreshed.
+    // Works for guests too, same as a fresh selection. updateUrl:false since
+    // the URL already has this selection; no need to replace it with itself.
+    const urlParams = new URLSearchParams(window.location.search);
+    const cardId = urlParams.get('card_id');
+    const editionId = urlParams.get('edition_id');
+    const foilId = urlParams.get('foil_id');
+    if (cardId && editionId && foilId) {
+        showPriceGraph(cardId, editionId, foilId, null, false);
+    }
 }
 
 function renderWatchlistGuestPrompt() {
@@ -207,9 +219,23 @@ function highlightSelectedPriceCard() {
     });
 }
 
-async function showPriceGraph(cardId, editionId, foilId, cardName) {
+// updateUrl syncs the selection into the URL (?card_id=&edition_id=&foil_id=)
+// so it survives a refresh and can be shared/bookmarked — mirrors the same
+// ?bin=/?deck= pattern already used on Inventory/Decks. replaceState rather
+// than pushState: unlike opening a bin or deck (one deliberate navigation),
+// selecting a card here happens casually and often in quick succession, and
+// pushState per click would flood browser history with one entry per card
+// glanced at. False for callers where the selection isn't really "the
+// thing being looked at" yet — e.g. the watchlist modal's foil-picker
+// preview, which shows a chart for a card that hasn't been added yet.
+async function showPriceGraph(cardId, editionId, foilId, cardName, updateUrl = true) {
     priceGraphCard = {cardId, editionId, foilId};
     highlightSelectedPriceCard();
+
+    if (updateUrl) {
+        const params = new URLSearchParams({card_id: cardId, edition_id: editionId, foil_id: foilId});
+        window.history.replaceState({}, '', `/prices?${params}`);
+    }
 
     const header = document.getElementById('price-graph-header');
     const body = document.getElementById('price-graph-body');
@@ -231,6 +257,10 @@ async function showPriceGraph(cardId, editionId, foilId, cardName) {
         const edition = data.card?.editions?.[editionId];
         const foilInfo = edition?.foils?.[foilId];
         const pricing = edition?.pricing?.[foilId] || {sales: [], listings: []};
+        // Callers restoring a selection from the URL (see initPrices) only
+        // have the raw ids, not a display name — fall back to the name the
+        // card detail endpoint now resolves server-side.
+        cardName = cardName || data.card?.name || '';
 
         if (header) {
             const foilLabel = foilInfo?.kind ? toFoilLabel(foilInfo.kind) : 'Standard';
@@ -533,9 +563,11 @@ function selectWatchlistFoilOption(opt, editionId, foilId) {
     document.getElementById('watchlist-modal-submit').disabled = false;
 
     // Preview the chart behind the modal so the user can see the price
-    // history before deciding whether to add it to their watchlist.
+    // history before deciding whether to add it to their watchlist. Not a
+    // real selection yet (they haven't committed to adding it), so this
+    // shouldn't overwrite the URL's current selection.
     if (watchlistCardId && watchlistCardName) {
-        showPriceGraph(watchlistCardId, editionId, foilId, watchlistCardName);
+        showPriceGraph(watchlistCardId, editionId, foilId, watchlistCardName, false);
     }
 }
 
