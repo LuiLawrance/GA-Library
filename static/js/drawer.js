@@ -1,6 +1,47 @@
 let drawerIsOpen = false;
-let drawerCardData = null;
 let drawerActiveTab = 'info';
+
+const DRAWER_RARITY_MAP = {
+    1: "C", 2: "U", 3: "R", 4: "SR",
+    5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
+};
+
+// Every card-drawer instance (the main one on Cards/Prices/Decks/Admin, and the
+// inventory bin page's own copy) shares this exact same open/close/edition-select
+// behavior. This registry is what lets openDrawer/closeDrawer/selectDrawerEditionFor
+// below be written ONCE instead of once per page — see switchDrawerTab, which
+// already followed this drawerId-parameterized shape before the rest did, and
+// promptly went stale in the inventory page's independent copy as a result.
+const DRAWER_CONFIG = {
+    'card-drawer': {
+        contentId: 'drawer-content',
+        sidebarId: 'drawer-sidebar',
+        tilePrefix: 'edition-tile-',
+        gridWrapSelector: '.card-grid-wrap',
+        adminAware: true,
+        getSelectedCardId: () => selectedCardId,
+        setSelectedCardId: v => { selectedCardId = v; },
+        getIsOpen: () => drawerIsOpen,
+        setIsOpen: v => { drawerIsOpen = v; },
+        getActiveTab: () => drawerActiveTab,
+        setActiveTab: v => { drawerActiveTab = v; },
+        onOpenError: () => console.error('Failed to load card details'),
+    },
+    'inv-card-drawer': {
+        contentId: 'inv-drawer-content',
+        sidebarId: 'inv-drawer-sidebar',
+        tilePrefix: 'edition-tile-inv-',
+        gridWrapSelector: '.inv-card-grid-wrap',
+        adminAware: false,
+        getSelectedCardId: () => selectedInvCardId,
+        setSelectedCardId: v => { selectedInvCardId = v; },
+        getIsOpen: () => invDrawerIsOpen,
+        setIsOpen: v => { invDrawerIsOpen = v; },
+        getActiveTab: () => invDrawerActiveTab,
+        setActiveTab: v => { invDrawerActiveTab = v; },
+        onOpenError: () => console.error('Failed to load card details for inv drawer'),
+    },
+};
 
 // Build the "Set Name (PREFIX) — #NUM" line with the set portion hyperlinked
 // to a set search on the Cards page.
@@ -471,6 +512,21 @@ function buildPricingSeriesMarks(series, xAt, yAt) {
     return {linePath, dotsHTML: dotsHTML + avgDotsHTML, last: vertexPoints[vertexPoints.length - 1], color, key};
 }
 
+// One labeled group of toggles in the Prices page's legend menu (see
+// buildPricingComboChart) — skips entirely when this type has no series, so
+// a card with only sales (or only listings) doesn't show an empty header.
+function buildLegendMenuGroup(headerLabel, groupSeries) {
+    if (!groupSeries.length) return '';
+
+    return `
+        <div class="pricing-legend-menu-header">${escapeHtml(headerLabel)}</div>
+        ${groupSeries.map(s => `
+        <div class="pricing-legend-toggle" data-series-key="${escapeHtml(s.key)}" onclick="togglePricingSeries(this)" role="checkbox" aria-checked="true">
+            <span class="pricing-legend-swatch" style="--swatch-color:${s.color}"></span>
+            <span class="pricing-legend-toggle-label">${escapeHtml(s.condition)}</span>
+        </div>`).join('')}`;
+}
+
 function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_POINTS, widthPx = null, heightPx = null) {
     // Split into one series per (type, condition) pair — "Near Mint Sales" and
     // "Lightly Played Sales" never share a line, same for listings — so each
@@ -510,19 +566,22 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
                 </span>`).join('')}
         </div>`;
 
+    // Grouped under a "Sales"/"Listings" header instead of repeating that
+    // word on every toggle (see buildLegendMenuGroup) — condition alone
+    // (e.g. "Near Mint") is enough once the group makes the type clear.
+    const salesGroupSeries = series.filter(s => s.type === 'sales');
+    const listingsGroupSeries = series.filter(s => s.type === 'listings');
+    // Each group renders into its own wrapper regardless of whether it has
+    // content — an empty wrapper just collapses to nothing in the single-
+    // type case, while the has-both class (only when both are non-empty)
+    // splits the menu into equal halves via CSS so Listings' wrapper always
+    // starts at the container's midpoint (see .pricing-legend-menu.has-both).
+    const hasBothGroups = salesGroupSeries.length > 0 && listingsGroupSeries.length > 0;
+
     const legendMenuHTML = `
-        <div class="pricing-legend-menu">
-            ${series.map((s, i) => {
-                // Series are built sales-first then listings (see above), so
-                // a type change only ever happens once — right at that
-                // boundary — and only when both actually appear.
-                const separator = i > 0 && series[i - 1].type !== s.type ? '<div class="pricing-legend-separator"></div>' : '';
-                return `${separator}
-                <div class="pricing-legend-toggle" data-series-key="${escapeHtml(s.key)}" onclick="togglePricingSeries(this)">
-                    <span class="pricing-legend-swatch" style="background:${s.color}"></span>
-                    <span class="pricing-legend-toggle-label">${escapeHtml(s.label)}</span>
-                </div>`;
-            }).join('')}
+        <div class="pricing-legend-menu${hasBothGroups ? ' has-both' : ''}">
+            <div class="pricing-legend-menu-group">${buildLegendMenuGroup('Sales', salesGroupSeries)}</div>
+            <div class="pricing-legend-menu-group">${buildLegendMenuGroup('Listings', listingsGroupSeries)}</div>
         </div>`;
 
     const all = series.flatMap(s => s.entries);
@@ -745,6 +804,7 @@ function togglePricingSeries(toggleEl) {
     const key = toggleEl.dataset.seriesKey;
     toggleEl.classList.toggle('off');
     const isOff = toggleEl.classList.contains('off');
+    toggleEl.setAttribute('aria-checked', String(!isOff));
     const canvas = toggleEl.closest('.pricing-chart-row')?.querySelector('.pricing-chart-canvas');
     if (!canvas || !key) return;
     canvas.querySelectorAll(`[data-series-key="${key}"]`).forEach(el => {
@@ -814,23 +874,60 @@ function buildTabPricingPanel(edition) {
     return sections.join('');
 }
 
+// The info/thema/pricing panels above the editions grid can differ in height,
+// so anything that changes which one is showing (switching tabs) or what's in
+// one of them (switching editions, when a data-driven tab is active) shifts
+// the editions grid below into a new position the instant it happens. FLIP
+// (First/Last/Invert/Play) that shift into a slide instead of letting it snap:
+// captureEditionsGridTop reads where the grid starts, playEditionsGridShift
+// (called once the height-changing DOM update is done) reads where it landed,
+// undoes the jump with an untransitioned transform back to the old spot, then
+// transitions that back to 0 so it visibly moves from A to B.
+function captureEditionsGridTop(drawer) {
+    const editionsSection = drawer?.querySelector('.drawer-editions-section');
+    return { editionsSection, beforeTop: editionsSection?.getBoundingClientRect().top };
+}
+
+function playEditionsGridShift({ editionsSection, beforeTop }) {
+    if (!editionsSection || beforeTop === undefined) return;
+
+    const delta = beforeTop - editionsSection.getBoundingClientRect().top;
+    if (!delta) return;
+
+    // getBoundingClientRect() reports positions already scaled by the
+    // page-wide zoom (main.css applies `zoom: 0.9` under 2100px), but a
+    // transform value is read in pre-zoom CSS pixels and gets scaled by zoom
+    // again on top of that — so the raw measured delta has to be un-scaled
+    // first, or this lands short of canceling the jump.
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    editionsSection.style.transition = 'none';
+    editionsSection.style.transform = `translateY(${delta / zoom}px)`;
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            editionsSection.style.transition = 'transform 0.2s ease';
+            editionsSection.style.transform = 'translateY(0)';
+        });
+    });
+
+    setTimeout(() => {
+        editionsSection.style.transition = '';
+        editionsSection.style.transform = '';
+    }, 220);
+}
+
 function switchDrawerTab(tab, drawerId = 'card-drawer') {
-    const isCardDrawer = drawerId === 'card-drawer';
-    const previousTab = isCardDrawer ? drawerActiveTab : invDrawerActiveTab;
+    const cfg = DRAWER_CONFIG[drawerId];
+    const previousTab = cfg.getActiveTab();
 
     if (previousTab === tab) return;
 
-    if (isCardDrawer) {
-        drawerActiveTab = tab;
-    } else {
-        invDrawerActiveTab = tab;
-    }
+    cfg.setActiveTab(tab);
     const drawer = document.getElementById(drawerId);
     if (!drawer) return;
 
     // Update the external floating sidebar
-    const sidebarId = isCardDrawer ? 'drawer-sidebar' : 'inv-drawer-sidebar';
-    const sidebar = document.getElementById(sidebarId);
+    const sidebar = document.getElementById(cfg.sidebarId);
     if (sidebar) {
         sidebar.querySelectorAll('.drawer-sidebar-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -867,6 +964,8 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     outgoing.style.transform = 'translateY(-6px)';
 
     setTimeout(() => {
+        const flip = captureEditionsGridTop(drawer);
+
         outgoing.classList.add('hidden');
         outgoing.style.transition = '';
         outgoing.style.opacity = '';
@@ -877,6 +976,8 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
         incoming.style.opacity = '0';
         incoming.style.transform = 'translateY(6px)';
         incoming.style.transition = 'opacity 0.18s ease, transform 0.18s ease';
+
+        playEditionsGridShift(flip);
 
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
@@ -893,21 +994,24 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     }, 150);
 }
 
-async function openCardDrawer(cardId, editionId, cardName) {
-    const drawer = document.getElementById('card-drawer');
+// Shared implementation behind openCardDrawer/openInvDrawer — see DRAWER_CONFIG above.
+async function openDrawer(drawerId, cardId, editionId, cardName) {
+    const cfg = DRAWER_CONFIG[drawerId];
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
 
-    if (selectedCardId === cardId) {
-        const currentTile = document.querySelector('.drawer-edition-tile img.edition-selected');
-        if (currentTile && currentTile.id === `edition-tile-${editionId}`) {
-            closeCardDrawer();
+    if (cfg.getSelectedCardId() === cardId) {
+        const currentTile = drawer.querySelector('.drawer-edition-tile img.edition-selected');
+        if (currentTile && currentTile.id === `${cfg.tilePrefix}${editionId}`) {
+            closeDrawer(drawerId);
             return;
         }
-        selectDrawerEdition(editionId);
+        selectDrawerEditionFor(drawerId, editionId);
         return;
     }
 
-    selectedCardId = cardId;
-    const isAlreadyOpen = drawerIsOpen;
+    const isAlreadyOpen = cfg.getIsOpen();
+    cfg.setSelectedCardId(cardId);
 
     try {
         const res = await fetch(`/api/cards/${cardId}`);
@@ -915,17 +1019,13 @@ async function openCardDrawer(cardId, editionId, cardName) {
         const card = data.card;
 
         const editions = Object.entries(card.editions).sort((a, b) => {
-            const numA = a[1].collector_number || 'ZZZ';
-            const numB = b[1].collector_number || 'ZZZ';
-
             const parseNum = str => {
-                const match = str.match(/^(\d+)([A-Z]*)$/i);
-                if (match) return [parseInt(match[1]), match[2] || ''];
-                return [Infinity, str];
+                const match = (str || 'ZZZ').match(/^(\d+)([A-Z]*)$/i);
+                return match ? [parseInt(match[1]), match[2] || ''] : [Infinity, str];
             };
 
-            const [nA, sA] = parseNum(numA);
-            const [nB, sB] = parseNum(numB);
+            const [nA, sA] = parseNum(a[1].collector_number);
+            const [nB, sB] = parseNum(b[1].collector_number);
 
             if (nA !== nB) return nA - nB;
             return sA.localeCompare(sB);
@@ -959,13 +1059,8 @@ async function openCardDrawer(cardId, editionId, cardName) {
                 </span>
             `).join('');
 
-        const rarityMap = {
-            1: "C", 2: "U", 3: "R", 4: "SR",
-            5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
-        };
-
         const editionsHTML = editions.map(([eid, einfo], i) => {
-            const rarity = rarityMap[einfo.rarity] || "?";
+            const rarity = DRAWER_RARITY_MAP[einfo.rarity] || "?";
             const rarityClass = `rarity-${rarity.toLowerCase()}`;
 
             return `
@@ -974,8 +1069,8 @@ async function openCardDrawer(cardId, editionId, cardName) {
                     <div class="edition-tile-wrap">
                         <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
                             title="${einfo.set_name} (${einfo.set_prefix})"
-                            onclick="event.stopPropagation(); selectDrawerEdition('${eid}')"
-                            id="edition-tile-${eid}">
+                            onclick="event.stopPropagation(); selectDrawerEditionFor('${drawerId}', '${eid}')"
+                            id="${cfg.tilePrefix}${eid}">
                         <span class="edition-prefix-badge">${einfo.set_prefix}</span>
                         <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>
                     </div>
@@ -984,7 +1079,7 @@ async function openCardDrawer(cardId, editionId, cardName) {
         `
         }).join('');
 
-        const drawerContent = document.getElementById('drawer-content');
+        const drawerContent = document.getElementById(cfg.contentId);
 
         drawer.dataset.editions = JSON.stringify(Object.fromEntries(editions));
         drawer.dataset.selectedEdition = editionId;
@@ -1045,30 +1140,29 @@ async function openCardDrawer(cardId, editionId, cardName) {
             drawerContent.appendChild(inner);
 
             // Mark the selected edition tile immediately
-            const initialTile = document.getElementById(`edition-tile-${editionId}`);
+            const initialTile = document.getElementById(`${cfg.tilePrefix}${editionId}`);
             if (initialTile) initialTile.classList.add('edition-selected');
 
             // Apply active tab to the newly rendered panels
             const cardInfo = drawer.querySelector('.drawer-card-info');
-            if (cardInfo && drawerIsOpen && drawerActiveTab !== 'info') {
+            const activeTab = cfg.getActiveTab();
+            if (cardInfo && cfg.getIsOpen() && activeTab !== 'info') {
                 const infoPanel = cardInfo.querySelector('.drawer-tab-info');
-                const editions = JSON.parse(drawer.dataset.editions || '{}');
-                const edition = editions[drawer.dataset.selectedEdition];
                 infoPanel.classList.add('hidden');
 
-                if (drawerActiveTab === 'thema') {
+                if (activeTab === 'thema') {
                     const themaPanel = cardInfo.querySelector('.drawer-tab-thema');
                     themaPanel.classList.remove('hidden');
-                    themaPanel.innerHTML = buildTabThemaPanel(edition);
-                } else if (drawerActiveTab === 'pricing') {
+                    themaPanel.innerHTML = buildTabThemaPanel(selectedEdition);
+                } else if (activeTab === 'pricing') {
                     const pricingPanel = cardInfo.querySelector('.drawer-tab-pricing');
                     pricingPanel.classList.remove('hidden');
-                    pricingPanel.innerHTML = buildTabPricingPanel(edition);
+                    pricingPanel.innerHTML = buildTabPricingPanel(selectedEdition);
                 }
             }
         };
 
-        if (drawerIsOpen) {
+        if (isAlreadyOpen) {
             const existing = drawerContent.firstElementChild;
             if (existing) {
                 // Switching cards while the drawer stays open reuses the
@@ -1129,38 +1223,42 @@ async function openCardDrawer(cardId, editionId, cardName) {
         drawer.classList.remove('hidden');
         setTimeout(() => {
             drawer.classList.add('open');
-            drawerIsOpen = true;
-            if (!isAlreadyOpen) drawerActiveTab = 'info';
-            const sidebar = document.getElementById('drawer-sidebar');
-            sidebar.classList.remove('hidden');
-            sidebar.querySelectorAll('.drawer-sidebar-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.tab === drawerActiveTab);
+            cfg.setIsOpen(true);
+            if (!isAlreadyOpen) cfg.setActiveTab('info');
+            const sidebar = document.getElementById(cfg.sidebarId);
+            sidebar?.classList.remove('hidden');
+            sidebar?.querySelectorAll('.drawer-sidebar-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === cfg.getActiveTab());
             });
-            document.querySelector('.footer').classList.add('footer-hidden');
+            document.querySelector('.footer')?.classList.add('footer-hidden');
         }, 10);
 
     } catch {
-        console.error('Failed to load card details');
+        cfg.onOpenError();
     }
 }
 
-function closeCardDrawer() {
-    const drawer = document.getElementById('card-drawer');
+// Shared implementation behind closeCardDrawer/closeInvDrawer — see DRAWER_CONFIG above.
+function closeDrawer(drawerId) {
+    const cfg = DRAWER_CONFIG[drawerId];
+    const drawer = document.getElementById(drawerId);
+    if (!drawer) return;
 
     drawer.classList.remove('open');
-    drawerIsOpen = false;
-    drawerActiveTab = 'info';
-    document.getElementById('drawer-sidebar').classList.add('hidden');
-    selectedCardId = null;
+    cfg.setIsOpen(false);
+    cfg.setActiveTab('info');
+    document.getElementById(cfg.sidebarId)?.classList.add('hidden');
+    cfg.setSelectedCardId(null);
 
     // The admin console keeps the footer hidden unconditionally (see initAdmin()
     // in admin.js) — it has no scrollable card grid to key footer visibility off of,
-    // so closing the drawer there must not reveal it.
-    const onAdminPage = !!document.getElementById('admin-page');
-    const gridWrap = document.querySelector('.card-grid-wrap');
+    // so closing the drawer there must not reveal it. Only the main card drawer
+    // is reachable from admin, so this only applies when cfg.adminAware is set.
+    const onAdminPage = cfg.adminAware && !!document.getElementById('admin-page');
+    const gridWrap = document.querySelector(cfg.gridWrapSelector);
 
     if (!onAdminPage && (!gridWrap || gridWrap.scrollTop === 0)) {
-        document.querySelector('.footer').classList.remove('footer-hidden');
+        document.querySelector('.footer')?.classList.remove('footer-hidden');
     }
 
     setTimeout(() => {
@@ -1168,55 +1266,84 @@ function closeCardDrawer() {
     }, 300);
 }
 
-function selectDrawerEdition(editionId) {
-    const mainImage = document.querySelector('.drawer-card-image');
-    const currentTile = document.querySelector('.drawer-edition-tile img.edition-selected');
+function openCardDrawer(cardId, editionId, cardName) {
+    return openDrawer('card-drawer', cardId, editionId, cardName);
+}
 
-    if (currentTile && currentTile.id === `edition-tile-${editionId}`) {
+function closeCardDrawer() {
+    closeDrawer('card-drawer');
+}
+
+// Shared implementation behind selectDrawerEdition/selectInvDrawerEdition — see DRAWER_CONFIG above.
+async function selectDrawerEditionFor(drawerId, editionId) {
+    const cfg = DRAWER_CONFIG[drawerId];
+    const drawer = document.getElementById(drawerId);
+    const mainImage = drawer?.querySelector('.drawer-card-image');
+    if (!mainImage) return;
+
+    const currentTile = drawer.querySelector('.drawer-edition-tile img.edition-selected');
+    if (currentTile && currentTile.id === `${cfg.tilePrefix}${editionId}`) {
         return;
     }
 
-    mainImage.classList.add('switching');
-
-    setTimeout(() => {
-        mainImage.src = `/images/${editionId}.jpg`;
-        mainImage.classList.remove('switching');
-    }, 200);
-
-    const drawer = document.getElementById('card-drawer');
     const editions = JSON.parse(drawer.dataset.editions || '{}');
     const edition = editions[editionId];
+    const cardInfo = drawer.querySelector('.drawer-card-info');
+
+    // Same fade-out/fade-in classes (opacity+translateY(8px), same timing) used
+    // for the app's page-to-page transition (main.css) and the admin pricing
+    // detail switch (admin.js selectAdminPricingDetail), so switching editions
+    // reads consistently with the rest of the app.
+    mainImage.classList.add('fade-out');
+    cardInfo?.classList.add('fade-out');
+    await sleep(150);
+
+    // The new edition's thema/pricing content below can be taller or shorter
+    // than the old one's, which would otherwise snap the editions grid into
+    // its new position while it's invisible (mid fade). Captured now (info is
+    // already faded out, so this is before any of that content changes) and
+    // played once it's done — see captureEditionsGridTop/playEditionsGridShift.
+    const flip = captureEditionsGridTop(drawer);
+
+    mainImage.src = `/images/${editionId}.jpg`;
 
     drawer.dataset.selectedEdition = editionId;
 
     if (edition) {
-        const setEl = document.querySelector('.drawer-set');
+        const setEl = drawer.querySelector('.drawer-set');
         if (setEl) {
             setEl.innerHTML = drawerSetLineHTML(edition);
         }
     }
 
-    const cardInfo = document.querySelector('.drawer-card-info');
-    if (cardInfo) {
-        cardInfo.classList.remove('drawer-info-animate');
-        void cardInfo.offsetWidth;
-        cardInfo.classList.add('drawer-info-animate');
-    }
-
-    document.querySelectorAll('.drawer-edition-tile img').forEach(img => {
-        img.classList.remove('edition-selected');
-    });
-
-    document.getElementById(`edition-tile-${editionId}`).classList.add('edition-selected');
-
     // If a data-driven tab is active, re-render for the new edition
-    if (drawerActiveTab === 'thema') {
-        const cardInfo = drawer.querySelector('.drawer-card-info');
+    const activeTab = cfg.getActiveTab();
+    if (activeTab === 'thema') {
         const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
         if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
-    } else if (drawerActiveTab === 'pricing') {
-        const cardInfo = drawer.querySelector('.drawer-card-info');
+    } else if (activeTab === 'pricing') {
         const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
         if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition);
     }
+
+    playEditionsGridShift(flip);
+
+    mainImage.classList.remove('fade-out');
+    cardInfo?.classList.remove('fade-out');
+    mainImage.classList.add('fade-in');
+    cardInfo?.classList.add('fade-in');
+    setTimeout(() => {
+        mainImage.classList.remove('fade-in');
+        cardInfo?.classList.remove('fade-in');
+    }, 200);
+
+    drawer.querySelectorAll('.drawer-edition-tile img').forEach(img => {
+        img.classList.remove('edition-selected');
+    });
+
+    document.getElementById(`${cfg.tilePrefix}${editionId}`)?.classList.add('edition-selected');
+}
+
+function selectDrawerEdition(editionId) {
+    return selectDrawerEditionFor('card-drawer', editionId);
 }

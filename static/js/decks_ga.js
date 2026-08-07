@@ -542,11 +542,7 @@ function closeDeckDetail() {
     if (typeof dgaDeckEditMode !== 'undefined') dgaDeckEditMode.discard(true);
     // Clean up drawer state so inventory drawer works correctly afterward
     if (typeof drawerIsOpen !== 'undefined' && drawerIsOpen) {
-        const drawer = document.getElementById('card-drawer');
-        if (drawer) drawer.classList.remove('open');
-        drawerIsOpen = false;
-        selectedCardId = null;
-        document.getElementById('drawer-sidebar')?.classList.add('hidden');
+        closeCardDrawer();
     }
     activeDeck = null;
     activeDeckData = null;

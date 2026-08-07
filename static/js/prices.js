@@ -147,11 +147,12 @@ function renderWatchlist() {
                  title="${escapeHtml(row.name)} — ${escapeHtml(meta)}">
                 <div class="prices-watch-tile-media">
                     <div class="edition-tile-wrap">
+                        <div class="card-tile-dim"></div>
                         <img src="/images/${row.edition_id}.jpg" alt="${escapeHtml(row.name)}">
+                        <button class="prices-watch-remove" title="Remove from watchlist">&times;</button>
                     </div>
                 </div>
                 ${priceText ? `<span class="inv-price-badge">${priceText}</span>` : ''}
-                <button class="prices-watch-remove" title="Remove from watchlist">&times;</button>
                 <div class="prices-watch-tile-info">
                     <div class="prices-watch-tile-name">${escapeHtml(row.name)}</div>
                     ${changeHTML}

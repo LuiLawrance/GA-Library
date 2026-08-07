@@ -137,21 +137,6 @@
     }
 }
 
-.drawer-info-animate {
-    animation: drawerInfoReveal 0.4s ease forwards;
-}
-
-@keyframes drawerInfoReveal {
-    from {
-        opacity: 0;
-        transform: translateX(-24px);
-    }
-    to {
-        opacity: 1;
-        transform: translateX(0);
-    }
-}
-
 .drawer-top {
     display: grid;
     grid-template-columns: 320px 1fr;
@@ -169,17 +154,26 @@
 .drawer-card-image {
     width: 100%;
     border-radius: 18px;
-    transition: opacity 0.2s ease;
-}
-
-.drawer-card-image.switching {
-    opacity: 0;
 }
 
 .drawer-card-info {
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+.drawer-card-image.fade-out,
+.drawer-card-info.fade-out {
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.drawer-card-image.fade-in,
+.drawer-card-info.fade-in {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .drawer-name-row {

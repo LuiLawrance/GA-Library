@@ -211,33 +211,45 @@
     transform: none;
 }
 
+/* Same hover affordance as the Card Search "+" overlay (.prices-search-add-btn,
+   attachPriceSearchAddOverlay) — dim layer (.card-tile-dim, added directly in
+   renderWatchlist's template here rather than attached by JS) + a centered button
+   on the image — but showing "×" to remove from the watchlist instead of "+" to
+   add. Red hover accent instead of the add button's brightness bump, since this
+   one is destructive. */
 .prices-watch-remove {
     position: absolute;
-    top: 8px;
-    left: 8px;
-    width: 20px;
-    height: 20px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.95rem;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    padding: 0;
+    margin: 0;
+    font-size: 1.3rem;
+    font-weight: 700;
     line-height: 1;
     color: #fff;
-    background: rgba(0, 0, 0, 0.65);
-    border: none;
-    border-radius: 50%;
     cursor: pointer;
     opacity: 0;
-    z-index: 2;
-    transition: opacity 0.15s, background 0.15s;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
 }
 
-.prices-watch-tile:hover .prices-watch-remove {
+.prices-watch-tile.card-tile--authed:hover .prices-watch-remove {
     opacity: 1;
 }
 
 .prices-watch-remove:hover {
     background: var(--error);
+    border-color: var(--error);
 }
 
 .prices-watch-tile-info {
@@ -358,10 +370,32 @@
     width: 130px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
     overflow-y: hidden;
     padding-left: 12px;
     border-left: 1px solid var(--border);
+}
+
+/* Splits the menu into two equal-height halves so the Listings group's top
+   edge always lands at the same spot — the container's exact midpoint —
+   instead of drifting down depending on how many Sales conditions are above
+   it (see hasBothGroups in buildPricingComboChart). Only applied when both
+   groups actually have something in them; a card with just one type fills
+   the whole area normally instead of leaving the other half blank. */
+.pricing-legend-menu.has-both {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+}
+
+.pricing-legend-menu-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.pricing-legend-menu.has-both .pricing-legend-menu-group:last-child {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
 }
 
 .pricing-legend-toggle {
@@ -383,11 +417,39 @@
     opacity: 0.35;
 }
 
+/* Styled as a checkbox — a colored outline box that gets a smaller filled
+   square inside it when the series is showing, and stays empty when toggled
+   off — so it reads as an on/off control rather than just a color key. The
+   color itself comes in via --swatch-color (set inline per series in
+   buildLegendMenuGroup) since it's per-series data, not something CSS knows. */
 .pricing-legend-swatch {
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
+    position: relative;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
     flex-shrink: 0;
+    border: 1.5px solid var(--swatch-color);
+    transition: border-color 0.15s;
+}
+
+/* The "checked" mark — a smaller square centered inside the outline via a
+   fixed negative margin (half its own width/height), so it's exactly
+   centered regardless of the outer box's border width. */
+.pricing-legend-swatch::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 1px;
+    background: var(--swatch-color);
+    transition: opacity 0.15s;
+}
+
+.pricing-legend-toggle.off .pricing-legend-swatch::after {
+    opacity: 0;
 }
 
 .pricing-legend-toggle-label {
@@ -395,9 +457,16 @@
     word-break: break-word;
 }
 
-.pricing-legend-separator {
-    height: 1px;
-    background: var(--border);
+/* Labels a group of toggles below it "Sales"/"Listings" (see
+   buildLegendMenuGroup in drawer.js) so the individual toggle labels can
+   just be the condition (e.g. "Near Mint") instead of repeating the type. */
+.pricing-legend-menu-header {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    opacity: 0.7;
     flex-shrink: 0;
 }
 

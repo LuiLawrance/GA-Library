@@ -30,11 +30,11 @@ async function navigate(path, pushState = true) {
     if (typeof selectedCardId !== 'undefined') selectedCardId = null;
     if (typeof drawerIsOpen !== 'undefined') drawerIsOpen = false;
 
-    // Same, for the inventory page's separate drawer instance — inv-card-drawer
-    // has no DOM-independent "is open" flag, it's derived from selectedInvCardId
-    // being non-null, so a stale value here caused openInvDrawer() to think a
-    // freshly-loaded, empty drawer was already open and populated.
+    // Same, for the inventory page's drawer instance (inv-card-drawer) — a stale
+    // value here caused openDrawer() to think a freshly-loaded, empty drawer was
+    // already open and populated.
     if (typeof selectedInvCardId !== 'undefined') selectedInvCardId = null;
+    if (typeof invDrawerIsOpen !== 'undefined') invDrawerIsOpen = false;
 
     if (pushState) {
         window.history.pushState({}, '', path);
