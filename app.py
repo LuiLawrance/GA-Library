@@ -859,6 +859,22 @@ def _days_since(iso_date: str | None) -> int | None:
     return (date.today() - date.fromisoformat(iso_date)).days
 
 
+@app.get("/api/admin/users")
+async def api_admin_users(request: Request):
+    require_admin(request)
+
+    with open(JSON_USERS, encoding="utf-8") as f:
+        users_data = json.load(f)
+
+    results = [
+        {"username": username, "auth_type": info.get("auth_type")}
+        for username, info in users_data.items()
+    ]
+    results.sort(key=lambda r: r["username"].lower())
+
+    return JSONResponse({"users": results})
+
+
 @app.get("/api/admin/pricing/product-ids")
 async def api_admin_pricing_product_ids(request: Request):
     require_admin(request)

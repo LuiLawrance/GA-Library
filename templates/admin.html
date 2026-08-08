@@ -14,7 +14,21 @@
     <div class="admin-content">
         <div class="admin-section hidden" id="admin-section-users">
             <span class="admin-section-title">User Management</span>
-            <p class="admin-section-placeholder">Coming soon.</p>
+            <div class="admin-user-controls">
+                <input type="text" class="admin-pid-search" id="admin-user-search"
+                       placeholder="Search users..." oninput="renderAdminUserRows()">
+                <div class="admin-user-summary" id="admin-user-summary"></div>
+            </div>
+
+            <div class="admin-user-list">
+                <div class="admin-user-row admin-user-row-header">
+                    <span class="admin-user-col-name">Username</span>
+                    <span class="admin-user-col-role">Role</span>
+                </div>
+                <div class="admin-user-table-scroll">
+                    <div class="admin-user-table" id="admin-user-table"></div>
+                </div>
+            </div>
         </div>
 
         <div class="admin-section" id="admin-section-pricing">

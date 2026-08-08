@@ -1,4 +1,6 @@
 let adminActiveSection = 'pricing';
+let adminUsersLoaded = false;
+let adminUsersData = [];
 let adminPidLoaded = false;
 let adminPidData = [];
 let adminPidSelected = new Set();
@@ -44,9 +46,59 @@ async function switchAdminSection(section) {
         loadAdminPricingIds();
     }
 
+    if (section === 'users' && !adminUsersLoaded) {
+        loadAdminUsers();
+    }
+
     content?.classList.remove('fade-out');
     content?.classList.add('fade-in');
     setTimeout(() => content?.classList.remove('fade-in'), 200);
+}
+
+async function loadAdminUsers() {
+    const summary = document.getElementById('admin-user-summary');
+    const table = document.getElementById('admin-user-table');
+    if (!summary || !table) return;
+
+    summary.textContent = 'Loading...';
+    table.innerHTML = '';
+
+    try {
+        const res = await fetch('/api/admin/users');
+        if (!res.ok) throw new Error('Failed to load users');
+        const data = await res.json();
+
+        adminUsersData = data.users || [];
+        adminUsersLoaded = true;
+        renderAdminUserRows();
+    } catch (err) {
+        summary.textContent = 'Failed to load users.';
+    }
+}
+
+function renderAdminUserRows() {
+    const summary = document.getElementById('admin-user-summary');
+    const table = document.getElementById('admin-user-table');
+    if (!summary || !table) return;
+
+    const query = (document.getElementById('admin-user-search')?.value || '').trim().toLowerCase();
+
+    const filtered = adminUsersData.filter(u => {
+        if (!query) return true;
+        return u.username.toLowerCase().includes(query);
+    });
+
+    summary.textContent = `${adminUsersData.length} user(s)`
+        + (filtered.length !== adminUsersData.length ? ` — showing ${filtered.length}` : '');
+
+    const rows = filtered.map(u => `
+        <div class="admin-user-row">
+            <span class="admin-user-col-name">${escapeHtml(u.username)}</span>
+            <span class="admin-user-col-role">${escapeHtml(u.auth_type || '—')}</span>
+        </div>
+    `).join('');
+
+    table.innerHTML = rows || '<div class="admin-pid-empty">No users match.</div>';
 }
 
 async function loadAdminPricingIds() {
@@ -1160,6 +1212,8 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
 
 function initAdmin() {
     adminActiveSection = 'pricing';
+    adminUsersLoaded = false;
+    adminUsersData = [];
     adminPidLoaded = false;
     adminPidData = [];
     adminPidSelected = new Set();
