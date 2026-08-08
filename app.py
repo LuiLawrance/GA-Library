@@ -194,7 +194,7 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
 
-    with open(JSON_SALES, encoding="utf-8") as f:
+    with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
     def enrich(cards):
@@ -806,7 +806,7 @@ async def api_find_product_ids_start(request: Request):
 
     if not edition_ids:
         # No specific editions given — default to every edition currently missing one
-        with open(JSON_EDITIONS, encoding="utf-8") as f:
+        with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
             editions_data = json.load(f)
         edition_ids = [eid for eid in editions_data if not get_product_id(eid)]
 
@@ -863,7 +863,7 @@ def _days_since(iso_date: str | None) -> int | None:
 async def api_admin_users(request: Request):
     require_admin(request)
 
-    with open(JSON_USERS, encoding="utf-8") as f:
+    with new_json(JSON_USERS).open(encoding="utf-8") as f:
         users_data = json.load(f)
 
     results = [
@@ -879,13 +879,13 @@ async def api_admin_users(request: Request):
 async def api_admin_pricing_product_ids(request: Request):
     require_admin(request)
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
-    with open(JSON_INFO, encoding="utf-8") as f:
+    with new_json(JSON_INFO).open(encoding="utf-8") as f:
         info_data = json.load(f)
 
-    with open(JSON_SLUGS, encoding="utf-8") as f:
+    with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
         slugs_data = json.load(f)
 
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
@@ -929,7 +929,7 @@ async def api_admin_set_product_id(request: Request):
     if product_id and not product_id.isdigit():
         raise HTTPException(status_code=400, detail="Product ID must be numeric")
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
     if edition_id not in editions_data:
@@ -944,7 +944,7 @@ async def api_admin_set_product_id(request: Request):
 async def api_admin_pricing_history(edition_id: str, request: Request):
     require_admin(request)
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
     if edition_id not in editions_data:
@@ -952,7 +952,7 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
 
     card_id = editions_data[edition_id]["card_id"]
 
-    with open(JSON_INFO, encoding="utf-8") as f:
+    with new_json(JSON_INFO).open(encoding="utf-8") as f:
         info_data = json.load(f)
 
     foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
@@ -995,7 +995,7 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
 async def api_admin_pricing_foils(edition_id: str, request: Request):
     require_admin(request)
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
     if edition_id not in editions_data:
@@ -1003,7 +1003,7 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
 
     card_id = editions_data[edition_id]["card_id"]
 
-    with open(JSON_INFO, encoding="utf-8") as f:
+    with new_json(JSON_INFO).open(encoding="utf-8") as f:
         info_data = json.load(f)
 
     foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
@@ -1026,7 +1026,7 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
 async def api_admin_pricing_add_entry(edition_id: str, request: Request):
     require_admin(request)
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
     if edition_id not in editions_data:
@@ -1106,7 +1106,7 @@ async def api_admin_pricing_delete_entry(edition_id: str, request: Request):
 async def api_admin_pricing_import_sales(edition_id: str, request: Request):
     require_admin(request)
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
     if edition_id not in editions_data:
@@ -1150,7 +1150,7 @@ async def api_sets_search(prefix: str):
     with info_file.open("r", encoding="utf-8") as f:
         info_data = json.load(f)
 
-    with open(JSON_SALES, encoding="utf-8") as f:
+    with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
     cards = []
@@ -1338,19 +1338,19 @@ async def api_watchlist_list(request: Request):
 
     rows = watchlist_list(user)
 
-    with open(JSON_EDITIONS, encoding="utf-8") as f:
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)
 
-    with open(JSON_INFO, encoding="utf-8") as f:
+    with new_json(JSON_INFO).open(encoding="utf-8") as f:
         info_data = json.load(f)
 
-    with open(JSON_SLUGS, encoding="utf-8") as f:
+    with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
         slugs_data = json.load(f)
 
-    with open(JSON_SALES, encoding="utf-8") as f:
+    with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
-    with open(JSON_LISTINGS, encoding="utf-8") as f:
+    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
         listings_data = json.load(f)
 
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
@@ -1488,7 +1488,7 @@ async def api_bin_value(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    with open(JSON_SALES, encoding="utf-8") as f:
+    with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
     total = 0.0
@@ -1529,7 +1529,7 @@ async def api_bin_prices(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    with open(JSON_SALES, encoding="utf-8") as f:
+    with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
     prices: dict = {}
