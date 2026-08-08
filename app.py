@@ -7,7 +7,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, _foil_kind_for_id, add_manual_entry, delete_entry, \
+from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id, add_manual_entry, delete_entry, \
     find_product_ids_by_editions, import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, \
     scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
@@ -852,6 +852,13 @@ async def api_find_product_ids_status(job_id: str, request: Request):
     return JSONResponse(snapshot)
 
 
+def _days_since(iso_date: str | None) -> int | None:
+    if not iso_date:
+        return None
+
+    return (date.today() - date.fromisoformat(iso_date)).days
+
+
 @app.get("/api/admin/pricing/product-ids")
 async def api_admin_pricing_product_ids(request: Request):
     require_admin(request)
@@ -878,10 +885,13 @@ async def api_admin_pricing_product_ids(request: Request):
             "edition_id": edition_id,
             "card_id": card_id,
             "name": name_by_card_id.get(card_id, "Unknown"),
+            "rarity": RARITY_MAP.get(edition_info.get("rarity")),
             "set_prefix": edition_info.get("set_prefix"),
             "set_name": edition_info.get("set_name"),
             "collector_number": collector_map.get(edition_id),
             "product_id": get_product_id(edition_id),
+            "sales_days_since": _days_since(get_last_sales(edition_id)),
+            "listings_days_since": _days_since(get_last_listings(edition_id)),
         })
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))

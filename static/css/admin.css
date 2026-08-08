@@ -278,6 +278,12 @@
 .admin-pid-table-header {
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
+    /* Matches .admin-pid-row-header's own background — the header row is
+       padded narrower than this container to offset the scrollbar (see
+       syncAdminPidHeaderScrollbarOffset() in admin.js), and without this the
+       reserved strip on the right shows the plain page background instead,
+       reading as a visibly separate patch. */
+    background: var(--bg-hover);
 }
 
 .admin-pid-table-scroll {
@@ -356,7 +362,7 @@
 
 .admin-pid-row {
     display: grid;
-    grid-template-columns: 28px 2fr 1fr 0.7fr 1.6fr;
+    grid-template-columns: 28px 2fr 0.6fr 0.8fr 130px 70px 70px;
     align-items: center;
     gap: 16px;
     padding: 10px 16px;
@@ -386,6 +392,35 @@
     background: var(--bg-hover);
 }
 
+/* Each column's own cell class (.admin-pid-col-rarity etc., defined further
+   down for the DATA rows) sets its own font-size/family/color and, being an
+   equal-specificity class selector that comes later in the file, would
+   otherwise win the cascade over .admin-pid-row-header above and make each
+   header label render in its data row's font instead of the header's own —
+   this pins every header cell but Card back to one shared look. */
+.admin-pid-row-header .admin-pid-col-rarity,
+.admin-pid-row-header .admin-pid-col-set,
+.admin-pid-row-header .admin-pid-col-status,
+.admin-pid-row-header .admin-pid-col-sales,
+.admin-pid-row-header .admin-pid-col-listings {
+    font-family: inherit;
+    font-size: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: inherit;
+}
+
+/* "Card" is the one header styled to match its own column's data instead of
+   the shared uppercase header look above — same font/size/case as the card
+   names underneath it. */
+.admin-pid-row-header .admin-pid-col-name {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.85rem;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--text);
+}
+
 .admin-pid-row:not(.admin-pid-row-header):hover {
     background: var(--bg-hover);
 }
@@ -398,15 +433,40 @@
     background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+.admin-pid-col-name,
+.admin-pid-col-rarity,
+.admin-pid-col-set {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .admin-pid-col-name {
     font-size: 0.85rem;
     color: var(--text);
+}
+
+.admin-pid-col-rarity {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
 }
 
 .admin-pid-col-set {
     font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
     color: var(--text-muted);
+}
+
+/* Pulls each of these in from the row's usual 16px gap so the table reads
+   tighter — headers and their column's data share the same grid track, so
+   both move together and stay lined up on the left. */
+.admin-pid-col-rarity,
+.admin-pid-col-set,
+.admin-pid-col-status,
+.admin-pid-col-sales,
+.admin-pid-col-listings {
+    margin-left: -6px;
 }
 
 .admin-pid-input {
@@ -417,7 +477,10 @@
     background: var(--bg-card);
     border: 1px solid var(--error);
     border-radius: var(--radius-sm);
-    padding: 5px 10px;
+    /* Left padding is trimmed well below the other sides — a full 10px would
+       leave the typed digits visibly indented past the "Product ID" header
+       above them, since the header label itself has no such padding. */
+    padding: 5px 10px 5px 4px;
     transition: border-color 0.15s;
 }
 
@@ -493,26 +556,28 @@
     color: var(--text-muted);
 }
 
-.admin-pid-col-refresh {
+.admin-pid-col-sales,
+.admin-pid-col-listings {
+    font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.admin-pid-refresh-idle {
+.admin-pid-updated-idle {
     color: var(--text-muted);
 }
 
-.admin-pid-refresh-running {
+.admin-pid-updated-running {
     color: var(--accent);
 }
 
-.admin-pid-refresh-done {
+.admin-pid-updated-done {
     color: var(--series-sales);
 }
 
-.admin-pid-refresh-error {
+.admin-pid-updated-error {
     color: var(--error);
 }
 
@@ -798,6 +863,13 @@
     margin: 0;
     gap: 4px;
     font: inherit;
+    /* Browsers reset text-transform (and letter-spacing) to normal on
+       <button> by default, so `font: inherit` above — which only covers
+       font-family/size/weight/line-height — isn't enough to match the
+       other header labels' uppercase letter-spaced style; state both
+       explicitly instead of relying on inheritance for them. */
+    text-transform: uppercase;
+    letter-spacing: inherit;
     color: inherit;
     cursor: pointer;
 }
@@ -878,6 +950,14 @@
 
 .admin-pid-add-entry-status {
     font-size: 0.78rem;
+}
+
+.admin-pid-refresh-done {
+    color: var(--series-sales);
+}
+
+.admin-pid-refresh-error {
+    color: var(--error);
 }
 
 .admin-pid-detail-table-scroll {

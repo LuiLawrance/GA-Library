@@ -85,10 +85,12 @@ function renderAdminPricingIds() {
             <span class="admin-pid-col-check">
                 <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
             </span>
-            <span class="admin-pid-col-name">Card</span>
+            <span class="admin-pid-col-name">CARD</span>
+            <span class="admin-pid-col-rarity">Rarity</span>
             <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
             <span class="admin-pid-col-status">Product ID</span>
-            <span class="admin-pid-col-refresh">Refresh Status</span>
+            <span class="admin-pid-col-sales">Sales</span>
+            <span class="admin-pid-col-listings">Listings</span>
         </div>
     `;
 
@@ -137,11 +139,13 @@ function renderAdminPidRows() {
                        onchange="onAdminPidRowCheckToggle(this)">
             </span>
             <span class="admin-pid-col-name">${escapeHtml(e.name)}</span>
+            <span class="admin-pid-col-rarity">${escapeHtml(e.rarity || '—')}</span>
             <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
             <span class="admin-pid-col-status" onclick="event.stopPropagation()">
                 ${adminPidProductIdFieldHtml(e)}
             </span>
-            <span class="admin-pid-col-refresh">${adminPidRefreshStatusMarkup(e.edition_id)}</span>
+            <span class="admin-pid-col-sales">${adminPidLastUpdatedFieldMarkup(e, 'sales')}</span>
+            <span class="admin-pid-col-listings">${adminPidLastUpdatedFieldMarkup(e, 'listings')}</span>
         </div>
     `).join('');
 
@@ -157,6 +161,24 @@ function renderAdminPidRows() {
     }
 
     updateAdminPidRefreshButton();
+    syncAdminPidHeaderScrollbarOffset();
+}
+
+// The header row lives outside .admin-pid-table-scroll, but the data rows
+// live inside it — when there are enough rows for a scrollbar, the browser
+// reserves its width from that container only, so the header's identical
+// grid-template-columns resolves slightly wider than the rows' and every
+// column past the flexible ones (Card/Rarity/Set) drifts right relative to
+// the data underneath it. Measuring and mirroring the actual reserved width
+// as padding on the header keeps both computing against the same available
+// width, whether or not a scrollbar happens to be showing right now.
+function syncAdminPidHeaderScrollbarOffset() {
+    const scrollEl = document.querySelector('.admin-pid-table-scroll');
+    const header = document.getElementById('admin-pid-table-header');
+    if (!scrollEl || !header) return;
+
+    const scrollbarWidth = scrollEl.offsetWidth - scrollEl.clientWidth;
+    header.style.paddingRight = `${scrollbarWidth}px`;
 }
 
 function adminPidProductIdFieldHtml(e) {
@@ -232,19 +254,39 @@ function toggleAdminPidSetFilterOption(set) {
     renderAdminPidRows();
 }
 
-function adminPidRefreshStatusMarkup(editionId) {
-    const status = adminPidRefreshStatus[editionId];
-    if (!status) return '<span class="admin-pid-refresh-idle">—</span>';
+// field is 'sales' or 'listings' — each has its own column now, and its own
+// slice of adminPidRefreshStatus[editionId] (a refresh can target just one
+// of them, so their running/error states are tracked independently).
+function adminPidLastUpdatedFieldMarkup(e, field) {
+    const status = adminPidRefreshStatus[e.edition_id]?.[field];
 
-    if (status.state === 'running') {
-        return '<span class="admin-pid-refresh-running">Running…</span>';
+    if (status?.state === 'running') {
+        return '<span class="admin-pid-updated-running">Running…</span>';
     }
 
-    if (status.state === 'error') {
-        return `<span class="admin-pid-refresh-error" title="${escapeHtml(status.message)}">${escapeHtml(status.message)}</span>`;
+    if (status?.state === 'error') {
+        return `<span class="admin-pid-updated-error" title="${escapeHtml(status.message)}">${escapeHtml(status.message)}</span>`;
     }
 
-    return `<span class="admin-pid-refresh-done">${escapeHtml(status.message)}</span>`;
+    // Shows what a just-finished refresh actually changed (e.g. "+1") instead
+    // of immediately collapsing back to a day count — sticks around until the
+    // admin leaves the pricing screen and comes back, which resets
+    // adminPidRefreshStatus (see initAdmin()) and re-fetches real day counts.
+    if (status?.state === 'done') {
+        return `<span class="admin-pid-updated-done">${escapeHtml(status.message)}</span>`;
+    }
+
+    const days = field === 'sales' ? e.sales_days_since : e.listings_days_since;
+    const title = `${field === 'sales' ? 'Sales' : 'Listings'}: ${adminPidDaysSinceLabel(days, true)}`;
+
+    return `<span class="admin-pid-updated-idle" title="${escapeHtml(title)}">`
+        + `${escapeHtml(adminPidDaysSinceLabel(days))}</span>`;
+}
+
+function adminPidDaysSinceLabel(days, verbose) {
+    if (days == null) return verbose ? 'never' : '—';
+    if (days === 0) return verbose ? 'today' : '0d';
+    return verbose ? `${days} day(s) ago` : `${days}d`;
 }
 
 function onAdminPidRowCheckToggle(checkbox) {
@@ -425,7 +467,10 @@ async function refreshSelectedAdminPricing(target) {
     updateAdminPidRefreshButton();
 
     editionIds.forEach(id => {
-        adminPidRefreshStatus[id] = {state: 'running', message: ''};
+        adminPidRefreshStatus[id] = {
+            sales: target !== 'listings' ? {state: 'running', message: ''} : null,
+            listings: target !== 'sales' ? {state: 'running', message: ''} : null,
+        };
     });
     renderAdminPricingIds();
 
@@ -436,7 +481,12 @@ async function refreshSelectedAdminPricing(target) {
 
     const markRemainingAsError = (seen, message) => {
         editionIds.forEach(id => {
-            if (!seen.has(id)) adminPidRefreshStatus[id] = {state: 'error', message};
+            if (!seen.has(id)) {
+                adminPidRefreshStatus[id] = {
+                    sales: target !== 'listings' ? {state: 'error', message} : null,
+                    listings: target !== 'sales' ? {state: 'error', message} : null,
+                };
+            }
         });
         renderAdminPricingIds();
     };
@@ -469,7 +519,14 @@ async function refreshSelectedAdminPricing(target) {
                 for (const [editionId, result] of Object.entries(job.results || {})) {
                     if (seen.has(editionId)) continue;
                     seen.add(editionId);
-                    adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings, target);
+
+                    const record = adminPidData.find(r => r.edition_id === editionId);
+                    if (record) {
+                        if (result.sales?.ok) record.sales_days_since = 0;
+                        if (result.listings?.ok && !result.listings.gated) record.listings_days_since = 0;
+                    }
+
+                    adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings);
 
                     if (adminPidDetailSelected === editionId) {
                         await loadAdminPricingDetailHistory();
@@ -504,26 +561,18 @@ async function refreshSelectedAdminPricing(target) {
     updateAdminPidRefreshButton();
 }
 
-function summarizeAdminPricingRefresh(sales, listings, target) {
-    const salesOk = !sales || sales.ok;
-    const listingsOk = !listings || listings.ok;
-
-    const salesText = !sales ? null
-        : !sales.ok ? `Sales: ${sales.error}`
-        : `Sales: +${sales.stored ?? 0}`;
-
-    const listingsText = !listings ? null
-        : !listings.ok ? `Listings: ${listings.error}`
-        : listings.gated ? 'Listings: gated'
-        : `Listings: +${listings.stored ?? 0}`;
-
-    const parts = [];
-    if (target !== 'listings' && salesText) parts.push(salesText);
-    if (target !== 'sales' && listingsText) parts.push(listingsText);
-
+// sales/listings are each either null (not targeted by this refresh), an
+// {ok: false, error} failure, or an {ok: true, stored, ...} success — mirrors
+// the shape scrape_sales_and_listings_tcg_by_edition() returns per side.
+function summarizeAdminPricingRefresh(sales, listings) {
     return {
-        state: (salesOk && listingsOk) ? 'done' : 'error',
-        message: parts.join(' · ') || 'No data'
+        sales: !sales ? null
+            : !sales.ok ? {state: 'error', message: sales.error}
+            : {state: 'done', message: `+${sales.stored ?? 0}`},
+        listings: !listings ? null
+            : !listings.ok ? {state: 'error', message: listings.error}
+            : listings.gated ? {state: 'done', message: 'gated'}
+            : {state: 'done', message: `+${listings.stored ?? 0}`},
     };
 }
 
