@@ -260,7 +260,7 @@
             </button>
             <button class="inv-modal-danger" id="settings-delete-btn" onclick="deleteBin()">Delete Bin</button>
         </div>
-        <button class="inv-settings-import-export-btn" onclick="closeBinSettings(); openImportExportModal()">⇅ Import /
+        <button class="inv-settings-import-export-btn" onclick="transitionSettingsToImportExport()">⇅ Import /
             Export
         </button>
     </div>
@@ -377,8 +377,9 @@
 <!-- ── Import / Export modal ── -->
 <div id="inv-import-export-modal" class="inv-modal-overlay hidden" onclick="closeImportExportModal()">
     <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
-        <div class="inv-modal-header">
-            <div>
+        <div class="inv-modal-header inv-add-modal-header">
+            <button class="inv-btn-back-arrow" onclick="transitionImportExportToSettings()">‹</button>
+            <div class="inv-import-export-title-wrap">
                 <div class="inv-modal-title">Import / Export</div>
                 <div class="inv-modal-set" id="import-export-bin-label"></div>
             </div>

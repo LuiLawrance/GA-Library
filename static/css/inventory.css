@@ -887,6 +887,11 @@
     max-width: min(700px, 95vw);
 }
 
+/* ── Cross-modal resize morph (e.g. Settings → Import/Export) ── */
+.inv-modal.morph-resizing {
+    animation: none;
+}
+
 @keyframes modalReveal {
     from {
         opacity: 0;
@@ -1008,6 +1013,7 @@
 
 .inv-search-tile img {
     width: 100%;
+    aspect-ratio: 5 / 7;
     border-radius: 14px;
     display: block;
     transition: transform 0.2s;
@@ -1905,6 +1911,11 @@
 .inv-modal-import-export {
     width: 520px;
     max-width: min(520px, 95vw);
+}
+
+.dga-import-export-title-wrap,
+.inv-import-export-title-wrap {
+    flex: 1;
 }
 
 .inv-import-export-tabs {

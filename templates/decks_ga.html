@@ -208,7 +208,7 @@
                 <button class="inv-modal-danger" onclick="submitDeleteDeck()">Delete Deck</button>
             </div>
             <button class="inv-settings-import-export-btn"
-                    onclick="closeDeckSettingsModal(); dgaOpenImportExportModal()">⇅ Import / Export
+                    onclick="dgaTransitionSettingsToImportExport()">⇅ Import / Export
             </button>
         </div>
     </div>
@@ -289,8 +289,9 @@
     <!-- ── Import / Export modal ── -->
     <div class="inv-modal-overlay hidden" id="dga-import-export-modal" onclick="dgaCloseImportExportModal()">
         <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
-            <div class="inv-modal-header">
-                <div>
+            <div class="inv-modal-header inv-add-modal-header">
+                <button class="inv-btn-back-arrow" onclick="dgaTransitionImportExportToSettings()">‹</button>
+                <div class="dga-import-export-title-wrap">
                     <div class="inv-modal-title">Import / Export</div>
                     <div class="inv-modal-set" id="dga-import-export-deck-label"></div>
                 </div>
