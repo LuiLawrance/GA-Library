@@ -1177,7 +1177,7 @@ function buildInvCardTile(row, index, total = 1) {
     const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
 
     const tile = document.createElement('div');
-    tile.className = 'inv-card-tile';
+    tile.className = 'inv-card-tile tile-hoverable';
     const maxDelay = 600;
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * maxDelay));
     tile.style.animationDelay = `${delay}ms`;
@@ -1191,7 +1191,7 @@ function buildInvCardTile(row, index, total = 1) {
     const lastPrice = invBinPrices[row.card_id]?.[row.edition_id]?.[row.foil_id];
 
     tile.innerHTML = `
-        <div class="edition-tile-wrap">
+        <div class="edition-tile-wrap tile-zoom">
             <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
                 onerror="this.style.opacity='0.1'">
             <div class="card-tile-dim"></div>
@@ -1535,13 +1535,13 @@ async function searchAddCards() {
                 const rarity = rarityMapInv[card.rarity] || '';
                 const rarityClass = rarity ? `rarity-${rarity.toLowerCase()}` : '';
                 const tile = document.createElement('div');
-                tile.className = 'inv-search-tile';
+                tile.className = 'inv-search-tile tile-hoverable';
                 tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
                 tile.innerHTML = `
-                    <div class="edition-tile-wrap">
+                    <div class="edition-tile-wrap tile-zoom">
                         <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
                         <div class="card-tile-dim"></div>
-                        <div class="inv-search-tile-add">+</div>
+                        <div class="inv-search-tile-add tile-action-btn">+</div>
                     </div>`;
                 tile.onclick = () => goToFoilStep(card.card_id, card.edition_id, card.name);
                 tile.addEventListener('animationend', () => tile.classList.add('animated'));

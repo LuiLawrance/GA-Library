@@ -606,19 +606,8 @@
     display: block;
 }
 
-/* Scale the wrap — overflow:hidden on the wrap clips both image and dim together */
-.inv-card-tile .edition-tile-wrap {
-    transition: transform 0.2s;
-}
-
-.inv-card-tile:hover .edition-tile-wrap {
-    transform: scale(1.03);
-}
-
-/* ── Dim layer trigger (element defined in tiles.css) ── */
-.inv-card-tile:hover .card-tile-dim {
-    opacity: 1;
-}
+/* Hover-zoom/dim behavior lives in tiles.css's shared .tile-hoverable/
+   .tile-zoom vocabulary — see buildInvCardTile in inventory.js. */
 
 
 .inv-card-tile-overlay {
@@ -1031,65 +1020,23 @@
     display: block;
 }
 
-/* Clipping lives here, not on .inv-search-tile itself, and the hover zoom
-   below scales this same element — so the rounded-corner clip boundary
-   moves with the zoomed image instead of staying pinned at the original
-   size while the image grows underneath it (the "porthole" look a fixed
-   outer clip + inner-only zoom produces). Same fix as .prices-watch-tile-media
-   / .prices-search-tile-media in prices.css and .inv-card-tile's own
-   .edition-tile-wrap below. */
+/* Clipping lives here, not on .inv-search-tile itself — the shared
+   .tile-zoom rule (tiles.css) scales this same element, so the rounded-
+   corner clip boundary moves with the zoomed image instead of staying
+   pinned at the original size while the image grows underneath it (the
+   "porthole" look a fixed outer clip + inner-only zoom produces). Same fix
+   as .prices-watch-tile-media/.prices-search-tile-media in prices.css and
+   .inv-card-tile's own .edition-tile-wrap. This isn't `.inv-card-tile` or
+   `.card-tile--authed`, so it doesn't inherit tiles.css's shared clip rule
+   and needs its own copy. */
 .inv-search-tile .edition-tile-wrap {
     overflow: hidden;
     border-radius: 14px;
-    transition: transform 0.2s;
 }
 
-.inv-search-tile:hover .edition-tile-wrap {
-    transform: scale(1.04);
-}
-
-.inv-search-tile:hover .card-tile-dim {
-    opacity: 1;
-}
-
-/* Centered "+" affordance — same treatment as the Prices page watchlist
-   add button (.prices-search-add-btn/.prices-watch-remove): a small button
-   over the dimmed image (.card-tile-dim, tiles.css) rather than a full-tile
-   color wash. */
-.inv-search-tile-add {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 2;
-    width: 34px;
-    height: 34px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
-    padding: 0;
-    margin: 0;
-    font-size: 1.1rem;
-    font-weight: 700;
-    line-height: 1;
-    color: #fff;
-    opacity: 0;
-    transition: opacity 0.15s, background 0.15s, border-color 0.15s, filter 0.15s;
-}
-
-.inv-search-tile:hover .inv-search-tile-add {
-    opacity: 1;
-}
-
-.inv-search-tile-add:hover {
-    background: rgba(255, 255, 255, 0.55);
-    border-color: rgba(255, 255, 255, 0.85);
-    filter: brightness(1.15);
-}
+/* Hover-zoom/dim/action-button behavior lives in tiles.css's shared
+   .tile-hoverable/.tile-zoom/.tile-action-btn vocabulary — see the
+   search-results tile template in inventory.js and decks_ga.js. */
 
 /* Foil step */
 .inv-add-card-preview {

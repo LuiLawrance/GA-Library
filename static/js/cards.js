@@ -202,7 +202,7 @@ function buildCardTile(card, index, total = 1) {
     const rarityClass = `rarity-${rarity.toLowerCase()}`;
 
     const tile = document.createElement('div');
-    tile.className = currentUser ? 'card-tile card-tile--authed' : 'card-tile card-tile--guest';
+    tile.className = currentUser ? 'card-tile card-tile--authed tile-hoverable' : 'card-tile card-tile--guest tile-hoverable';
 
     // Scale delay so the last tile never arrives later than ~600ms
     const maxDelay = 600;
@@ -210,7 +210,7 @@ function buildCardTile(card, index, total = 1) {
     tile.style.animationDelay = `${delay}ms`;
     tile.dataset.cardId = card.card_id;
     tile.innerHTML = `
-        <div class="edition-tile-wrap">
+        <div class="edition-tile-wrap tile-zoom">
             <img src="/images/${card.edition_id}.jpg" alt="${card.name}"
                 onerror="this.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}

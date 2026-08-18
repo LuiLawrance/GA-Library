@@ -379,12 +379,10 @@
    tiles' .prices-watch-tile-media. */
 .drawer-edition-media {
     border-radius: 8px;
-    transition: transform 0.2s;
 }
 
-.drawer-edition-tile:hover .drawer-edition-media {
-    transform: scale(1.03);
-}
+/* Hover-zoom comes from tiles.css's shared .tile-hoverable/.tile-zoom
+   vocabulary — see the editionsHTML template in drawer.js. */
 
 .drawer-edition-tile:has(img.edition-selected) .drawer-edition-media {
     box-shadow: 0 0 0 2px var(--accent);

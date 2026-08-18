@@ -509,19 +509,10 @@
     display: block;
 }
 
-.dga-card-tile .edition-tile-wrap {
-    transition: transform 0.2s;
-    overflow: hidden;
-    border-radius: 14px;
-}
-
-.dga-card-tile:hover .edition-tile-wrap {
-    transform: scale(1.03);
-}
-
-.dga-card-tile:hover .card-tile-dim {
-    opacity: 1;
-}
+/* Wrap's overflow:hidden/border-radius and the hover-zoom/dim behavior
+   both come from the shared .inv-card-tile / .tile-hoverable/.tile-zoom
+   rules (tiles.css, inventory.css) — this tile carries both classes
+   (buildDeckCardTile in decks_ga.js), so no separate copy is needed here. */
 
 .dga-qty-badge {
     position: absolute;

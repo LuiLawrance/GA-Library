@@ -1064,8 +1064,8 @@ async function openDrawer(drawerId, cardId, editionId, cardName) {
             const rarityClass = `rarity-${rarity.toLowerCase()}`;
 
             return `
-            <div class="drawer-edition-tile" style="animation-delay: ${i * 60}ms">
-                <div class="drawer-edition-media">
+            <div class="drawer-edition-tile tile-hoverable" style="animation-delay: ${i * 60}ms">
+                <div class="drawer-edition-media tile-zoom">
                     <div class="edition-tile-wrap">
                         <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
                             title="${einfo.set_name} (${einfo.set_prefix})"

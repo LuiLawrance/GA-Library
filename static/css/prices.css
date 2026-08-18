@@ -176,7 +176,6 @@
    This wrapper has no overflow set, so the ring paints outward untouched. */
 .prices-watch-tile-media {
     border-radius: 8px;
-    transition: transform 0.2s;
 }
 
 /* The shared card-tile radius (tiles.css/cards.css) is 14px, sized for the
@@ -197,60 +196,10 @@
     box-shadow: 0 0 0 2px var(--accent);
 }
 
-/* The shared card-tile hover zoom (see cards.css) scales .edition-tile-wrap
-   directly, which would leave the ring above fixed-size while the image
-   zooms past it. Move the zoom to this wrapper instead — same visual zoom
-   for the image (still clipped to .edition-tile-wrap's rounded corners),
-   but now the ring scales right along with it. The extra .card-tile--authed
-   qualifier just outweighs that shared rule's specificity. */
-.prices-watch-tile.card-tile--authed:hover .prices-watch-tile-media {
-    transform: scale(1.03);
-}
-
-.prices-watch-tile.card-tile--authed:hover .edition-tile-wrap {
-    transform: none;
-}
-
-/* Same hover affordance as the Card Search "+" overlay (.prices-search-add-btn,
-   attachPriceSearchAddOverlay) — dim layer (.card-tile-dim, added directly in
-   renderWatchlist's template here rather than attached by JS) + a centered button
-   on the image — but showing "×" to remove from the watchlist instead of "+" to
-   add. Red hover accent instead of the add button's brightness bump, since this
-   one is destructive. */
-.prices-watch-remove {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 2;
-    width: 34px;
-    height: 34px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
-    padding: 0;
-    margin: 0;
-    font-size: 1.3rem;
-    font-weight: 700;
-    line-height: 1;
-    color: #fff;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s, background 0.15s, border-color 0.15s;
-}
-
-.prices-watch-tile.card-tile--authed:hover .prices-watch-remove {
-    opacity: 1;
-}
-
-.prices-watch-remove:hover {
-    background: var(--error);
-    border-color: var(--error);
-}
+/* Hover-zoom (on this ring-safe wrapper, not .edition-tile-wrap — see the
+   comment above .prices-watch-tile-media) and the remove button's visuals
+   both come from tiles.css's shared .tile-hoverable/.tile-zoom/
+   .tile-action-btn vocabulary — see renderWatchlist in prices.js. */
 
 .prices-watch-tile-info {
     display: flex;
@@ -563,7 +512,6 @@
    as .prices-watch-tile-media above. */
 .prices-search-tile-media {
     border-radius: 8px;
-    transition: transform 0.2s;
 }
 
 /* Same ring treatment as .prices-watch-tile.selected — shows which search
@@ -573,18 +521,10 @@
     box-shadow: 0 0 0 2px var(--accent);
 }
 
-/* Same hover treatment as .prices-watch-tile-media in the watchlist grid,
-   for the same reason: the shared card-tile hover zoom (cards.css) scales
-   .edition-tile-wrap directly, which would leave the ring above fixed-size
-   while the image zooms past it. Moving the zoom to this wrapper instead
-   keeps the ring scaling right along with the image. */
-.prices-search-results .card-tile--authed:hover .prices-search-tile-media {
-    transform: scale(1.03);
-}
-
-.prices-search-results .card-tile--authed:hover .edition-tile-wrap {
-    transform: none;
-}
+/* Hover-zoom (on this ring-safe wrapper, not .edition-tile-wrap — see the
+   comment above .prices-search-tile-media) comes from tiles.css's shared
+   .tile-hoverable/.tile-zoom vocabulary — see buildPriceSearchTile in
+   prices.js. */
 
 /* Distinguishes same-card tiles now that search returns every printing
    instead of one randomly chosen edition. */
@@ -599,44 +539,5 @@
     text-overflow: ellipsis;
 }
 
-/* "+" hover affordance (attachPriceSearchAddOverlay in prices.js). The dim
-   behind it is the shared .card-tile-dim layer (tiles.css) — this just
-   centers the button on top of it, over the image only (same footprint as
-   .edition-tile-wrap), not the caption/price badge below. Sized and shaped
-   like the inventory quantity "+" (.inv-tile-qty-add in inventory.css), just
-   white instead of green since this isn't a quantity action. */
-.prices-search-add-btn {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 2;
-    width: 34px;
-    height: 34px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid transparent;
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
-    padding: 0;
-    margin: 0;
-    font-size: 1.1rem;
-    font-weight: 700;
-    line-height: 1;
-    color: #fff;
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s, background 0.15s, border-color 0.15s, filter 0.15s;
-}
-
-.card-tile--authed:hover .prices-search-add-btn {
-    opacity: 1;
-}
-
-.prices-search-add-btn:hover {
-    background: rgba(255, 255, 255, 0.55);
-    border-color: rgba(255, 255, 255, 0.85);
-    filter: brightness(1.15);
-}
+/* "+" button visuals come from tiles.css's shared .tile-action-btn — see
+   attachPriceSearchAddOverlay in prices.js. */

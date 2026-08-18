@@ -925,14 +925,14 @@ dgaDeckEditMode._clearAllIndicators = function () {
 
 function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index, total) {
     const tile = document.createElement('div');
-    tile.className = 'dga-card-tile inv-card-tile';
+    tile.className = 'dga-card-tile inv-card-tile tile-hoverable';
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
     tile.style.animationDelay = `${delay}ms`;
 
     const imgSrc = editionId ? `/images/${editionId}.jpg` : '';
 
     tile.innerHTML = `
-        <div class="edition-tile-wrap">
+        <div class="edition-tile-wrap tile-zoom">
             <img src="${imgSrc}" alt="${cardName}" onerror="this.style.opacity='0.1'">
             <div class="card-tile-dim"></div>
         </div>
@@ -1982,13 +1982,13 @@ async function searchDgaAddCards() {
 
             data.cards.forEach((card, i) => {
                 const tile = document.createElement('div');
-                tile.className = 'inv-search-tile';
+                tile.className = 'inv-search-tile tile-hoverable';
                 tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
                 tile.innerHTML = `
-                    <div class="edition-tile-wrap">
+                    <div class="edition-tile-wrap tile-zoom">
                         <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
                         <div class="card-tile-dim"></div>
-                        <div class="inv-search-tile-add">+</div>
+                        <div class="inv-search-tile-add tile-action-btn">+</div>
                     </div>`;
                 tile.onclick = () => dgaGoToConfirm(card.card_id, card.name, card.edition_id, dgaCardSetLabel(card));
                 tile.addEventListener('animationend', () => tile.classList.add('animated'));

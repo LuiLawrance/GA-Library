@@ -140,16 +140,16 @@ function renderWatchlist() {
         }
 
         return `
-            <div class="prices-watch-tile card-tile card-tile--authed"
+            <div class="prices-watch-tile card-tile card-tile--authed tile-hoverable"
                  style="animation-delay:${Math.min(i, 20) * 30}ms"
                  data-card-id="${row.card_id}" data-edition-id="${row.edition_id}" data-foil-id="${row.foil_id}"
                  data-name="${escapeHtml(row.name)}"
                  title="${escapeHtml(row.name)} — ${escapeHtml(meta)}">
-                <div class="prices-watch-tile-media">
+                <div class="prices-watch-tile-media tile-zoom">
                     <div class="edition-tile-wrap">
                         <div class="card-tile-dim"></div>
                         <img src="/images/${row.edition_id}.jpg" alt="${escapeHtml(row.name)}">
-                        <button class="prices-watch-remove" title="Remove from watchlist">&times;</button>
+                        <button class="prices-watch-remove tile-action-btn tile-action-btn--danger" title="Remove from watchlist">&times;</button>
                     </div>
                 </div>
                 ${priceText ? `<span class="inv-price-badge">${priceText}</span>` : ''}
@@ -729,7 +729,7 @@ function buildPriceSearchTile(card, index, total = 1) {
     // makes the same currentUser-based split for the same reason: the
     // --authed hover treatment (dim + fading badges, see tiles.css) only
     // makes sense when there's an add-to-watchlist button underneath it.
-    tile.className = currentUser ? 'card-tile card-tile--authed' : 'card-tile card-tile--guest';
+    tile.className = currentUser ? 'card-tile card-tile--authed tile-hoverable' : 'card-tile card-tile--guest tile-hoverable';
     tile.dataset.cardId = card.card_id;
     tile.dataset.editionId = card.edition_id;
     const maxDelay = 400;
@@ -739,7 +739,7 @@ function buildPriceSearchTile(card, index, total = 1) {
         ? `<div class="prices-tile-caption">${escapeHtml(card.set_prefix || '—')} · #${escapeHtml(card.collector_number || '?')}</div>`
         : '';
     tile.innerHTML = `
-        <div class="prices-search-tile-media">
+        <div class="prices-search-tile-media tile-zoom">
             <div class="edition-tile-wrap">
                 <img src="/images/${card.edition_id}.jpg" alt="${escapeHtml(card.name)}"
                     onerror="this.parentElement.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${escapeHtml(card.name)}</div>'">
@@ -809,7 +809,7 @@ function attachPriceSearchAddOverlay(tile, card) {
 
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
-    addBtn.className = 'prices-search-add-btn';
+    addBtn.className = 'prices-search-add-btn tile-action-btn';
     addBtn.title = 'Add to watchlist';
     addBtn.textContent = '+';
     addBtn.onclick = e => {

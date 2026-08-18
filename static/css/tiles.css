@@ -32,6 +32,80 @@
     opacity: 1;
 }
 
+/* ═══════════════════════════════════════
+   Shared hover vocabulary — .tile-hoverable/.tile-zoom/.tile-action-btn
+   Every card-tile surface (Cards, Inventory, Decks GA, Prices watchlist/
+   search, Drawer, the add-card search popup) adds these marker classes
+   instead of redefining its own hover-zoom/dim-trigger/action-button CSS.
+   .tile-hoverable goes on the element that already receives the page's
+   :hover. .tile-zoom goes on whichever single element should scale — either
+   .edition-tile-wrap directly, or a page's existing non-clipping ring
+   wrapper for the surfaces that show a selection ring (put it there so an
+   outward box-shadow ring doesn't get clipped by .edition-tile-wrap's own
+   overflow:hidden). .tile-action-btn is the shared small centered "+"/"×"
+   button; --danger swaps it to the red hover accent for destructive
+   actions. Added additively alongside each page's own class names so
+   existing JS selectors/event handlers keep working unchanged. ═══════════════════════════════════════ */
+.tile-zoom {
+    transition: transform 0.2s;
+}
+
+.tile-hoverable:hover .tile-zoom {
+    transform: scale(1.03);
+}
+
+.tile-hoverable:hover .card-tile-dim {
+    opacity: 1;
+}
+
+.tile-action-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    padding: 0;
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, border-color 0.15s, filter 0.15s;
+}
+
+.tile-hoverable:hover .tile-action-btn {
+    opacity: 1;
+}
+
+.tile-action-btn:hover {
+    background: rgba(255, 255, 255, 0.55);
+    border-color: rgba(255, 255, 255, 0.85);
+    filter: brightness(1.15);
+}
+
+/* Deliberately larger glyph than the "+" buttons (1.3rem vs 1.1rem) so a
+   "×" reads at the same visual weight — not a size to unify away. */
+.tile-action-btn--danger {
+    font-size: 1.3rem;
+}
+
+.tile-action-btn--danger:hover {
+    background: var(--error);
+    border-color: var(--error);
+    filter: none;
+}
+
 /* ── card-tile--authed hover triggers ── */
 .card-tile--authed:hover .inv-card-tile-overlay {
     opacity: 1;

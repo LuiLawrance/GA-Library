@@ -403,17 +403,8 @@
     position: relative;
 }
 
-/* Scale the wrap, not the img — mirrors exactly how .inv-card-tile works.
-   tiles.css sets overflow:hidden + border-radius on the wrap, so the scale
-   expands the clip boundary rather than being masked by it. */
-.card-tile .edition-tile-wrap {
-    transition: transform 0.2s;
-}
-
-.card-tile--guest:hover .edition-tile-wrap,
-.card-tile--authed:hover .edition-tile-wrap {
-    transform: scale(1.03);
-}
+/* Hover-zoom/dim/action-button behavior lives in tiles.css's shared
+   .tile-hoverable/.tile-zoom vocabulary — see buildCardTile in cards.js. */
 
 /* ── Card search confirm bar — same style as inventory, anchored to cards-body ── */
 #cards-qty-confirm-bar {
