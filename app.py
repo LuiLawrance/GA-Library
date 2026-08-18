@@ -22,7 +22,7 @@ import re
 import threading
 import uuid
 
-load_dotenv()
+load_dotenv(".env" if os.path.exists(".env") else "env")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
