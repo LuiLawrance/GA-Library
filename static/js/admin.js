@@ -111,15 +111,13 @@ function renderAdminUserRows() {
     summary.textContent = `${adminUsersData.length} user(s)`
         + (filtered.length !== adminUsersData.length ? ` — showing ${filtered.length}` : '');
 
-    // The logged-in admin can never delete themselves or a peer of their own
-    // rank (only require_admin-gated accounts reach this page at all, so
-    // "peer" today always means "another admin" — but this is looked up from
-    // the viewer's own record rather than hardcoded, so it still holds if
-    // more ranks are ever added).
-    const viewerRank = adminUsersData.find(u => u.username === currentUser)?.auth_type;
+    // The logged-in admin can never delete themselves or anyone at or above
+    // their own rank in RANK_ORDER (lower index = higher privilege) — only
+    // users strictly below them are deletable.
+    const viewerIndex = RANK_ORDER.indexOf(adminUsersData.find(u => u.username === currentUser)?.auth_type);
 
     const rows = filtered.map(u => {
-        const canDelete = viewerRank && u.username !== currentUser && u.auth_type !== viewerRank;
+        const canDelete = viewerIndex >= 0 && u.username !== currentUser && RANK_ORDER.indexOf(u.auth_type) > viewerIndex;
         const deleteBtn = canDelete
             ? `<button type="button" class="admin-pid-detail-delete-btn" title="Delete user"
                    onclick="event.stopPropagation(); deleteAdminUser('${escapeHtml(u.username)}')">&times;</button>`
@@ -184,6 +182,25 @@ async function deleteAdminUser(username) {
     }
 }
 
+// Promote/demote move the selected user one step up/down RANK_ORDER from
+// their CURRENT rank — there's no fixed target rank anymore now that there
+// are 4 tiers instead of a binary admin/local toggle.
+function promoteAdminUser() {
+    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+    if (!record) return;
+    const idx = RANK_ORDER.indexOf(record.auth_type);
+    if (idx <= 0) return;
+    setAdminUserRole(RANK_ORDER[idx - 1]);
+}
+
+function demoteAdminUser() {
+    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+    if (!record) return;
+    const idx = RANK_ORDER.indexOf(record.auth_type);
+    if (idx < 0 || idx >= RANK_ORDER.length - 1) return;
+    setAdminUserRole(RANK_ORDER[idx + 1]);
+}
+
 async function setAdminUserRole(authType) {
     const username = adminUserDetailSelected;
     if (!username) return;
@@ -220,19 +237,38 @@ async function setAdminUserRole(authType) {
 }
 
 // Buttons "light up" (become enabled) only when a user is selected and the
-// action would actually do something — already-admin can't be promoted,
-// already-local can't be demoted, and the viewer can't change their own role
-// (avoids an admin accidentally locking themselves out mid-session).
+// action would actually do something. Mirrors the backend's checks in
+// api_admin_set_user_role(): the viewer can't touch anyone at or above their
+// own rank at all, can't promote someone up to (or past) their own rank, and
+// can't demote anyone already at the bottom "user" tier. Also blocks acting
+// on yourself, same as before (avoids an admin accidentally locking
+// themselves out mid-session).
 function updateAdminUserRoleButtons() {
     const promoteBtn = document.getElementById('admin-user-promote-btn');
     const demoteBtn = document.getElementById('admin-user-demote-btn');
     if (!promoteBtn || !demoteBtn) return;
 
     const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+    const viewerRecord = adminUsersData.find(u => u.username === currentUser);
     const isSelf = adminUserDetailSelected === currentUser;
 
-    promoteBtn.disabled = !record || isSelf || record.auth_type === 'admin';
-    demoteBtn.disabled = !record || isSelf || record.auth_type === 'local';
+    if (!record || !viewerRecord || isSelf) {
+        promoteBtn.disabled = true;
+        demoteBtn.disabled = true;
+        return;
+    }
+
+    const viewerIndex = RANK_ORDER.indexOf(viewerRecord.auth_type);
+    const targetIndex = RANK_ORDER.indexOf(record.auth_type);
+
+    if (targetIndex <= viewerIndex) {
+        promoteBtn.disabled = true;
+        demoteBtn.disabled = true;
+        return;
+    }
+
+    promoteBtn.disabled = (targetIndex - 1) <= viewerIndex;
+    demoteBtn.disabled = targetIndex >= RANK_ORDER.length - 1;
 }
 
 async function selectAdminUserDetail(username) {

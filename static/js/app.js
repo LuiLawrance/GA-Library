@@ -3,6 +3,12 @@ let currentUser = null;
 let isAdmin = false;
 let loginMode = 'login';
 
+// Highest to lowest privilege — mirrors RANK_ORDER in user.py. Shared
+// globally (classic <script>s on one page see each other's top-level
+// const/let) so admin.js's promote/demote logic can reuse it.
+const RANK_ORDER = ['owner', 'admin', 'moderator', 'user'];
+const ADMIN_CONSOLE_RANKS = new Set(['owner', 'admin', 'moderator']);
+
 // ── Router ──
 const routes = {
     '/': '/fragments/home',
@@ -190,7 +196,7 @@ async function checkAuth() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
-            isAdmin = data.auth_type === 'admin';
+            isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
             setLoggedIn(currentUser);
         } else {
             currentUser = null;
@@ -244,7 +250,9 @@ function toggleMode() {
 
     document.getElementById('form-title').textContent = isRegister ? 'Create account' : 'Sign in';
     document.getElementById('submit-btn').textContent = isRegister ? 'Create account' : 'Sign in';
-    document.getElementById('confirm-group').style.display = isRegister ? 'flex' : 'none';
+    const confirmGroup = document.getElementById('confirm-group');
+    confirmGroup.classList.toggle('expanded', isRegister);
+    confirmGroup.style.maxHeight = isRegister ? confirmGroup.scrollHeight + 'px' : '0px';
     document.getElementById('switch-text').textContent = isRegister ? 'Already have an account?' : "Don't have an account?";
     document.querySelector('.btn-switch').textContent = isRegister ? 'Sign in' : 'Create account';
 
@@ -286,7 +294,7 @@ async function handleLogin() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
-            isAdmin = data.auth_type === 'admin';
+            isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
             setLoggedIn(currentUser);
             navigate('/');
         } else {

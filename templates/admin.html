@@ -19,9 +19,9 @@
                        placeholder="Search users..." oninput="renderAdminUserRows()">
                 <div class="admin-user-role-actions">
                     <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-user-promote-btn"
-                            onclick="setAdminUserRole('admin')" disabled>Promote</button>
+                            onclick="promoteAdminUser()" disabled>Promote</button>
                     <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-user-demote-btn"
-                            onclick="setAdminUserRole('local')" disabled>Demote</button>
+                            onclick="demoteAdminUser()" disabled>Demote</button>
                 </div>
                 <div class="admin-user-summary" id="admin-user-summary"></div>
             </div>

@@ -12,7 +12,7 @@ from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id,
     find_product_ids_by_editions, import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, \
     scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
-from user import JSON_USERS, user_create, user_delete, user_login
+from user import JSON_USERS, RANK_ORDER, user_create, user_delete, user_login
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
@@ -91,10 +91,16 @@ def get_user_auth_type(username: str) -> str | None:
     return users_data.get(username, {}).get("auth_type")
 
 
+# Ranks that can reach the admin console at all. Finer-grained permissions
+# between these three (e.g. what a moderator can't do that an admin can)
+# aren't split out yet — for now they get equal access once inside.
+ADMIN_CONSOLE_RANKS = {"owner", "admin", "moderator"}
+
+
 def require_admin(request: Request) -> str:
     user = get_current_user(request)
 
-    if not user or get_user_auth_type(user) != "admin":
+    if not user or get_user_auth_type(user) not in ADMIN_CONSOLE_RANKS:
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return user
@@ -896,8 +902,8 @@ async def api_admin_set_user_role(username: str, request: Request):
     body = await request.json()
     auth_type = body.get("auth_type")
 
-    if auth_type not in ("admin", "local"):
-        raise HTTPException(status_code=400, detail="auth_type must be 'admin' or 'local'")
+    if auth_type not in RANK_ORDER:
+        raise HTTPException(status_code=400, detail=f"auth_type must be one of {', '.join(RANK_ORDER)}")
 
     if username == admin:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
@@ -906,6 +912,18 @@ async def api_admin_set_user_role(username: str, request: Request):
 
     if username not in users_data:
         raise HTTPException(status_code=404, detail="User not found")
+
+    admin_rank = RANK_ORDER.index(users_data[admin]["auth_type"])
+    target_rank = RANK_ORDER.index(users_data[username]["auth_type"])
+    new_rank = RANK_ORDER.index(auth_type)
+
+    # A lower index means higher privilege — you can only act on someone
+    # already below you, and can only grant a rank below your own.
+    if target_rank <= admin_rank:
+        raise HTTPException(status_code=400, detail="Cannot change the role of a user at or above your own rank")
+
+    if new_rank <= admin_rank:
+        raise HTTPException(status_code=400, detail="Cannot grant a rank at or above your own")
 
     users_data[username]["auth_type"] = auth_type
     _save_users_data(users_data)
@@ -925,8 +943,11 @@ async def api_admin_delete_user(username: str, request: Request):
     if username == admin:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
-    if users_data[username].get("auth_type") == users_data[admin].get("auth_type"):
-        raise HTTPException(status_code=400, detail="Cannot delete a user of the same rank")
+    admin_rank = RANK_ORDER.index(users_data[admin]["auth_type"])
+    target_rank = RANK_ORDER.index(users_data[username]["auth_type"])
+
+    if target_rank <= admin_rank:
+        raise HTTPException(status_code=400, detail="Cannot delete a user at or above your own rank")
 
     user_delete(username)
 

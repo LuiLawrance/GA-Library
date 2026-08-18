@@ -13,6 +13,10 @@ DIR_WISH = "DATA_GA/WISH_GA"
 
 JSON_USERS = "DATA_GENERAL/USERS.json"
 
+# Highest to lowest privilege. The first user ever created becomes "owner";
+# everyone who signs up after that starts at the base "user" rank.
+RANK_ORDER = ["owner", "admin", "moderator", "user"]
+
 
 def user_create(username: str, password: str, debug: bool = False) -> None:
     users_file = new_json(JSON_USERS)
@@ -26,7 +30,7 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
     users_data[username] = {
-        "auth_type": "admin" if not users_data else "local",
+        "auth_type": "owner" if not users_data else "user",
         "password": hashed.decode("utf-8"),
         "notes": []
     }
