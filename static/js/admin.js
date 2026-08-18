@@ -520,7 +520,10 @@ function openAdminPidTcgPlayer() {
     const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
     if (!record) return;
 
-    const url = record.product_id
+    // "~" is a real, saved product_id (meaning "confirmed no listings"), but
+    // it isn't an actual TCGPlayer product to link to — fall back to a name
+    // search the same as a genuinely missing product_id would.
+    const url = adminPidIsScrapable(record.product_id)
         ? `https://www.tcgplayer.com/product/${encodeURIComponent(record.product_id)}`
         : `https://www.tcgplayer.com/search/grand-archive/product?q=${encodeURIComponent(record.name)}&productLineName=grand-archive`;
 

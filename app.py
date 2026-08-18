@@ -499,6 +499,9 @@ async def api_card_detail(card_id: str):
 
         edition_info["collector_number"] = collector_number
         edition_info["thema"] = thema_data.get(edition_id, {})
+        edition_info["last_price"] = _last_sale_price(
+            sales_data, card_id, edition_id, edition_info.get("foils", {})
+        )
 
         edition_listings = card_listings.get(edition_id, {})
         edition_sales = card_sales.get(edition_id, {})
