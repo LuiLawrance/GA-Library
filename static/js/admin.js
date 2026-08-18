@@ -8,6 +8,8 @@ let adminPidRefreshStatus = {};
 let adminPidRefreshing = false;
 let adminPidSetFilter = new Set();
 let adminPidSetFilterOpen = false;
+let adminPidRarityFilter = new Set();
+let adminPidRarityFilterOpen = false;
 let adminPidFindingIds = new Set();
 
 let adminPidDetailSelected = null;
@@ -23,6 +25,10 @@ let adminPidBulkPastePending = false;
 // Matches CONDITION_MAP in api_tcgplayer.py, so manual entries use the same
 // grading vocabulary as scraped TCGPlayer data.
 const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played', 'Heavily Played', 'Damaged'];
+
+// Matches RARITY_MAP's value order in pricing_ga.py, so the rarity filter
+// lists options from most common to rarest instead of alphabetically.
+const ADMIN_PID_RARITY_ORDER = ['C', 'U', 'R', 'SR', 'UR', 'PR', 'CSR', 'CUR', 'CPR'];
 
 async function switchAdminSection(section) {
     const page = document.getElementById('admin-page');
@@ -122,15 +128,31 @@ async function loadAdminPricingIds() {
     }
 }
 
-function renderAdminPricingIds() {
+// Rebuilds just the header row (including the Set filter dropdown), without
+// touching the data rows below it — opening/closing the dropdown doesn't
+// change which rows are visible, so re-rendering all of them on every click
+// (previously ~600ms+ with thousands of editions loaded) was pure waste.
+function renderAdminPidHeader() {
     const header = document.getElementById('admin-pid-table-header');
     if (!header) return;
 
-    // header.innerHTML below rebuilds the set-filter dropdown from scratch, which
-    // would otherwise silently reset its option list back to the top (and replay
-    // its open animation) — save/restore its scroll position across the rebuild.
-    const prevSetMenu = header.querySelector('.set-dropdown-menu');
+    // header.innerHTML below rebuilds both filter dropdowns from scratch, which
+    // would otherwise silently reset their option lists back to the top (and
+    // replay their open animation) — save/restore each one's scroll position
+    // across the rebuild. Scoped per-column since both share the same
+    // .set-dropdown-menu class.
+    const prevRarityMenu = header.querySelector('.admin-pid-col-rarity .set-dropdown-menu');
+    const rarityMenuScrollTop = prevRarityMenu ? prevRarityMenu.scrollTop : 0;
+    const prevSetMenu = header.querySelector('.admin-pid-col-set .set-dropdown-menu');
     const setMenuScrollTop = prevSetMenu ? prevSetMenu.scrollTop : 0;
+
+    // Same idea for the select-all checkbox: its checked/indeterminate state is
+    // derived from the current row selection by renderAdminPidRows(), which this
+    // header-only rebuild doesn't call — save/restore it so it doesn't flash back
+    // to an unchecked default every time the header is rebuilt.
+    const prevSelectAll = document.getElementById('admin-pid-select-all');
+    const selectAllChecked = prevSelectAll ? prevSelectAll.checked : false;
+    const selectAllIndeterminate = prevSelectAll ? prevSelectAll.indeterminate : false;
 
     header.innerHTML = `
         <div class="admin-pid-row admin-pid-row-header">
@@ -138,7 +160,7 @@ function renderAdminPricingIds() {
                 <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
             </span>
             <span class="admin-pid-col-name">CARD</span>
-            <span class="admin-pid-col-rarity">Rarity</span>
+            <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
             <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
             <span class="admin-pid-col-status">Product ID</span>
             <span class="admin-pid-col-sales">Sales</span>
@@ -146,9 +168,21 @@ function renderAdminPricingIds() {
         </div>
     `;
 
-    const newSetMenu = header.querySelector('.set-dropdown-menu');
+    const newRarityMenu = header.querySelector('.admin-pid-col-rarity .set-dropdown-menu');
+    if (newRarityMenu) newRarityMenu.scrollTop = rarityMenuScrollTop;
+
+    const newSetMenu = header.querySelector('.admin-pid-col-set .set-dropdown-menu');
     if (newSetMenu) newSetMenu.scrollTop = setMenuScrollTop;
 
+    const newSelectAll = document.getElementById('admin-pid-select-all');
+    if (newSelectAll) {
+        newSelectAll.checked = selectAllChecked;
+        newSelectAll.indeterminate = selectAllIndeterminate;
+    }
+}
+
+function renderAdminPricingIds() {
+    renderAdminPidHeader();
     renderAdminPidRows();
 }
 
@@ -170,6 +204,8 @@ function renderAdminPidRows() {
         if (missingOnly && e.product_id) return false;
 
         if (adminPidSetFilter.size > 0 && !adminPidSetFilter.has(e.set_prefix)) return false;
+
+        if (adminPidRarityFilter.size > 0 && !adminPidRarityFilter.has(e.rarity)) return false;
 
         if (query) {
             const haystack = `${e.name} ${e.set_prefix || ''} ${e.set_name || ''}`.toLowerCase();
@@ -280,13 +316,13 @@ function adminPidSetFilterHtml() {
 
 function toggleAdminPidSetFilter() {
     adminPidSetFilterOpen = !adminPidSetFilterOpen;
-    renderAdminPricingIds();
+    renderAdminPidHeader();
 }
 
 function closeAdminPidSetFilter() {
     if (!adminPidSetFilterOpen) return;
     adminPidSetFilterOpen = false;
-    renderAdminPricingIds();
+    renderAdminPidHeader();
 }
 
 function toggleAdminPidSetFilterOption(set) {
@@ -299,8 +335,68 @@ function toggleAdminPidSetFilterOption(set) {
     // Flip this option's own checkmark in place instead of going through
     // renderAdminPricingIds() — rebuilding the header would recreate the whole
     // dropdown menu and replay its open animation on every click.
-    document.querySelectorAll('#admin-pid-table-header .set-dropdown-option').forEach(opt => {
+    document.querySelectorAll('.admin-pid-col-set .set-dropdown-option').forEach(opt => {
         if (opt.dataset.set === set) opt.classList.toggle('selected', adminPidSetFilter.has(set));
+    });
+
+    renderAdminPidRows();
+}
+
+// Rarity filter — same dropdown widget/styling as the Set filter above
+// (shares its .set-dropdown-* CSS), just scoped to the Rarity column and
+// sorted by ADMIN_PID_RARITY_ORDER instead of alphabetically.
+function adminPidRarityFilterHtml() {
+    const rarities = [...new Set(adminPidData.map(e => e.rarity).filter(Boolean))].sort((a, b) => {
+        const ai = ADMIN_PID_RARITY_ORDER.indexOf(a);
+        const bi = ADMIN_PID_RARITY_ORDER.indexOf(b);
+        if (ai === -1 && bi === -1) return a.localeCompare(b);
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+    });
+
+    const optionsHtml = rarities.map(rarity => `
+        <div class="set-dropdown-option ${adminPidRarityFilter.has(rarity) ? 'selected' : ''}" data-rarity="${escapeHtml(rarity)}"
+             onclick="event.stopPropagation(); toggleAdminPidRarityFilterOption('${escapeHtml(rarity)}')">
+            <span>${escapeHtml(rarity)}</span>
+            <div class="set-toggle"></div>
+        </div>
+    `).join('');
+
+    return `
+        <span class="set-dropdown-wrap">
+            <button type="button" class="set-dropdown-btn ${adminPidRarityFilterOpen ? 'open' : ''}"
+                    onclick="event.stopPropagation(); toggleAdminPidRarityFilter()">
+                <span>Rarity</span>
+                <span class="set-dropdown-arrow">&#8249;</span>
+            </button>
+            <div class="set-dropdown-menu ${adminPidRarityFilterOpen ? '' : 'hidden'}">
+                ${optionsHtml || '<div class="admin-pid-detail-empty-small">No rarities</div>'}
+            </div>
+        </span>
+    `;
+}
+
+function toggleAdminPidRarityFilter() {
+    adminPidRarityFilterOpen = !adminPidRarityFilterOpen;
+    renderAdminPidHeader();
+}
+
+function closeAdminPidRarityFilter() {
+    if (!adminPidRarityFilterOpen) return;
+    adminPidRarityFilterOpen = false;
+    renderAdminPidHeader();
+}
+
+function toggleAdminPidRarityFilterOption(rarity) {
+    if (adminPidRarityFilter.has(rarity)) {
+        adminPidRarityFilter.delete(rarity);
+    } else {
+        adminPidRarityFilter.add(rarity);
+    }
+
+    document.querySelectorAll('.admin-pid-col-rarity .set-dropdown-option').forEach(opt => {
+        if (opt.dataset.rarity === rarity) opt.classList.toggle('selected', adminPidRarityFilter.has(rarity));
     });
 
     renderAdminPidRows();
@@ -511,11 +607,31 @@ async function findAdminProductId(editionId) {
 }
 
 async function refreshSelectedAdminPricing(target) {
-    const editionIds = getAdminPidRefreshTargets();
-    if (adminPidRefreshing || editionIds.length === 0) return;
+    const requestedIds = getAdminPidRefreshTargets();
+    if (adminPidRefreshing || requestedIds.length === 0) return;
+
+    const progress = document.getElementById('admin-pid-progress');
+
+    // A card with no TCGPlayer product ID configured can't be scraped — filter
+    // those out up front instead of sending them to the batch job, where they'd
+    // just come back as a per-edition error. If that's every requested card
+    // (in particular, the common single-card case), cancel the refresh outright
+    // instead of starting a job with nothing left to do.
+    const editionIds = requestedIds.filter(id => adminPidData.find(e => e.edition_id === id)?.product_id);
+    const skippedCount = requestedIds.length - editionIds.length;
+
+    if (editionIds.length === 0) {
+        if (progress) {
+            progress.classList.remove('hidden');
+            progress.textContent = requestedIds.length === 1
+                ? 'Cancelled — this card has no TCGPlayer product ID set.'
+                : `Cancelled — none of the ${requestedIds.length} selected cards have a TCGPlayer product ID set.`;
+            setTimeout(() => progress.classList.add('hidden'), 4000);
+        }
+        return;
+    }
 
     adminPidRefreshing = true;
-    const progress = document.getElementById('admin-pid-progress');
     updateAdminPidRefreshButton();
 
     editionIds.forEach(id => {
@@ -606,7 +722,8 @@ async function refreshSelectedAdminPricing(target) {
     adminPidRefreshing = false;
 
     if (progress) {
-        progress.textContent = `Done refreshing ${editionIds.length} edition(s).`;
+        progress.textContent = `Done refreshing ${editionIds.length} edition(s)`
+            + (skippedCount > 0 ? `, skipped ${skippedCount} without a product ID` : '') + '.';
         setTimeout(() => progress.classList.add('hidden'), 4000);
     }
 
@@ -1221,6 +1338,8 @@ function initAdmin() {
     adminPidRefreshing = false;
     adminPidSetFilter = new Set();
     adminPidSetFilterOpen = false;
+    adminPidRarityFilter = new Set();
+    adminPidRarityFilterOpen = false;
     adminPidDetailSelected = null;
     adminPidDetailHistory = null;
     adminPidDetailFoils = null;
@@ -1240,5 +1359,6 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-bulk-paste-wrap')) closeAdminPidBulkPaste();
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
-    if (!e.target.closest('#admin-pid-table-header .set-dropdown-wrap')) closeAdminPidSetFilter();
+    if (!e.target.closest('.admin-pid-col-rarity .set-dropdown-wrap')) closeAdminPidRarityFilter();
+    if (!e.target.closest('.admin-pid-col-set .set-dropdown-wrap')) closeAdminPidSetFilter();
 }, true);

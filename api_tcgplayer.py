@@ -33,6 +33,18 @@ def _get_ids_field(edition_id: str, field: str) -> str | None:
     return ids_data.get(edition_id, {}).get(field)
 
 
+def get_all_ids() -> dict:
+    """Reads the whole ID_TCGPLAYER.json store in one go, for callers building
+    a view across many editions (e.g. the admin product-ID list) — avoids
+    re-opening and re-parsing the file once per edition per field the way
+    get_product_id()/get_last_sales()/get_last_listings() do when called
+    individually in a loop."""
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _set_ids_field(edition_id: str, field: str, value: str, debug: bool = False) -> None:
     ids_file = new_json(JSON_IDS)
 
@@ -76,15 +88,16 @@ def set_product_id(edition_id: str, product_id: str, debug: bool = False) -> Non
     _set_ids_field(edition_id, "product_id", product_id, debug)
 
 
-def _scrape_sales_page(page, url: str, debug: bool = False) -> list[dict]:
-    """Runs the sales scrape against an already-open Playwright page. Caller
-    owns the browser/page lifecycle."""
-    page.goto(url)
-    page.wait_for_load_state("networkidle")
-
+def _open_sales_popup(page) -> None:
+    """Clicks 'View More Data' to open the sales popup on the currently-loaded
+    product page. Caller must have already navigated there."""
     page.get_by_text("View More Data").first.click()
     page.wait_for_load_state("networkidle")
 
+
+def _parse_sales_rows(page, url: str, debug: bool = False) -> list[dict]:
+    """Parses the sales popup rows on the currently-loaded page. Caller must
+    have already opened the popup via _open_sales_popup()."""
     if page.get_by_text("No sales data available").count() > 0:
         if debug:
             print(f"No sales data available | url={url}")
@@ -135,57 +148,78 @@ def _scrape_sales_page(page, url: str, debug: bool = False) -> list[dict]:
     return sales
 
 
+def _scrape_sales_page(page, url: str, debug: bool = False) -> list[dict]:
+    """Runs the sales scrape against an already-open Playwright page. Caller
+    owns the browser/page lifecycle."""
+    page.goto(url)
+    page.wait_for_load_state("networkidle")
+
+    _open_sales_popup(page)
+
+    return _parse_sales_rows(page, url, debug)
+
+
+def _listing_page_count(page) -> int:
+    """Reads the highest page number shown on the currently-loaded listings
+    page. Page-number buttons are the only role="link" buttons whose visible
+    text is a bare number — "tcg-standard-button" itself is too generic
+    (Add to Cart, Filter Sales, etc. all share it) to scope to directly."""
+    page_number_texts = page.locator("a[role='link'] .tcg-standard-button__content").all_inner_texts()
+    page_numbers = [int(t.strip()) for t in page_number_texts if t.strip().isdigit()]
+    return max(page_numbers) if page_numbers else 1
+
+
+def _parse_listing_rows(page) -> list[dict]:
+    """Parses the listing rows on the currently-loaded listings page."""
+    condition_names = set(CONDITION_MAP.values())
+    rows = page.locator(".listing-item")
+    listings = []
+
+    for i in range(rows.count()):
+        row = rows.nth(i)
+
+        condition = row.locator(".listing-item__condition").inner_text().strip()
+        price = row.locator(".listing-item__listing-data__info__price").inner_text().strip()
+        available = row.locator(".add-to-cart__available").inner_text().strip()
+        quantity = int(available.replace("of", "").strip())
+
+        # Listings already show the full condition name (e.g. "Near Mint"),
+        # unlike the sales popup's abbreviations, so no CONDITION_MAP lookup
+        # is needed here — just the same Foil-suffix classification.
+        is_foil = condition.endswith(" Foil")
+        base_condition = condition.removesuffix(" Foil") if is_foil else condition
+
+        if is_foil:
+            foil_kind = "FOIL" if base_condition in condition_names else None
+        else:
+            foil_kind = "NONFOIL"
+
+        listings.append({
+            "date": date.today().isoformat(),
+            "condition": condition,
+            "foil_kind": foil_kind,
+            "quantity": quantity,
+            "price": float(price.replace("$", "").replace(",", ""))
+        })
+
+    return listings
+
+
 def _scrape_listings_page(page, url: str, debug: bool = False) -> list[dict]:
     """Runs the listings scrape against an already-open Playwright page. Caller
     owns the browser/page lifecycle."""
     base_url = url.split("?")[0]
-    condition_names = set(CONDITION_MAP.values())
 
     page.goto(url)
     page.wait_for_load_state("networkidle")
 
-    # Page-number buttons are the only role="link" buttons whose visible
-    # text is a bare number — "tcg-standard-button" itself is too generic
-    # (Add to Cart, Filter Sales, etc. all share it) to scope to directly.
-    page_number_texts = page.locator("a[role='link'] .tcg-standard-button__content").all_inner_texts()
-    page_numbers = [int(t.strip()) for t in page_number_texts if t.strip().isdigit()]
-    total_pages = max(page_numbers) if page_numbers else 1
+    total_pages = _listing_page_count(page)
+    listings = _parse_listing_rows(page)
 
-    listings = []
-
-    for page_num in range(1, total_pages + 1):
-        if page_num > 1:
-            page.goto(f"{base_url}?page={page_num}")
-            page.wait_for_load_state("networkidle")
-
-        rows = page.locator(".listing-item")
-
-        for i in range(rows.count()):
-            row = rows.nth(i)
-
-            condition = row.locator(".listing-item__condition").inner_text().strip()
-            price = row.locator(".listing-item__listing-data__info__price").inner_text().strip()
-            available = row.locator(".add-to-cart__available").inner_text().strip()
-            quantity = int(available.replace("of", "").strip())
-
-            # Listings already show the full condition name (e.g. "Near Mint"),
-            # unlike the sales popup's abbreviations, so no CONDITION_MAP lookup
-            # is needed here — just the same Foil-suffix classification.
-            is_foil = condition.endswith(" Foil")
-            base_condition = condition.removesuffix(" Foil") if is_foil else condition
-
-            if is_foil:
-                foil_kind = "FOIL" if base_condition in condition_names else None
-            else:
-                foil_kind = "NONFOIL"
-
-            listings.append({
-                "date": date.today().isoformat(),
-                "condition": condition,
-                "foil_kind": foil_kind,
-                "quantity": quantity,
-                "price": float(price.replace("$", "").replace(",", ""))
-            })
+    for page_num in range(2, total_pages + 1):
+        page.goto(f"{base_url}?page={page_num}")
+        page.wait_for_load_state("networkidle")
+        listings.extend(_parse_listing_rows(page))
 
     if debug:
         print(
@@ -270,24 +304,58 @@ def fetch_listings(url: str, debug: bool = False, headless: bool = False, page=N
 
 def _scrape_sales_and_listings_page(page, url: str, debug: bool, want_sales: bool,
                                      want_listings: bool) -> tuple[list[dict] | None, list[dict] | None]:
+    """Scrapes sales and/or listings against an already-open Playwright page.
+    When both are wanted, page 1 is visited once: its listings are read, then
+    the sales popup is opened on that same load, before moving on to any
+    further listing pages — instead of visiting page 1 separately for each."""
     from api_ga import _log_error
 
+    base_url = url.split("?")[0]
     sales = None
     listings = None
+    total_pages = 1
+    page1_loaded = False
+
+    if want_listings:
+        try:
+            page.goto(url)
+            page.wait_for_load_state("networkidle")
+            page1_loaded = True
+            total_pages = _listing_page_count(page)
+            listings = _parse_listing_rows(page)
+        except Exception as e:
+            _log_error(url, e, debug)
+            print(f"Fetch Error (listings) | url={url} | {e}")
 
     if want_sales:
         try:
-            sales = _scrape_sales_page(page, url, debug)
+            if not page1_loaded:
+                page.goto(url)
+                page.wait_for_load_state("networkidle")
+
+            _open_sales_popup(page)
+            sales = _parse_sales_rows(page, url, debug)
         except Exception as e:
             _log_error(url, e, debug)
             print(f"Fetch Error (sales) | url={url} | {e}")
 
-    if want_listings:
+    if want_listings and listings is not None and total_pages > 1:
         try:
-            listings = _scrape_listings_page(page, url, debug)
+            for page_num in range(2, total_pages + 1):
+                page.goto(f"{base_url}?page={page_num}")
+                page.wait_for_load_state("networkidle")
+                listings.extend(_parse_listing_rows(page))
         except Exception as e:
             _log_error(url, e, debug)
             print(f"Fetch Error (listings) | url={url} | {e}")
+
+    if debug and listings is not None:
+        print(
+            f"Fetched listings | "
+            f"url={url} | "
+            f"pages={total_pages} | "
+            f"count={len(listings)}"
+        )
 
     return sales, listings
 

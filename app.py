@@ -1,6 +1,6 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _sort_collector_number, _update_slug, \
     JSON_EDITIONS, JSON_INFO, JSON_SLUGS, JSON_THEMA, set_search, UPDATE_THRESHOLD
-from api_tcgplayer import get_last_listings, get_last_sales, get_product_id, set_product_id
+from api_tcgplayer import get_all_ids, get_last_listings, get_last_sales, get_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -808,7 +808,8 @@ async def api_find_product_ids_start(request: Request):
         # No specific editions given — default to every edition currently missing one
         with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
             editions_data = json.load(f)
-        edition_ids = [eid for eid in editions_data if not get_product_id(eid)]
+        ids_data = get_all_ids()
+        edition_ids = [eid for eid in editions_data if not ids_data.get(eid, {}).get("product_id")]
 
     if not edition_ids:
         raise HTTPException(status_code=400, detail="No editions to look up")
@@ -890,12 +891,14 @@ async def api_admin_pricing_product_ids(request: Request):
 
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
     collector_map = _build_collector_map()
+    ids_data = get_all_ids()
 
     results = []
 
     for edition_id, edition_ref in editions_data.items():
         card_id = edition_ref.get("card_id")
         edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
+        edition_ids = ids_data.get(edition_id, {})
 
         results.append({
             "edition_id": edition_id,
@@ -905,9 +908,9 @@ async def api_admin_pricing_product_ids(request: Request):
             "set_prefix": edition_info.get("set_prefix"),
             "set_name": edition_info.get("set_name"),
             "collector_number": collector_map.get(edition_id),
-            "product_id": get_product_id(edition_id),
-            "sales_days_since": _days_since(get_last_sales(edition_id)),
-            "listings_days_since": _days_since(get_last_listings(edition_id)),
+            "product_id": edition_ids.get("product_id"),
+            "sales_days_since": _days_since(edition_ids.get("last_sales")),
+            "listings_days_since": _days_since(edition_ids.get("last_listings")),
         })
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))

@@ -421,6 +421,13 @@
     color: var(--text);
 }
 
+/* The Rarity and Set header cells host filter dropdowns; the data rows'
+   overflow:hidden truncation below would otherwise clip the dropdown menus. */
+.admin-pid-row-header .admin-pid-col-rarity,
+.admin-pid-row-header .admin-pid-col-set {
+    overflow: visible;
+}
+
 .admin-pid-row:not(.admin-pid-row-header):hover {
     background: var(--bg-hover);
 }
@@ -923,12 +930,13 @@
     color: var(--accent);
 }
 
-/* The Set-column header filter reuses cards.css's .set-dropdown-wrap /
-   .set-dropdown-btn / .set-dropdown-menu / .set-dropdown-option / .set-toggle
-   directly (loaded globally) for the dropdown menu itself, so it matches the
-   cards page's set filter exactly. The trigger button, though, should look
-   like the plain "Card" / "Product ID" header labels, not a boxed button —
-   this strips its chrome down to match while keeping the arrow. */
+/* The Rarity- and Set-column header filters both reuse cards.css's
+   .set-dropdown-wrap / .set-dropdown-btn / .set-dropdown-menu /
+   .set-dropdown-option / .set-toggle directly (loaded globally) for the
+   dropdown menu itself, so both match the cards page's set filter exactly.
+   The trigger button, though, should look like the plain "Card" / "Product ID"
+   header labels, not a boxed button — this strips its chrome down to match
+   while keeping the arrow. */
 #admin-pid-table-header .set-dropdown-btn {
     background: none;
     border: none;
