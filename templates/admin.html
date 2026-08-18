@@ -17,17 +17,32 @@
             <div class="admin-user-controls">
                 <input type="text" class="admin-pid-search" id="admin-user-search"
                        placeholder="Search users..." oninput="renderAdminUserRows()">
+                <div class="admin-user-role-actions">
+                    <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-user-promote-btn"
+                            onclick="setAdminUserRole('admin')" disabled>Promote</button>
+                    <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-user-demote-btn"
+                            onclick="setAdminUserRole('local')" disabled>Demote</button>
+                </div>
                 <div class="admin-user-summary" id="admin-user-summary"></div>
             </div>
 
-            <div class="admin-user-list">
-                <div class="admin-user-row admin-user-row-header">
-                    <span class="admin-user-col-name">Username</span>
-                    <span class="admin-user-col-role">Role</span>
+            <div class="admin-user-layout">
+                <div class="admin-user-list" id="admin-user-list">
+                    <div class="admin-user-table-header" id="admin-user-table-header">
+                        <div class="admin-user-row admin-user-row-header">
+                            <span class="admin-user-col-name">Username</span>
+                            <span class="admin-user-col-role">Role</span>
+                            <span class="admin-user-col-delete"></span>
+                        </div>
+                    </div>
+                    <div class="admin-user-table-scroll">
+                        <div class="admin-user-table" id="admin-user-table"></div>
+                    </div>
                 </div>
-                <div class="admin-user-table-scroll">
-                    <div class="admin-user-table" id="admin-user-table"></div>
+                <div class="admin-user-profile-col" id="admin-user-profile-col">
+                    <div class="admin-pid-detail-empty">Select a user from the list to view their profile.</div>
                 </div>
+                <div class="admin-user-detail" id="admin-user-detail"></div>
             </div>
         </div>
 

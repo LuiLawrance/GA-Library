@@ -12,7 +12,7 @@ from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id,
     find_product_ids_by_editions, import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, \
     scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
-from user import JSON_USERS, user_create, user_login
+from user import JSON_USERS, user_create, user_delete, user_login
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
@@ -864,12 +864,21 @@ def _days_since(iso_date: str | None) -> int | None:
     return (date.today() - date.fromisoformat(iso_date)).days
 
 
+def _load_users_data() -> dict:
+    with new_json(JSON_USERS).open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_users_data(data: dict) -> None:
+    with new_json(JSON_USERS).open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
 @app.get("/api/admin/users")
 async def api_admin_users(request: Request):
     require_admin(request)
 
-    with new_json(JSON_USERS).open(encoding="utf-8") as f:
-        users_data = json.load(f)
+    users_data = _load_users_data()
 
     results = [
         {"username": username, "auth_type": info.get("auth_type")}
@@ -878,6 +887,112 @@ async def api_admin_users(request: Request):
     results.sort(key=lambda r: r["username"].lower())
 
     return JSONResponse({"users": results})
+
+
+@app.post("/api/admin/users/{username}/role")
+async def api_admin_set_user_role(username: str, request: Request):
+    admin = require_admin(request)
+
+    body = await request.json()
+    auth_type = body.get("auth_type")
+
+    if auth_type not in ("admin", "local"):
+        raise HTTPException(status_code=400, detail="auth_type must be 'admin' or 'local'")
+
+    if username == admin:
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
+
+    users_data = _load_users_data()
+
+    if username not in users_data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    users_data[username]["auth_type"] = auth_type
+    _save_users_data(users_data)
+
+    return JSONResponse({"username": username, "auth_type": auth_type})
+
+
+@app.delete("/api/admin/users/{username}")
+async def api_admin_delete_user(username: str, request: Request):
+    admin = require_admin(request)
+
+    users_data = _load_users_data()
+
+    if username not in users_data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if username == admin:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    if users_data[username].get("auth_type") == users_data[admin].get("auth_type"):
+        raise HTTPException(status_code=400, detail="Cannot delete a user of the same rank")
+
+    user_delete(username)
+
+    return JSONResponse({"deleted": username})
+
+
+def _require_existing_user(username: str) -> None:
+    users_data = _load_users_data()
+
+    if username not in users_data:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
+def _bin_card_count(bin_info: dict) -> int:
+    total = 0
+    for section in bin_info.get("sections", {}).values():
+        for card in section.values():
+            for edition in card.values():
+                total += sum(edition.values())
+    return total
+
+
+@app.get("/api/admin/users/{username}/inventory")
+async def api_admin_user_inventory(username: str, request: Request):
+    require_admin(request)
+    _require_existing_user(username)
+
+    bins_data = _inv_load(username)
+
+    bins = [
+        {
+            "name": name,
+            "section_count": len(bin_info.get("sections", {})),
+            "card_count": _bin_card_count(bin_info),
+            "desc": bin_info.get("desc", ""),
+            "banner": bin_info.get("banner"),
+            "default": bool(bin_info.get("default")),
+        }
+        for name, bin_info in bins_data.items()
+    ]
+    bins.sort(key=lambda b: b["name"].lower())
+
+    return JSONResponse({"bins": bins})
+
+
+@app.get("/api/admin/users/{username}/decks")
+async def api_admin_user_decks(username: str, request: Request):
+    require_admin(request)
+    _require_existing_user(username)
+
+    index = _deck_index_load(username)
+
+    decks = []
+    for name, entry in index.items():
+        deck_data = _deck_load(username, name)
+        count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
+        decks.append({
+            "name": name,
+            "format": (deck_data or {}).get("format", entry.get("format", "")),
+            "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
+            "banner": entry.get("banner"),
+            "card_count": count,
+        })
+    decks.sort(key=lambda d: d["name"].lower())
+
+    return JSONResponse({"decks": decks})
 
 
 @app.get("/api/admin/pricing/product-ids")

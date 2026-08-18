@@ -1,6 +1,9 @@
 let adminActiveSection = 'pricing';
 let adminUsersLoaded = false;
 let adminUsersData = [];
+let adminUserDetailSelected = null;
+let adminUserDetailInventory = null;
+let adminUserDetailDecks = null;
 let adminPidLoaded = false;
 let adminPidData = [];
 let adminPidSelected = new Set();
@@ -108,14 +111,328 @@ function renderAdminUserRows() {
     summary.textContent = `${adminUsersData.length} user(s)`
         + (filtered.length !== adminUsersData.length ? ` — showing ${filtered.length}` : '');
 
-    const rows = filtered.map(u => `
-        <div class="admin-user-row">
-            <span class="admin-user-col-name">${escapeHtml(u.username)}</span>
-            <span class="admin-user-col-role">${escapeHtml(u.auth_type || '—')}</span>
-        </div>
-    `).join('');
+    // The logged-in admin can never delete themselves or a peer of their own
+    // rank (only require_admin-gated accounts reach this page at all, so
+    // "peer" today always means "another admin" — but this is looked up from
+    // the viewer's own record rather than hardcoded, so it still holds if
+    // more ranks are ever added).
+    const viewerRank = adminUsersData.find(u => u.username === currentUser)?.auth_type;
+
+    const rows = filtered.map(u => {
+        const canDelete = viewerRank && u.username !== currentUser && u.auth_type !== viewerRank;
+        const deleteBtn = canDelete
+            ? `<button type="button" class="admin-pid-detail-delete-btn" title="Delete user"
+                   onclick="event.stopPropagation(); deleteAdminUser('${escapeHtml(u.username)}')">&times;</button>`
+            : '';
+
+        return `
+            <div class="admin-user-row ${u.username === adminUserDetailSelected ? 'admin-user-row-active' : ''}"
+                 onclick="selectAdminUserDetail('${escapeHtml(u.username)}')">
+                <span class="admin-user-col-name">${escapeHtml(u.username)}</span>
+                <span class="admin-user-col-role">${escapeHtml(u.auth_type || '—')}</span>
+                <span class="admin-user-col-delete">${deleteBtn}</span>
+            </div>
+        `;
+    }).join('');
 
     table.innerHTML = rows || '<div class="admin-pid-empty">No users match.</div>';
+    syncAdminUserHeaderScrollbarOffset();
+}
+
+// Mirrors syncAdminPidHeaderScrollbarOffset() — the header row lives outside
+// the scrollable body, so when a scrollbar appears it eats into the body's
+// width but not the header's, drifting the Role column out of line with the
+// data underneath it unless the header reserves the same strip.
+function syncAdminUserHeaderScrollbarOffset() {
+    const scrollEl = document.querySelector('#admin-user-list .admin-user-table-scroll');
+    const header = document.getElementById('admin-user-table-header');
+    if (!scrollEl || !header) return;
+
+    const scrollbarWidth = scrollEl.offsetWidth - scrollEl.clientWidth;
+    header.style.paddingRight = `${scrollbarWidth}px`;
+}
+
+async function deleteAdminUser(username) {
+    const confirmed = await appConfirm(
+        `Delete user "${username}"? This permanently removes their account, inventory, and decks.`,
+        {title: 'Delete User', confirmLabel: 'Delete'}
+    );
+    if (!confirmed) return;
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {method: 'DELETE'});
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.detail || 'Failed to delete user.');
+            return;
+        }
+
+        adminUsersData = adminUsersData.filter(u => u.username !== username);
+
+        if (adminUserDetailSelected === username) {
+            adminUserDetailSelected = null;
+            adminUserDetailInventory = null;
+            adminUserDetailDecks = null;
+            renderAdminUserProfileCol();
+            renderAdminUserDetail();
+            updateAdminUserRoleButtons();
+        }
+
+        renderAdminUserRows();
+    } catch (err) {
+        alert('Request failed.');
+    }
+}
+
+async function setAdminUserRole(authType) {
+    const username = adminUserDetailSelected;
+    if (!username) return;
+
+    const promoteBtn = document.getElementById('admin-user-promote-btn');
+    const demoteBtn = document.getElementById('admin-user-demote-btn');
+    if (promoteBtn) promoteBtn.disabled = true;
+    if (demoteBtn) demoteBtn.disabled = true;
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/role`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({auth_type: authType}),
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.detail || 'Failed to update role.');
+            updateAdminUserRoleButtons();
+            return;
+        }
+
+        const record = adminUsersData.find(u => u.username === username);
+        if (record) record.auth_type = authType;
+
+        renderAdminUserRows();
+        renderAdminUserProfileCol();
+        updateAdminUserRoleButtons();
+    } catch (err) {
+        alert('Request failed.');
+        updateAdminUserRoleButtons();
+    }
+}
+
+// Buttons "light up" (become enabled) only when a user is selected and the
+// action would actually do something — already-admin can't be promoted,
+// already-local can't be demoted, and the viewer can't change their own role
+// (avoids an admin accidentally locking themselves out mid-session).
+function updateAdminUserRoleButtons() {
+    const promoteBtn = document.getElementById('admin-user-promote-btn');
+    const demoteBtn = document.getElementById('admin-user-demote-btn');
+    if (!promoteBtn || !demoteBtn) return;
+
+    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+    const isSelf = adminUserDetailSelected === currentUser;
+
+    promoteBtn.disabled = !record || isSelf || record.auth_type === 'admin';
+    demoteBtn.disabled = !record || isSelf || record.auth_type === 'local';
+}
+
+async function selectAdminUserDetail(username) {
+    if (adminUserDetailSelected === username) return;
+
+    const profileCol = document.getElementById('admin-user-profile-col');
+    const detail = document.getElementById('admin-user-detail');
+
+    profileCol?.classList.add('fade-out');
+    detail?.classList.add('fade-out');
+    await sleep(150);
+
+    adminUserDetailSelected = username;
+    adminUserDetailInventory = null;
+    adminUserDetailDecks = null;
+
+    renderAdminUserRows();
+    renderAdminUserProfileCol();
+    renderAdminUserDetail();
+    updateAdminUserRoleButtons();
+
+    profileCol?.classList.remove('fade-out');
+    detail?.classList.remove('fade-out');
+    profileCol?.classList.add('fade-in');
+    detail?.classList.add('fade-in');
+    setTimeout(() => {
+        profileCol?.classList.remove('fade-in');
+        detail?.classList.remove('fade-in');
+    }, 200);
+
+    await Promise.all([loadAdminUserInventory(), loadAdminUserDecks()]);
+}
+
+async function loadAdminUserInventory() {
+    const username = adminUserDetailSelected;
+    if (!username) return;
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/inventory`);
+        if (!res.ok) throw new Error('Failed to load inventory');
+        const data = await res.json();
+
+        if (adminUserDetailSelected !== username) return;
+        adminUserDetailInventory = data.bins || [];
+    } catch (err) {
+        if (adminUserDetailSelected !== username) return;
+        adminUserDetailInventory = [];
+    }
+
+    renderAdminUserProfileCol();
+    renderAdminUserDetail();
+}
+
+async function loadAdminUserDecks() {
+    const username = adminUserDetailSelected;
+    if (!username) return;
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/decks`);
+        if (!res.ok) throw new Error('Failed to load decks');
+        const data = await res.json();
+
+        if (adminUserDetailSelected !== username) return;
+        adminUserDetailDecks = data.decks || [];
+    } catch (err) {
+        if (adminUserDetailSelected !== username) return;
+        adminUserDetailDecks = [];
+    }
+
+    renderAdminUserProfileCol();
+    renderAdminUserDetail();
+}
+
+function renderAdminUserProfileCol() {
+    const col = document.getElementById('admin-user-profile-col');
+    if (!col) return;
+
+    if (!adminUserDetailSelected) {
+        col.innerHTML = '<div class="admin-pid-detail-empty">Select a user from the list to view their profile.</div>';
+        return;
+    }
+
+    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+    if (!record) {
+        col.innerHTML = '<div class="admin-pid-detail-empty">User not found.</div>';
+        return;
+    }
+
+    const binsLoaded = !!adminUserDetailInventory;
+    const decksLoaded = !!adminUserDetailDecks;
+    const binCount = binsLoaded ? adminUserDetailInventory.length : null;
+    const cardCount = binsLoaded ? adminUserDetailInventory.reduce((sum, b) => sum + b.card_count, 0) : null;
+    const deckCount = decksLoaded ? adminUserDetailDecks.length : null;
+
+    col.innerHTML = `
+        <div class="admin-pid-detail-header">
+            <span class="admin-user-profile-name">${escapeHtml(record.username)}</span>
+            <span class="admin-user-profile-role">${escapeHtml(record.auth_type || '—')}</span>
+        </div>
+        <div class="drawer-stats">
+            <div class="drawer-stat">
+                <span class="drawer-stat-label">Bins</span>
+                <span class="drawer-stat-value">${binCount ?? '…'}</span>
+            </div>
+            <div class="drawer-stat">
+                <span class="drawer-stat-label">Cards</span>
+                <span class="drawer-stat-value">${cardCount ?? '…'}</span>
+            </div>
+            <div class="drawer-stat">
+                <span class="drawer-stat-label">Decks</span>
+                <span class="drawer-stat-value">${deckCount ?? '…'}</span>
+            </div>
+        </div>
+    `;
+}
+
+function renderAdminUserDetail() {
+    const panel = document.getElementById('admin-user-detail');
+    if (!panel) return;
+
+    if (!adminUserDetailSelected) {
+        panel.innerHTML = '';
+        return;
+    }
+
+    const invLoaded = !!adminUserDetailInventory;
+    const decksLoaded = !!adminUserDetailDecks;
+
+    panel.innerHTML = `
+        <div class="admin-pid-detail-section" id="admin-user-section-inventory">
+            <div class="admin-pid-detail-section-header">
+                <span class="admin-pid-detail-section-title">Inventory</span>
+            </div>
+            ${adminUserBinTilesHtml(invLoaded)}
+        </div>
+        <div class="admin-pid-detail-section" id="admin-user-section-decks">
+            <div class="admin-pid-detail-section-header">
+                <span class="admin-pid-detail-section-title">Decks</span>
+            </div>
+            ${adminUserDeckTilesHtml(decksLoaded)}
+        </div>
+    `;
+}
+
+// Mirrors buildBinTile() in inventory.js (static/css/inventory.css .inv-bin-tile*),
+// minus the qty-edit affordances and price-value badge that don't apply to a
+// read-only admin overview of someone else's inventory.
+function adminUserBinTilesHtml(loaded) {
+    if (!loaded) return '<div class="admin-pid-detail-loading">Loading…</div>';
+    if (!adminUserDetailInventory.length) return '<div class="admin-pid-detail-empty-small">No inventory bins.</div>';
+
+    const tiles = adminUserDetailInventory.map(b => {
+        const banner = b.banner
+            ? `<div class="inv-bin-banner" style="background-image: url('/images/${encodeURIComponent(b.banner)}.jpg')"></div>`
+            : '';
+
+        return `
+            <div class="inv-bin-tile admin-user-tile ${b.default ? 'default-bin' : ''} ${b.banner ? 'has-banner' : ''}">
+                ${banner}
+                <div class="inv-bin-icon-row">
+                    <span class="inv-bin-icon">${b.default ? '📦' : '⬡'}</span>
+                    ${b.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
+                </div>
+                <div class="inv-bin-name">${escapeHtml(b.name)}</div>
+                <div class="inv-bin-desc">${escapeHtml(b.desc || '')}</div>
+                <div class="inv-bin-meta-row">
+                    <div class="inv-bin-meta">${b.card_count} card${b.card_count !== 1 ? 's' : ''}
+                        · ${b.section_count} section${b.section_count !== 1 ? 's' : ''}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    return `<div class="admin-user-tile-grid">${tiles}</div>`;
+}
+
+// Mirrors buildDeckTile() in decks_ga.js (static/css/decks_ga.css .dga-deck-tile*),
+// read-only — no click-through, since there's no admin deck-detail view.
+function adminUserDeckTilesHtml(loaded) {
+    if (!loaded) return '<div class="admin-pid-detail-loading">Loading…</div>';
+    if (!adminUserDetailDecks.length) return '<div class="admin-pid-detail-empty-small">No decks.</div>';
+
+    const tiles = adminUserDetailDecks.map(d => {
+        const banner = d.banner
+            ? `<div class="dga-tile-banner" style="background-image: url('/images/${encodeURIComponent(d.banner)}.jpg')"></div>`
+            : '';
+        const format = d.format ? `<span class="dga-tile-format">${escapeHtml(d.format)}</span>` : '';
+
+        return `
+            <div class="dga-deck-tile admin-user-tile ${d.banner ? 'has-banner' : ''}">
+                ${banner}
+                <div class="dga-tile-icon">⬡</div>
+                <div class="dga-tile-name">${escapeHtml(d.name)}${format}</div>
+                <div class="dga-tile-desc">${escapeHtml(d.desc || '')}</div>
+                <div class="dga-tile-meta">${d.card_count} card${d.card_count !== 1 ? 's' : ''}</div>
+            </div>
+        `;
+    }).join('');
+
+    return `<div class="admin-user-tile-grid">${tiles}</div>`;
 }
 
 async function loadAdminPricingIds() {
@@ -1057,6 +1374,15 @@ async function submitAdminPidBulkPasteSales() {
         if (data.skipped_unrecognized) parts.push(`${data.skipped_unrecognized} unrecognized variant(s)`);
         if (data.parse_errors && data.parse_errors.length) parts.push(`${data.parse_errors.length} line(s) unparsed`);
 
+        // A successful import (res.ok) always reached the point in
+        // import_pasted_sales_tcg_by_edition() that stamps last_sales, even if
+        // every entry turned out to be a duplicate — keep the row's badge in sync.
+        const record = adminPidData.find(r => r.edition_id === editionId);
+        if (record) {
+            record.sales_days_since = 0;
+            renderAdminPidRows();
+        }
+
         await loadAdminPricingDetailHistory();
 
         const freshStatus = document.getElementById('admin-pid-bulk-paste-status');
@@ -1276,6 +1602,16 @@ async function submitAdminPricingManualEntry(type) {
             return;
         }
 
+        // Matches add_manual_entry() in pricing_ga.py, which now stamps
+        // last_sales/last_listings for a manual entry the same as a scrape or
+        // pasted import would — keep the row's badge in sync with that.
+        const record = adminPidData.find(r => r.edition_id === editionId);
+        if (record) {
+            if (type === 'sales') record.sales_days_since = 0;
+            else record.listings_days_since = 0;
+            renderAdminPidRows();
+        }
+
         // Success re-renders the whole detail panel (fresh, empty form) via the
         // history reload, so the "Added." confirmation must target the new DOM node.
         await loadAdminPricingDetailHistory();
@@ -1351,6 +1687,9 @@ function initAdmin() {
     adminActiveSection = 'pricing';
     adminUsersLoaded = false;
     adminUsersData = [];
+    adminUserDetailSelected = null;
+    adminUserDetailInventory = null;
+    adminUserDetailDecks = null;
     adminPidLoaded = false;
     adminPidData = [];
     adminPidSelected = new Set();
@@ -1371,6 +1710,7 @@ function initAdmin() {
     adminPidBulkPastePending = false;
     document.querySelector('.footer')?.classList.add('footer-hidden');
     updateAdminPidTcgButton();
+    updateAdminUserRoleButtons();
     loadAdminPricingIds();
 }
 

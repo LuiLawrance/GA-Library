@@ -576,6 +576,15 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
 
     card_id = _append_entry(file_path, edition_id, foil_id, entry)
 
+    # A manual entry is us recording pricing data for this edition just as much
+    # as a scrape or pasted import is — count it the same way so the admin
+    # console's "last updated" badge (and, for listings, the refresh gate)
+    # reflect it.
+    if entry_type == "sales":
+        api_tcgplayer.set_last_sales(edition_id, debug)
+    else:
+        api_tcgplayer.set_last_listings(edition_id, debug)
+
     if debug:
         print(
             f"Added manual {entry_type} entry | "
