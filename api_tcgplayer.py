@@ -11,6 +11,13 @@ SEARCH_URL = "https://www.tcgplayer.com/search/grand-archive/product"
 
 JSON_IDS = "DATA_GA/PRICING_GA/ID_TCGPLAYER.json"
 
+# Admins enter this as the product ID for cards confirmed to have no
+# TCGPlayer listings at all, instead of leaving it blank — it marks the
+# absence as deliberate rather than "not yet looked up". Scrape entry points
+# must treat it exactly like a missing product ID: no product page exists to
+# open a browser and navigate to.
+NO_LISTINGS_SENTINEL = "~"
+
 CONDITION_MAP = {
     "NM": "Near Mint",
     "LP": "Lightly Played",

@@ -1,6 +1,7 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _sort_collector_number, _update_slug, \
     JSON_EDITIONS, JSON_INFO, JSON_SLUGS, JSON_THEMA, set_search, UPDATE_THRESHOLD
-from api_tcgplayer import get_all_ids, get_last_listings, get_last_sales, get_product_id, set_product_id
+from api_tcgplayer import NO_LISTINGS_SENTINEL, get_all_ids, get_last_listings, get_last_sales, get_product_id, \
+    set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -929,8 +930,8 @@ async def api_admin_set_product_id(request: Request):
     if not edition_id:
         raise HTTPException(status_code=400, detail="edition_id is required")
 
-    if product_id and not product_id.isdigit():
-        raise HTTPException(status_code=400, detail="Product ID must be numeric")
+    if product_id and product_id != NO_LISTINGS_SENTINEL and not product_id.isdigit():
+        raise HTTPException(status_code=400, detail=f'Product ID must be numeric, or "{NO_LISTINGS_SENTINEL}" for no listings')
 
     with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
         editions_data = json.load(f)

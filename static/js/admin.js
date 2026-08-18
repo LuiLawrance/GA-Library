@@ -30,6 +30,17 @@ const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played'
 // lists options from most common to rarest instead of alphabetically.
 const ADMIN_PID_RARITY_ORDER = ['C', 'U', 'R', 'SR', 'UR', 'PR', 'CSR', 'CUR', 'CPR'];
 
+// Matches NO_LISTINGS_SENTINEL in api_tcgplayer.py — admins enter this instead
+// of a real product ID for cards confirmed to have no TCGPlayer listings at
+// all, so it's not mistaken for "not yet looked up".
+const ADMIN_PID_NO_LISTINGS_SENTINEL = '~';
+
+// True only for a product ID that's actually worth sending to a refresh —
+// excludes both a blank/missing ID and the "~" no-listings marker.
+function adminPidIsScrapable(productId) {
+    return !!productId && productId !== ADMIN_PID_NO_LISTINGS_SENTINEL;
+}
+
 async function switchAdminSection(section) {
     const page = document.getElementById('admin-page');
     if (!page || adminActiveSection === section) return;
@@ -271,20 +282,24 @@ function syncAdminPidHeaderScrollbarOffset() {
 
 function adminPidProductIdFieldHtml(e) {
     const finding = adminPidFindingIds.has(e.edition_id);
+    const noListings = e.product_id === ADMIN_PID_NO_LISTINGS_SENTINEL;
+
+    const inputStateClass = noListings ? 'admin-pid-input-no-listings' : e.product_id ? 'admin-pid-input-filled' : '';
 
     return `
         <div class="admin-pid-pid-wrap">
-            <input type="text" class="admin-pid-input ${e.product_id ? 'admin-pid-input-filled' : ''}"
+            <input type="text" class="admin-pid-input ${inputStateClass}"
                    data-edition-id="${escapeHtml(e.edition_id)}"
                    value="${escapeHtml(e.product_id || '')}"
                    placeholder="Missing"
+                   title="${noListings ? 'Marked as having no TCGPlayer listings' : ''}"
                    ${finding ? 'disabled' : ''}
                    onkeydown="if (event.key === 'Enter') this.blur()"
                    onblur="saveAdminProductId(this)">
             <button type="button" class="admin-pid-find-btn ${finding ? 'finding' : ''}"
-                    title="Auto-detect from TCGPlayer"
-                    ${finding ? 'disabled' : ''}
-                    onclick="findAdminProductId('${escapeHtml(e.edition_id)}')">${finding ? '…' : '🔍'}</button>
+                    title="${noListings ? 'Marked as having no TCGPlayer listings — auto-detect disabled' : 'Auto-detect from TCGPlayer'}"
+                    ${finding || noListings ? 'disabled' : ''}
+                    onclick="findAdminProductId('${escapeHtml(e.edition_id)}')">${finding ? '…' : noListings ? '🚫' : '🔍'}</button>
         </div>
     `;
 }
@@ -612,20 +627,22 @@ async function refreshSelectedAdminPricing(target) {
 
     const progress = document.getElementById('admin-pid-progress');
 
-    // A card with no TCGPlayer product ID configured can't be scraped — filter
-    // those out up front instead of sending them to the batch job, where they'd
-    // just come back as a per-edition error. If that's every requested card
-    // (in particular, the common single-card case), cancel the refresh outright
-    // instead of starting a job with nothing left to do.
-    const editionIds = requestedIds.filter(id => adminPidData.find(e => e.edition_id === id)?.product_id);
+    // A card with no product ID — or "~", which admins enter to mark a card as
+    // confirmed to have no TCGPlayer listings at all — can't be scraped: filter
+    // those out up front instead of sending them to the batch job (which would
+    // otherwise open a browser and try to navigate to a product page that
+    // doesn't exist). If that's every requested card (in particular, the
+    // common single-card case), cancel the refresh outright instead of
+    // starting a job with nothing left to do.
+    const editionIds = requestedIds.filter(id => adminPidIsScrapable(adminPidData.find(e => e.edition_id === id)?.product_id));
     const skippedCount = requestedIds.length - editionIds.length;
 
     if (editionIds.length === 0) {
         if (progress) {
             progress.classList.remove('hidden');
             progress.textContent = requestedIds.length === 1
-                ? 'Cancelled — this card has no TCGPlayer product ID set.'
-                : `Cancelled — none of the ${requestedIds.length} selected cards have a TCGPlayer product ID set.`;
+                ? 'Cancelled — this card has no TCGPlayer listings to refresh.'
+                : `Cancelled — none of the ${requestedIds.length} selected cards have TCGPlayer listings to refresh.`;
             setTimeout(() => progress.classList.add('hidden'), 4000);
         }
         return;
@@ -723,7 +740,7 @@ async function refreshSelectedAdminPricing(target) {
 
     if (progress) {
         progress.textContent = `Done refreshing ${editionIds.length} edition(s)`
-            + (skippedCount > 0 ? `, skipped ${skippedCount} without a product ID` : '') + '.';
+            + (skippedCount > 0 ? `, skipped ${skippedCount} with no TCGPlayer listings to refresh` : '') + '.';
         setTimeout(() => progress.classList.add('hidden'), 4000);
     }
 

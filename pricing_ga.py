@@ -789,6 +789,15 @@ def _process_listings_result(edition_id: str, listings: list[dict] | None, debug
     }
 
 
+def _no_product_id_error(product_id: str | None) -> dict:
+    """Shared "can't scrape" result for a missing or '~'-marked product ID —
+    either way there's no real product page to open a browser and visit."""
+    if product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
+        return {"ok": False, "error": 'Marked as having no TCGPlayer listings ("~").'}
+
+    return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+
+
 def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None) -> dict:
     """Web-safe core: no interactive prompts, requires a product_id to already
     be stored. Returns a result dict rather than printing, so both the CLI
@@ -801,8 +810,8 @@ def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headles
 
     product_id = api_tcgplayer.get_product_id(edition_id)
 
-    if not product_id:
-        return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+    if not product_id or product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
+        return _no_product_id_error(product_id)
 
     url = api_tcgplayer._build_url(product_id)
     listings = api_tcgplayer.fetch_listings(url, debug, headless, page=page)
@@ -864,8 +873,8 @@ def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: 
     Playwright `page` to reuse a shared browser instead of opening a new one."""
     product_id = api_tcgplayer.get_product_id(edition_id)
 
-    if not product_id:
-        return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+    if not product_id or product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
+        return _no_product_id_error(product_id)
 
     url = api_tcgplayer._build_url(product_id)
     sales = api_tcgplayer.fetch_sales(url, debug, headless, page=page)
@@ -883,8 +892,8 @@ def scrape_sales_and_listings_tcg_by_edition(edition_id: str, debug: bool = Fals
     (e.g. one spanning multiple editions in a batch refresh)."""
     product_id = api_tcgplayer.get_product_id(edition_id)
 
-    if not product_id:
-        error = {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
+    if not product_id or product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
+        error = _no_product_id_error(product_id)
         return {"sales": error, "listings": error}
 
     gated = _listings_gate_result(edition_id)

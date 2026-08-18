@@ -505,6 +505,15 @@
     border-color: var(--series-sales);
 }
 
+/* Cards deliberately marked "~" (confirmed to have no TCGPlayer listings at
+   all) get a neutral/muted look — distinct from both the red "missing, not
+   yet looked up" default and the green "filled with a real ID" state. */
+.admin-pid-input-no-listings {
+    border-color: var(--border);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 .admin-pid-input-error {
     border-color: var(--error);
     background: color-mix(in srgb, var(--error) 12%, var(--bg-card));
