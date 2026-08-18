@@ -1987,7 +1987,8 @@ async function searchDgaAddCards() {
                 tile.innerHTML = `
                     <div class="edition-tile-wrap">
                         <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
-                        <div class="inv-search-tile-overlay">＋</div>
+                        <div class="card-tile-dim"></div>
+                        <div class="inv-search-tile-add">+</div>
                     </div>`;
                 tile.onclick = () => dgaGoToConfirm(card.card_id, card.name, card.edition_id, dgaCardSetLabel(card));
                 tile.addEventListener('animationend', () => tile.classList.add('animated'));

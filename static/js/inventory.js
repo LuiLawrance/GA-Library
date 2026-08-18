@@ -1540,7 +1540,8 @@ async function searchAddCards() {
                 tile.innerHTML = `
                     <div class="edition-tile-wrap">
                         <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
-                        <div class="inv-search-tile-overlay">＋</div>
+                        <div class="card-tile-dim"></div>
+                        <div class="inv-search-tile-add">+</div>
                     </div>`;
                 tile.onclick = () => goToFoilStep(card.card_id, card.edition_id, card.name);
                 tile.addEventListener('animationend', () => tile.classList.add('animated'));
