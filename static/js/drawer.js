@@ -1073,7 +1073,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName) {
                             id="${cfg.tilePrefix}${eid}">
                         <span class="edition-prefix-badge">${einfo.set_prefix}</span>
                         <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>
-                        ${einfo.last_price != null ? `<span class="inv-price-badge">$${Number(einfo.last_price).toFixed(2)}</span>` : ''}
+                        ${priceBadgesHTML(einfo.last_price, einfo.lowest_listing)}
                     </div>
                 </div>
             </div>

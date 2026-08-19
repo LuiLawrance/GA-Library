@@ -118,7 +118,8 @@
 
 .card-tile--authed:hover .inv-qty-badge,
 .card-tile--authed:hover .edition-rarity-badge,
-.card-tile--authed:hover .inv-price-badge {
+.card-tile--authed:hover .inv-price-badge,
+.card-tile--authed:hover .inv-listing-badge {
     opacity: 0;
     transition: opacity 0.15s;
 }

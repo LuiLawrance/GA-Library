@@ -177,14 +177,28 @@ def _pick_default_foil(foils: dict):
     return min(foils.items(), key=lambda kv: priority(kv[1]))[0]
 
 
+def _last_sale_price_from_records(records: list):
+    return max(records, key=lambda r: r["date"])["price"] if records else None
+
+
+def _lowest_listing_price_from_records(records: list):
+    return min((r["price"] for r in records), default=None)
+
+
 def _last_sale_price(sales_data: dict, card_id: str, edition_id: str, foils: dict):
     foil_id = _pick_default_foil(foils)
     if not foil_id:
         return None
     records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
-    if not records:
+    return _last_sale_price_from_records(records)
+
+
+def _lowest_listing_price(listings_data: dict, card_id: str, edition_id: str, foils: dict):
+    foil_id = _pick_default_foil(foils)
+    if not foil_id:
         return None
-    return max(records, key=lambda r: r["date"])["price"]
+    records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+    return _lowest_listing_price_from_records(records)
 
 
 @app.get("/api/cards/search")
@@ -203,6 +217,9 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
 
     with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
+
+    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
+        listings_data = json.load(f)
 
     def enrich(cards):
         set_file_cache = {}
@@ -224,6 +241,9 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
             )
             card["last_price"] = _last_sale_price(
                 sales_data, card["card_id"], card["edition_id"], edition_info.get("foils", {})
+            )
+            card["lowest_listing"] = _lowest_listing_price(
+                listings_data, card["card_id"], card["edition_id"], edition_info.get("foils", {})
             )
         return cards
 
@@ -507,6 +527,9 @@ async def api_card_detail(card_id: str):
         edition_info["thema"] = thema_data.get(edition_id, {})
         edition_info["last_price"] = _last_sale_price(
             sales_data, card_id, edition_id, edition_info.get("foils", {})
+        )
+        edition_info["lowest_listing"] = _lowest_listing_price(
+            listings_data, card_id, edition_id, edition_info.get("foils", {})
         )
 
         edition_listings = card_listings.get(edition_id, {})
@@ -1675,18 +1698,26 @@ async def api_bin_prices(bin_name: str, request: Request):
     with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
+    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
+        listings_data = json.load(f)
+
     prices: dict = {}
 
     for cards in inv[bin_name].get("sections", {}).values():
         for card_id, editions in cards.items():
             for edition_id, foils in editions.items():
                 for foil_id in foils:
-                    records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
-                    if not records:
+                    sale_records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                    listing_records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                    last_price = _last_sale_price_from_records(sale_records)
+                    lowest_listing = _lowest_listing_price_from_records(listing_records)
+                    if last_price is None and lowest_listing is None:
                         continue
 
-                    latest = max(records, key=lambda r: r["date"])
-                    prices.setdefault(card_id, {}).setdefault(edition_id, {})[foil_id] = latest["price"]
+                    prices.setdefault(card_id, {}).setdefault(edition_id, {})[foil_id] = {
+                        "price": last_price,
+                        "lowest_listing": lowest_listing,
+                    }
 
     return JSONResponse(prices)
 

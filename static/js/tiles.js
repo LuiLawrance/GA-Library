@@ -8,6 +8,22 @@ function toFoilLabel(s) {
     return s ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '';
 }
 
+// ── Sale/listing price badge markup — shared by Cards, Inventory, and the
+// drawer's edition grid. Sale (green) always sits on top; the listing (red)
+// badge stacks under it, or takes its spot via .inv-listing-badge--solo
+// when there's no sale price to stack under. ──
+function priceBadgesHTML(lastPrice, lowestListing) {
+    let html = '';
+    if (lastPrice != null) {
+        html += `<span class="inv-price-badge">$${Number(lastPrice).toFixed(2)}</span>`;
+    }
+    if (lowestListing != null) {
+        const solo = lastPrice == null ? ' inv-listing-badge--solo' : '';
+        html += `<span class="inv-listing-badge${solo}">$${Number(lowestListing).toFixed(2)}</span>`;
+    }
+    return html;
+}
+
 // ── Foil priority: normal/nonfoil > foil > anything else ──
 function pickDefaultFoil(foils) {
     const priority = kind => {

@@ -1187,7 +1187,9 @@ function buildInvCardTile(row, index, total = 1) {
     invWireTileDrag(tile, row);
 
     const uid = `${row.card_id}-${row.edition_id}-${row.foil_id}`;
-    const lastPrice = invBinPrices[row.card_id]?.[row.edition_id]?.[row.foil_id];
+    const priceEntry = invBinPrices[row.card_id]?.[row.edition_id]?.[row.foil_id];
+    const lastPrice = priceEntry?.price;
+    const lowestListing = priceEntry?.lowest_listing;
 
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
@@ -1196,7 +1198,7 @@ function buildInvCardTile(row, index, total = 1) {
             <div class="card-tile-dim"></div>
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}${getFoilSuffix(row) ? ' has-foil-suffix' : ''}">${rarity}${getFoilSuffix(row)}</span>` : ''}
         </div>
-        ${lastPrice !== undefined ? `<span class="inv-price-badge">$${lastPrice.toFixed(2)}</span>` : ''}
+        ${priceBadgesHTML(lastPrice, lowestListing)}
         <span class="inv-qty-badge">x${row.quantity}</span>
         <div class="inv-card-tile-overlay">
             <div class="inv-card-tile-info">
