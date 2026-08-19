@@ -9,7 +9,6 @@ let dgaAddModalCardName = null;
 let dgaAddModalEditionId = null;
 let dgaAddModalPreSection = null;
 let dgaAddAcIndex = -1;
-let _dgaAddModalResizeAnim = null;
 
 // ═══════════════════════════════════════
 // DECK CONTEXT MENU
@@ -1523,36 +1522,10 @@ function dgaTransitionSettingsToImportExport() {
     dgaSwitchImportExportTab('import');
 
     const ieBox = ieBoxAlready;
-
-    // Reveal it at its real, final size/position right away — both boxes are centered by
-    // the same flex overlay rule, so they share a center point — then fake the "resize"
-    // with a transform: scale() from the settings box's size down to identity. This never
-    // touches width/height (which force a full layout+paint on every animation frame and
-    // is what caused the earlier late snap); the DOM box never actually changes size, so
-    // there's nothing for a reflow to desync from.
     settingsBox.classList.add('hidden');
     overlay.appendChild(ieBox);
     overlay.onclick = dgaCloseImportExportModal;
-
-    const toRect = ieBox.getBoundingClientRect();
-    const scaleX = fromRect.width / toRect.width;
-    const scaleY = fromRect.height / toRect.height;
-
-    ieBox.classList.add('morph-resizing');
-
-    const anim = ieBox.animate([
-        {transform: `scale(${scaleX}, ${scaleY})`},
-        {transform: 'scale(1, 1)'}
-    ], {duration: 350, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-
-    anim.finished.then(() => {
-        anim.cancel();
-        ieBox.style.transform = '';
-        // Deliberately NOT removing 'morph-resizing' here: doing so re-enables .inv-modal's
-        // default `animation: modalReveal`, which — since its 0% keyframe is opacity:0 —
-        // restarts and instantly makes the whole box flash invisible before fading back in.
-        // It stays suppressed until dgaCloseImportExportModal() resets it for next time.
-    }).catch(() => {});
+    morphBoxIn(ieBox, fromRect);
 
     dgaLoadExport();
 }
@@ -1568,44 +1541,18 @@ function dgaTransitionImportExportToSettings() {
     const settingsBox = overlay.querySelector('.inv-modal:not(.inv-modal-import-export)');
     const fromRect = {width: ieBox.offsetWidth, height: ieBox.offsetHeight};
 
-    // Reset any in-flight import/export animation before handing off.
-    _dgaTabHeightAnim?.cancel();
-    _dgaTabHeightAnim = null;
-    ieBox.getAnimations().forEach(a => a.cancel());
-    ieBox.classList.remove('morph-resizing');
-    ieBox.style.transform = '';
-    ieBox.style.height = '';
-    ieBox.style.overflow = '';
+    resetBoxResize(ieBox);
+    resetMorphBox(ieBox);
 
     // Swap content immediately — settings becomes the visible box, import/export goes back
     // to its home overlay — then fake the "shrink" the same way the forward morph fakes the
-    // "grow": settingsBox sits at its real, natural size the whole time; a transform:scale()
-    // starting at the import/export box's old size and easing to identity is what fakes the
-    // motion, so nothing here ever animates width/height directly.
+    // "grow".
     const homeOverlay = document.getElementById('dga-import-export-modal');
     homeOverlay.appendChild(ieBox);
     homeOverlay.classList.add('hidden');
     overlay.onclick = closeDeckSettingsModal;
-    settingsBox.classList.add('morph-resizing'); // suppress modalReveal before it becomes visible
     settingsBox.classList.remove('hidden');
-
-    const toWidth = settingsBox.offsetWidth;
-    const toHeight = settingsBox.offsetHeight;
-    const scaleX = fromRect.width / toWidth;
-    const scaleY = fromRect.height / toHeight;
-
-    const anim = settingsBox.animate([
-        {transform: `scale(${scaleX}, ${scaleY})`},
-        {transform: 'scale(1, 1)'}
-    ], {duration: 350, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-
-    anim.finished.then(() => {
-        anim.cancel();
-        settingsBox.style.transform = '';
-        // 'morph-resizing' stays on until closeDeckSettingsModal() resets it — removing it
-        // here while the box is still visible would restart modalReveal (opacity:0 flash),
-        // same as the import/export box's forward-morph cleanup.
-    }).catch(() => {});
+    morphBoxIn(settingsBox, fromRect);
 }
 
 function dgaOpenImportExportModal() {
@@ -1627,12 +1574,8 @@ function dgaCloseImportExportModal() {
     const ieBox = document.querySelector('.inv-modal-import-export');
 
     // Closing mid-morph should never leave a stale resize animation attached to the box.
-    ieBox.getAnimations().forEach(a => a.cancel());
-    _dgaTabHeightAnim = null;
-    ieBox.classList.remove('morph-resizing');
-    ieBox.style.transform = '';
-    ieBox.style.height = '';
-    ieBox.style.overflow = '';
+    resetBoxResize(ieBox);
+    resetMorphBox(ieBox);
 
     // If the box was borrowed by the settings overlay for the resize morph, return
     // everything to its normal place (invisible now, so no flash from the move).
@@ -1641,16 +1584,13 @@ function dgaCloseImportExportModal() {
         const settingsBox = settingsOverlay.querySelector('.inv-modal:not(.inv-modal-import-export)');
         settingsOverlay.classList.add('hidden');
         settingsOverlay.onclick = closeDeckSettingsModal;
-        settingsBox.getAnimations().forEach(a => a.cancel());
-        settingsBox.classList.remove('hidden', 'morph-resizing');
-        settingsBox.style.transform = '';
+        resetMorphBox(settingsBox);
+        settingsBox.classList.remove('hidden');
         homeOverlay.appendChild(ieBox);
     }
 
     homeOverlay.classList.add('hidden');
 }
-
-let _dgaTabHeightAnim = null;
 
 function dgaSwitchImportExportTab(tab) {
     // Re-entrancy guard: a double-click (or any repeat call while already on this tab)
@@ -1660,40 +1600,13 @@ function dgaSwitchImportExportTab(tab) {
     if (tab === dgaImportExportTab) return;
 
     const box = document.querySelector('.inv-modal-import-export');
-    // offsetHeight (layout height) rather than getBoundingClientRect() (visual, post-transform
-    // size) — a tab click landing while the settings→import/export scale-in entrance is still
-    // playing would otherwise read a shrunk, transform-distorted value as the "from" height.
-    const fromHeight = box.offsetHeight;
-
-    dgaImportExportTab = tab;
-    document.getElementById('dga-import-tab-btn').classList.toggle('active', tab === 'import');
-    document.getElementById('dga-export-tab-btn').classList.toggle('active', tab === 'export');
-    document.getElementById('dga-import-panel').classList.toggle('hidden', tab !== 'import');
-    document.getElementById('dga-export-panel').classList.toggle('hidden', tab !== 'export');
-
-    const toHeight = box.offsetHeight;
-
-    // Cancel only our own previous tab-switch animation if one's still in flight — never
-    // box.getAnimations() wholesale, which would also abort an in-progress entrance morph
-    // (e.g. the settings→import/export scale-in) and snap it to full size prematurely.
-    _dgaTabHeightAnim?.cancel();
-
-    // Skip animating when the box isn't actually visible yet (e.g. this call is just the
-    // initial tab setup before the modal has been shown) — both heights read as 0 then.
-    if (!fromHeight || fromHeight === toHeight) return;
-
-    box.style.overflow = 'hidden';
-    const anim = box.animate([
-        {height: fromHeight + 'px'},
-        {height: toHeight + 'px'}
-    ], {duration: 300, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-    _dgaTabHeightAnim = anim;
-
-    anim.finished.then(() => {
-        anim.cancel();
-        if (_dgaTabHeightAnim === anim) _dgaTabHeightAnim = null;
-        box.style.overflow = '';
-    }).catch(() => {});
+    animateBoxResize(box, () => {
+        dgaImportExportTab = tab;
+        document.getElementById('dga-import-tab-btn').classList.toggle('active', tab === 'import');
+        document.getElementById('dga-export-tab-btn').classList.toggle('active', tab === 'export');
+        document.getElementById('dga-import-panel').classList.toggle('hidden', tab !== 'import');
+        document.getElementById('dga-export-panel').classList.toggle('hidden', tab !== 'export');
+    });
 }
 
 async function dgaLoadExport() {
@@ -1859,68 +1772,12 @@ function closeDeckAddModal() {
     hideDgaAddAc();
     // Closing mid-resize shouldn't leave a stale animation holding the box at the wrong
     // size for next time — it uses fill:'forwards' so it keeps holding even while hidden.
-    _dgaAddModalResizeAnim?.cancel();
-    _dgaAddModalResizeAnim = null;
-    const box = document.querySelector('#dga-add-modal .inv-modal-wide');
-    box.style.overflow = '';
-    box.style.minWidth = '';
-    box.style.maxWidth = '';
-    box.style.maxHeight = '';
+    resetBoxResize(document.querySelector('#dga-add-modal .inv-modal-wide'));
 }
 
-// Runs `mutate` (a step/content swap) and smoothly resizes the add-card box from its size
-// before the swap to its size after — same box, same overlay throughout, so no backdrop-filter
-// or entrance-animation concerns apply here (unlike the settings→import/export cross-modal
-// morph); this animates width+height directly, same technique as the import/export tab switch.
+// Thin adapter over the shared animateBoxResize() for this modal's box.
 function dgaAnimateAddModalResize(mutate) {
-    const box = document.querySelector('#dga-add-modal .inv-modal-wide');
-
-    // Cancel any previous resize animation FIRST, before measuring anything. Its held
-    // fill:'forwards' value overrides CSS regardless of class changes, so if this call
-    // fires again before the last one settled (e.g. a fast local search resolving straight
-    // to dgaGoToConfirm before the idle→"Searching..." resize even finished), measuring
-    // "from" and "to" while it's still active reads its stale held size for *both* —
-    // making them look identical and skipping the animation below entirely.
-    _dgaAddModalResizeAnim?.cancel();
-    _dgaAddModalResizeAnim = null;
-
-    const fromWidth = box.offsetWidth;
-    const fromHeight = box.offsetHeight;
-
-    mutate();
-
-    const toWidth = box.offsetWidth;
-    const toHeight = box.offsetHeight;
-
-    // Skip animating when the box isn't visible yet, or the size genuinely didn't change
-    // (e.g. re-confirming a different card while already on the confirm step).
-    if (!fromWidth || !fromHeight || (fromWidth === toWidth && fromHeight === toHeight)) return;
-
-    // The step swap in `mutate` already toggled classes, so the CSS min/max-width and
-    // max-height for whichever step is now active are already in effect — e.g. going from
-    // the wide results grid to the confirm step's `max-width: 700px` clamps the box to
-    // 700px on frame 0, before the animation gets a chance to ease it there, which is why
-    // width appeared to snap while height (whose max-height never changes between steps)
-    // animated normally. Suspend the clamps for the animation's duration.
-    box.style.overflow = 'hidden';
-    box.style.minWidth = '0';
-    box.style.maxWidth = 'none';
-    box.style.maxHeight = 'none';
-
-    const anim = box.animate([
-        {width: fromWidth + 'px', height: fromHeight + 'px'},
-        {width: toWidth + 'px', height: toHeight + 'px'}
-    ], {duration: 300, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-    _dgaAddModalResizeAnim = anim;
-
-    anim.finished.then(() => {
-        anim.cancel();
-        if (_dgaAddModalResizeAnim === anim) _dgaAddModalResizeAnim = null;
-        box.style.overflow = '';
-        box.style.minWidth = '';
-        box.style.maxWidth = '';
-        box.style.maxHeight = '';
-    }).catch(() => {});
+    animateBoxResize(document.querySelector('#dga-add-modal .inv-modal-wide'), mutate);
 }
 
 function dgaBackToSearch() {

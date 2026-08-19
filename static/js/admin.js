@@ -682,15 +682,27 @@ function adminPidSetFilterHtml() {
     `;
 }
 
+// Toggles the button/menu's classes on the existing DOM nodes rather than
+// going through renderAdminPidHeader() — rebuilding the header's innerHTML
+// would replace the arrow <span> with a fresh element that has no prior
+// rotation to transition from, so the CSS rotation (matching the Cards page)
+// would snap instantly instead of animating.
+function applyAdminPidSetFilterOpenState() {
+    const btn = document.querySelector('.admin-pid-col-set .set-dropdown-btn');
+    const menu = document.querySelector('.admin-pid-col-set .set-dropdown-menu');
+    if (btn) btn.classList.toggle('open', adminPidSetFilterOpen);
+    if (menu) menu.classList.toggle('hidden', !adminPidSetFilterOpen);
+}
+
 function toggleAdminPidSetFilter() {
     adminPidSetFilterOpen = !adminPidSetFilterOpen;
-    renderAdminPidHeader();
+    applyAdminPidSetFilterOpenState();
 }
 
 function closeAdminPidSetFilter() {
     if (!adminPidSetFilterOpen) return;
     adminPidSetFilterOpen = false;
-    renderAdminPidHeader();
+    applyAdminPidSetFilterOpenState();
 }
 
 function toggleAdminPidSetFilterOption(set) {
@@ -745,15 +757,23 @@ function adminPidRarityFilterHtml() {
     `;
 }
 
+// Same reasoning as applyAdminPidSetFilterOpenState() above.
+function applyAdminPidRarityFilterOpenState() {
+    const btn = document.querySelector('.admin-pid-col-rarity .set-dropdown-btn');
+    const menu = document.querySelector('.admin-pid-col-rarity .set-dropdown-menu');
+    if (btn) btn.classList.toggle('open', adminPidRarityFilterOpen);
+    if (menu) menu.classList.toggle('hidden', !adminPidRarityFilterOpen);
+}
+
 function toggleAdminPidRarityFilter() {
     adminPidRarityFilterOpen = !adminPidRarityFilterOpen;
-    renderAdminPidHeader();
+    applyAdminPidRarityFilterOpenState();
 }
 
 function closeAdminPidRarityFilter() {
     if (!adminPidRarityFilterOpen) return;
     adminPidRarityFilterOpen = false;
-    renderAdminPidHeader();
+    applyAdminPidRarityFilterOpenState();
 }
 
 function toggleAdminPidRarityFilterOption(rarity) {

@@ -10,7 +10,6 @@ let addModalFoilId = null;
 let cardModalRow = null;   // the row being edited in the card detail modal
 let invAcIndex = -1;
 let addAcIndex = -1;
-let _addModalResizeAnim = null;
 
 const rarityMapInv = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
 
@@ -1402,64 +1401,12 @@ function closeAddModal() {
     }
     // Closing mid-resize shouldn't leave a stale animation holding the box at the wrong
     // size for next time — it uses fill:'forwards' so it keeps holding even while hidden.
-    _addModalResizeAnim?.cancel();
-    _addModalResizeAnim = null;
-    const box = document.querySelector('#inv-add-modal .inv-modal-wide');
-    box.style.overflow = '';
-    box.style.minWidth = '';
-    box.style.maxWidth = '';
-    box.style.maxHeight = '';
+    resetBoxResize(document.querySelector('#inv-add-modal .inv-modal-wide'));
 }
 
-// Runs `mutate` (a step/content swap) and smoothly resizes the add-card box from its size
-// before the swap to its size after — same box, same overlay throughout, so no backdrop-filter
-// or entrance-animation concerns apply (unlike a cross-modal morph); animates width+height
-// directly, same technique as the decks_ga Add Card modal and the Import/Export tab switch.
+// Thin adapter over the shared animateBoxResize() for this modal's box.
 function animateAddModalResize(mutate) {
-    const box = document.querySelector('#inv-add-modal .inv-modal-wide');
-
-    // Cancel any previous resize animation FIRST, before measuring anything — its held
-    // fill:'forwards' value overrides CSS regardless of class changes, so measuring "from"
-    // and "to" while it's still active would read its stale held size for both, making
-    // them look identical and skipping the animation below entirely.
-    _addModalResizeAnim?.cancel();
-    _addModalResizeAnim = null;
-
-    const fromWidth = box.offsetWidth;
-    const fromHeight = box.offsetHeight;
-
-    mutate();
-
-    const toWidth = box.offsetWidth;
-    const toHeight = box.offsetHeight;
-
-    // Skip animating when the box isn't visible yet, or the size genuinely didn't change.
-    if (!fromWidth || !fromHeight || (fromWidth === toWidth && fromHeight === toHeight)) return;
-
-    // The step swap in `mutate` already toggled classes, so the CSS min/max-width and
-    // max-height for whichever step is now active are already in effect — e.g. going from
-    // the wide results grid to the foil step's `max-width: 700px` would otherwise clamp the
-    // box to 700px on frame 0, before the animation gets a chance to ease it there. Suspend
-    // the clamps for the animation's duration.
-    box.style.overflow = 'hidden';
-    box.style.minWidth = '0';
-    box.style.maxWidth = 'none';
-    box.style.maxHeight = 'none';
-
-    const anim = box.animate([
-        {width: fromWidth + 'px', height: fromHeight + 'px'},
-        {width: toWidth + 'px', height: toHeight + 'px'}
-    ], {duration: 300, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-    _addModalResizeAnim = anim;
-
-    anim.finished.then(() => {
-        anim.cancel();
-        if (_addModalResizeAnim === anim) _addModalResizeAnim = null;
-        box.style.overflow = '';
-        box.style.minWidth = '';
-        box.style.maxWidth = '';
-        box.style.maxHeight = '';
-    }).catch(() => {});
+    animateBoxResize(document.querySelector('#inv-add-modal .inv-modal-wide'), mutate);
 }
 
 function backToSearch() {
@@ -2436,7 +2383,6 @@ async function ctxMoveToNewBin() {
 // ═══════════════════════════════════════
 
 let importExportTab = 'import';
-let _tabHeightAnim = null;
 
 function transitionSettingsToImportExport() {
     if (!activeBin) return;
@@ -2468,35 +2414,10 @@ function transitionSettingsToImportExport() {
     switchImportExportTab('import');
 
     const ieBox = ieBoxAlready;
-
-    // Reveal it at its real, final size/position right away — both boxes are centered by
-    // the same flex overlay rule, so they share a center point — then fake the "resize"
-    // with a transform: scale() from the settings box's size down to identity. This never
-    // touches width/height (which force a full layout+paint on every animation frame); the
-    // DOM box never actually changes size, so there's nothing for a reflow to desync from.
     settingsBox.classList.add('hidden');
     overlay.appendChild(ieBox);
     overlay.onclick = closeImportExportModal;
-
-    const toRect = ieBox.getBoundingClientRect();
-    const scaleX = fromRect.width / toRect.width;
-    const scaleY = fromRect.height / toRect.height;
-
-    ieBox.classList.add('morph-resizing');
-
-    const anim = ieBox.animate([
-        {transform: `scale(${scaleX}, ${scaleY})`},
-        {transform: 'scale(1, 1)'}
-    ], {duration: 350, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-
-    anim.finished.then(() => {
-        anim.cancel();
-        ieBox.style.transform = '';
-        // Deliberately NOT removing 'morph-resizing' here: doing so re-enables .inv-modal's
-        // default `animation: modalReveal`, which — since its 0% keyframe is opacity:0 —
-        // restarts and instantly makes the whole box flash invisible before fading back in.
-        // It stays suppressed until closeImportExportModal() resets it for next time.
-    }).catch(() => {});
+    morphBoxIn(ieBox, fromRect);
 
     loadExport();
 }
@@ -2512,41 +2433,18 @@ function transitionImportExportToSettings() {
     const settingsBox = overlay.querySelector('.inv-modal:not(.inv-modal-import-export)');
     const fromRect = {width: ieBox.offsetWidth, height: ieBox.offsetHeight};
 
-    // Reset any in-flight import/export animation before handing off.
-    _tabHeightAnim?.cancel();
-    _tabHeightAnim = null;
-    ieBox.getAnimations().forEach(a => a.cancel());
-    ieBox.classList.remove('morph-resizing');
-    ieBox.style.transform = '';
-    ieBox.style.height = '';
-    ieBox.style.overflow = '';
+    resetBoxResize(ieBox);
+    resetMorphBox(ieBox);
 
     // Swap content immediately — settings becomes the visible box, import/export goes back
     // to its home overlay — then fake the "shrink" the same way the forward morph fakes the
-    // "grow": settingsBox sits at its real, natural size the whole time.
+    // "grow".
     const homeOverlay = document.getElementById('inv-import-export-modal');
     homeOverlay.appendChild(ieBox);
     homeOverlay.classList.add('hidden');
     overlay.onclick = closeBinSettings;
-    settingsBox.classList.add('morph-resizing'); // suppress modalReveal before it becomes visible
     settingsBox.classList.remove('hidden');
-
-    const toWidth = settingsBox.offsetWidth;
-    const toHeight = settingsBox.offsetHeight;
-    const scaleX = fromRect.width / toWidth;
-    const scaleY = fromRect.height / toHeight;
-
-    const anim = settingsBox.animate([
-        {transform: `scale(${scaleX}, ${scaleY})`},
-        {transform: 'scale(1, 1)'}
-    ], {duration: 350, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-
-    anim.finished.then(() => {
-        anim.cancel();
-        settingsBox.style.transform = '';
-        // 'morph-resizing' stays on until closeBinSettings() resets it — same flash-avoidance
-        // reasoning as the import/export box's forward-morph cleanup.
-    }).catch(() => {});
+    morphBoxIn(settingsBox, fromRect);
 }
 
 function openImportExportModal() {
@@ -2570,12 +2468,8 @@ function closeImportExportModal() {
     const ieBox = document.querySelector('.inv-modal-import-export');
 
     // Closing mid-morph should never leave a stale resize animation attached to the box.
-    ieBox.getAnimations().forEach(a => a.cancel());
-    _tabHeightAnim = null;
-    ieBox.classList.remove('morph-resizing');
-    ieBox.style.transform = '';
-    ieBox.style.height = '';
-    ieBox.style.overflow = '';
+    resetBoxResize(ieBox);
+    resetMorphBox(ieBox);
 
     // If the box was borrowed by the settings overlay for the resize morph, return
     // everything to its normal place (invisible now, so no flash from the move).
@@ -2584,9 +2478,8 @@ function closeImportExportModal() {
         const settingsBox = settingsOverlay.querySelector('.inv-modal:not(.inv-modal-import-export)');
         settingsOverlay.classList.add('hidden');
         settingsOverlay.onclick = closeBinSettings;
-        settingsBox.getAnimations().forEach(a => a.cancel());
-        settingsBox.classList.remove('hidden', 'morph-resizing');
-        settingsBox.style.transform = '';
+        resetMorphBox(settingsBox);
+        settingsBox.classList.remove('hidden');
         homeOverlay.appendChild(ieBox);
     }
 
@@ -2599,37 +2492,13 @@ function switchImportExportTab(tab) {
     if (tab === importExportTab) return;
 
     const box = document.querySelector('.inv-modal-import-export');
-
-    // Cancel any previous resize animation FIRST, before measuring anything — its held
-    // fill:'forwards' value overrides CSS regardless of class changes, so measuring while
-    // it's still active would read its stale held size for both "from" and "to".
-    _tabHeightAnim?.cancel();
-    _tabHeightAnim = null;
-
-    const fromHeight = box.offsetHeight;
-
-    importExportTab = tab;
-    document.getElementById('import-tab-btn').classList.toggle('active', tab === 'import');
-    document.getElementById('export-tab-btn').classList.toggle('active', tab === 'export');
-    document.getElementById('import-panel').classList.toggle('hidden', tab !== 'import');
-    document.getElementById('export-panel').classList.toggle('hidden', tab !== 'export');
-
-    const toHeight = box.offsetHeight;
-
-    if (!fromHeight || fromHeight === toHeight) return;
-
-    box.style.overflow = 'hidden';
-    const anim = box.animate([
-        {height: fromHeight + 'px'},
-        {height: toHeight + 'px'}
-    ], {duration: 300, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
-    _tabHeightAnim = anim;
-
-    anim.finished.then(() => {
-        anim.cancel();
-        if (_tabHeightAnim === anim) _tabHeightAnim = null;
-        box.style.overflow = '';
-    }).catch(() => {});
+    animateBoxResize(box, () => {
+        importExportTab = tab;
+        document.getElementById('import-tab-btn').classList.toggle('active', tab === 'import');
+        document.getElementById('export-tab-btn').classList.toggle('active', tab === 'export');
+        document.getElementById('import-panel').classList.toggle('hidden', tab !== 'import');
+        document.getElementById('export-panel').classList.toggle('hidden', tab !== 'export');
+    });
 }
 
 async function loadExport() {
