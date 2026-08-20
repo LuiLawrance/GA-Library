@@ -182,7 +182,18 @@ def _last_sale_price_from_records(records: list):
 
 
 def _lowest_listing_price_from_records(records: list):
-    return min((r["price"] for r in records), default=None)
+    """Lowest price among listings from the most recent scrape date only.
+    Listings accumulate forever (each scrape appends that day's snapshot
+    rather than replacing the last one), so pooling min() across every date
+    ever recorded can surface a stale price from a listing that's long gone."""
+    if not records:
+        return None
+    latest_date = max(r["date"] for r in records)
+    return min(r["price"] for r in records if r["date"] == latest_date)
+
+
+def _last_listing_price_from_records(records: list):
+    return max(records, key=lambda r: r["date"])["price"] if records else None
 
 
 def _last_sale_price(sales_data: dict, card_id: str, edition_id: str, foils: dict):
@@ -1533,7 +1544,7 @@ async def api_watchlist_list(request: Request):
 
         last_price, change_pct, last_sale_date = _price_and_change(sales_data, card_id, edition_id, foil_id)
         listing_records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
-        lowest_listing = min((r["price"] for r in listing_records), default=None)
+        lowest_listing = _lowest_listing_price_from_records(listing_records)
 
         results.append({
             "card_id": card_id,
@@ -1657,8 +1668,13 @@ async def api_bin_value(bin_name: str, request: Request):
     with new_json(JSON_SALES).open(encoding="utf-8") as f:
         sales_data = json.load(f)
 
+    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
+        listings_data = json.load(f)
+
     total = 0.0
-    priced_quantity = 0
+    sale_quantity = 0
+    listing_quantity = 0
+    unpriced_quantity = 0
     total_quantity = 0
 
     for cards in inv[bin_name].get("sections", {}).values():
@@ -1671,17 +1687,28 @@ async def api_bin_value(bin_name: str, request: Request):
                     total_quantity += quantity
                     records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
 
-                    if not records:
+                    price = _last_sale_price_from_records(records)
+                    if price is not None:
+                        sale_quantity += quantity
+                    else:
+                        listing_records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                        price = _last_listing_price_from_records(listing_records)
+                        if price is not None:
+                            listing_quantity += quantity
+
+                    if price is None:
+                        unpriced_quantity += quantity
                         continue
 
-                    latest = max(records, key=lambda r: r["date"])
-                    total += latest["price"] * quantity
-                    priced_quantity += quantity
+                    total += price * quantity
 
     return JSONResponse({
         "total": round(total, 2),
-        "priced_quantity": priced_quantity,
+        "priced_quantity": sale_quantity + listing_quantity,
         "total_quantity": total_quantity,
+        "sale_quantity": sale_quantity,
+        "listing_quantity": listing_quantity,
+        "unpriced_quantity": unpriced_quantity,
     })
 
 

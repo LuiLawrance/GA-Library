@@ -103,7 +103,20 @@
 /* ── Bin tile ── */
 .inv-bin-tile.has-banner {
     position: relative;
+}
+
+/* Clips just the banner art to the tile's own rounded corners. This clip
+   used to live on .inv-bin-tile itself, but that also clipped the value
+   popup (a normal descendant that intentionally renders past the tile's
+   bottom edge), un-rounding the tile and hiding part of the popup whenever
+   it was open. Scoping the clip to a dedicated layer behind the banner
+   keeps the corners rounded without clipping anything else in the tile. */
+.inv-bin-banner-clip {
+    position: absolute;
+    inset: 0;
     overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
 }
 
 .inv-bin-banner {
@@ -127,7 +140,7 @@
     mask-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.3) 35%, rgba(0, 0, 0, 0.7) 70%, rgba(0, 0, 0, 1));
 }
 
-.inv-bin-tile.has-banner > :not(.inv-bin-banner) {
+.inv-bin-tile.has-banner > :not(.inv-bin-banner-clip) {
     position: relative;
     z-index: 1;
 }
@@ -147,6 +160,17 @@
     animation: tileReveal 0.3s ease forwards;
 }
 
+/* The entrance animation above gives every tile its own stacking context, so
+   a tile in a later grid row paints over an earlier tile's value popup no
+   matter how high the popup's own z-index is — z-index only ranks siblings
+   within the same stacking context. This lifts the whole active tile (and
+   everything nested in it, popup included) above its unhovered siblings
+   while its popup is open (see showBinValuePopup in inventory.js). */
+.inv-bin-tile.inv-bin-tile-popup-active {
+    position: relative;
+    z-index: 50;
+}
+
 @keyframes tileReveal {
     from {
         opacity: 0;
@@ -162,6 +186,14 @@
     border-color: var(--border-focus);
     background: var(--bg-hover);
     transform: translateY(-2px);
+}
+
+/* Hovering the value badge to open its popup necessarily also hovers the
+   badge's parent tile (it's a descendant), which would otherwise trigger the
+   lift above on every popup open/close, making the tile appear to shift/
+   resize under the popup. Keep the tile still while its popup is shown. */
+.inv-bin-tile.inv-bin-tile-popup-active:hover {
+    transform: none;
 }
 
 .inv-bin-tile.default-bin {
@@ -208,6 +240,7 @@
     justify-content: space-between;
     gap: 8px;
     margin-top: auto;
+    position: relative;
 }
 
 .inv-bin-meta {
@@ -240,6 +273,82 @@
 .inv-bin-value-badge.inv-bin-value-partial {
     color: var(--price-green);
     border-color: rgba(34, 197, 94, 0.35);
+}
+
+.inv-bin-value-popup {
+    /* Anchored via position:absolute to its badge's own row (which the row
+       gets position:relative for) rather than position:fixed with
+       JS-computed viewport coordinates. The page applies `zoom: 0.9` below
+       2100px (see main.css), and mixing zoom with getBoundingClientRect-based
+       fixed-position math produced a left-ward offset that grew with the
+       badge's distance from the page origin — worst on the first bin,
+       smaller on later ones. Anchoring in the badge's own coordinate space
+       sidesteps that entirely and needs no JS position math at all.
+
+       Default (used inside a bin's detail header, .inv-detail-counts-row)
+       opens downward — that badge sits right at the top of the page, so
+       there's no room above it. The bin grid overrides this to open upward
+       below, since .inv-bins-grid scrolls internally and badges there
+       usually sit lower in the visible area, closer to its bottom edge. */
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 700;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px;
+    min-width: 150px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    animation: contextReveal 0.12s ease;
+}
+
+.inv-bin-meta-row > .inv-bin-value-popup {
+    top: auto;
+    bottom: calc(100% + 8px);
+}
+
+.inv-bin-value-popup-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+}
+
+.inv-bin-value-popup-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.inv-bin-value-popup-dot-sale {
+    background: var(--price-green);
+}
+
+.inv-bin-value-popup-dot-listing {
+    background: var(--price-red);
+}
+
+.inv-bin-value-popup-dot-none {
+    background: var(--text-muted);
+}
+
+.inv-bin-value-popup-label {
+    flex: 1;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.inv-bin-value-popup-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 400;
+    color: var(--text);
 }
 
 .inv-bin-default-badge {
@@ -450,6 +559,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    position: relative;
 }
 
 .inv-detail-counts {

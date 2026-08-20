@@ -821,8 +821,12 @@ function buildPricingStats(sales, listings) {
     }
 
     if (listings.length > 0) {
-        const lowest = Math.min(...listings.map(l => l.price));
-        stats.push(['Lowest Recent Listing', `$${lowest.toFixed(2)}`]);
+        // Best-quality tier that actually has a listing (Near Mint first,
+        // falling back down PRICING_CONDITION_ORDER), then the most recent
+        // listing within that tier.
+        const [, topTierEntries] = groupPricingByCondition(listings)[0];
+        const mostRecent = [...topTierEntries].sort((a, b) => b.date.localeCompare(a.date))[0];
+        stats.push(['Most Recent Listing', `$${Number(mostRecent.price).toFixed(2)}`]);
     }
 
     if (stats.length === 0) return '';

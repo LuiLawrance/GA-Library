@@ -94,7 +94,7 @@ function renderBinGrid() {
 }
 
 function buildBinTile(name, bin, index, total = 1) {
-    const count = countBinEntries(bin.sections || {});
+    const stats = countBinStats(bin.sections || {});
     const tile = document.createElement('div');
     tile.className = `inv-bin-tile${bin.default ? ' default-bin' : ''}`;
     const maxDelay = 400;
@@ -108,15 +108,18 @@ function buildBinTile(name, bin, index, total = 1) {
         <div class="inv-bin-name">${name}</div>
         <div class="inv-bin-desc">${bin.desc || ''}</div>
         <div class="inv-bin-meta-row">
-            <div class="inv-bin-meta">${count} card${count !== 1 ? 's' : ''}</div>
+            <div class="inv-bin-meta">${stats.cards} card${stats.cards !== 1 ? 's' : ''} · ${stats.copies} cop${stats.copies !== 1 ? 'ies' : 'y'}</div>
             <span class="inv-bin-value-badge inv-bin-value-loading">…</span>
         </div>`;
     if (bin.banner) {
         tile.classList.add('has-banner');
+        const clip = document.createElement('div');
+        clip.className = 'inv-bin-banner-clip';
         const bg = document.createElement('div');
         bg.className = 'inv-bin-banner';
         bg.style.backgroundImage = `url('/images/${encodeURIComponent(bin.banner)}.jpg')`;
-        tile.prepend(bg);
+        clip.appendChild(bg);
+        tile.prepend(clip);
     }
     tile.onclick = () => openBinDetail(name);
     tile.addEventListener('contextmenu', e => {
@@ -140,12 +143,95 @@ async function loadBinValue(binName, badgeEl) {
 
         if (data.priced_quantity < data.total_quantity) {
             badgeEl.classList.add('inv-bin-value-partial');
-            badgeEl.title = `${data.priced_quantity} of ${data.total_quantity} card(s) have sale data`;
+        }
+
+        // Stash the latest breakdown on the element and read it at hover time,
+        // rather than attaching a fresh closure-bound listener on every call.
+        // The bin-detail header's badge is a single persistent element that
+        // loadBinValue() re-runs on every card/quantity edit (see
+        // updateInvCounts), so re-attaching listeners here would stack up an
+        // unbounded number of duplicate handlers over a session — unlike grid
+        // tiles, which get a brand-new badge element on every render.
+        badgeEl._binValueData = data;
+        if (!badgeEl._binValueHoverWired) {
+            badgeEl._binValueHoverWired = true;
+            badgeEl.addEventListener('mouseenter', () => showBinValuePopup(badgeEl, badgeEl._binValueData));
+            badgeEl.addEventListener('mouseleave', hideBinValuePopup);
         }
     } catch (err) {
         badgeEl.textContent = '—';
         badgeEl.classList.remove('inv-bin-value-loading');
     }
+}
+
+let _stackedTileFixEl = null;
+
+function showBinValuePopup(badgeEl, data) {
+    let popup = document.getElementById('inv-bin-value-popup');
+    if (!popup) {
+        popup = document.createElement('div');
+        popup.id = 'inv-bin-value-popup';
+        popup.className = 'inv-bin-value-popup hidden';
+    }
+
+    _restoreStackedTile();
+
+    // Anchored with CSS (position:absolute against the badge's own row,
+    // which has position:relative — see .inv-bin-meta-row and
+    // .inv-detail-counts-row) instead of position:fixed + JS-computed
+    // viewport coordinates. The page applies `zoom: 0.9` below 2100px
+    // (main.css), and getBoundingClientRect()-based fixed-position math
+    // doesn't agree with that zoom, producing a left-ward offset that grew
+    // with distance from the page origin. Re-parenting the single shared
+    // popup into whichever row is currently hovered keeps it in the same
+    // coordinate space as the badge, so no viewport math is needed. Which
+    // way it opens (up vs down) is decided purely by CSS based on which row
+    // it's currently parented in — see .inv-bin-meta-row > .inv-bin-value-popup
+    // in inventory.css. The tile's own banner clip lives on a dedicated
+    // .inv-bin-banner-clip layer (see inventory.css) so the popup is never
+    // cropped by it.
+    const row = badgeEl.parentElement;
+    row.appendChild(popup);
+
+    const tile = row.closest('.inv-bin-tile');
+    if (tile) {
+        // Every tile gets its own stacking context from its entrance
+        // animation (opacity/transform in @keyframes tileReveal), so a
+        // popup nested in an earlier-row tile paints BEHIND a later-row
+        // tile's opaque background regardless of the popup's own z-index —
+        // z-index only ranks siblings within the same stacking context.
+        // Bumping the active tile's own z-index lifts its whole stacking
+        // context (popup included) above its unhovered siblings.
+        _stackedTileFixEl = tile;
+        tile.classList.add('inv-bin-tile-popup-active');
+    }
+
+    const rows = [
+        ['sale', 'Sale data', data.sale_quantity],
+        ['listing', 'Listing data', data.listing_quantity],
+        ['none', 'No data', data.unpriced_quantity],
+    ];
+
+    popup.innerHTML = rows.map(([kind, label, qty]) => `
+        <div class="inv-bin-value-popup-row">
+            <span class="inv-bin-value-popup-dot inv-bin-value-popup-dot-${kind}"></span>
+            <span class="inv-bin-value-popup-label">${label}</span>
+            <span class="inv-bin-value-popup-count">${qty}</span>
+        </div>`).join('');
+
+    popup.classList.remove('hidden');
+}
+
+function _restoreStackedTile() {
+    if (_stackedTileFixEl) {
+        _stackedTileFixEl.classList.remove('inv-bin-tile-popup-active');
+        _stackedTileFixEl = null;
+    }
+}
+
+function hideBinValuePopup() {
+    document.getElementById('inv-bin-value-popup')?.classList.add('hidden');
+    _restoreStackedTile();
 }
 
 function countBinEntries(sections) {
@@ -156,6 +242,19 @@ function countBinEntries(sections) {
                 for (const qty of Object.values(foils))
                     total += qty;
     return total;
+}
+
+function countBinStats(sections) {
+    let cards = 0;
+    let copies = 0;
+    for (const cardsMap of Object.values(sections))
+        for (const editions of Object.values(cardsMap))
+            for (const foils of Object.values(editions))
+                for (const qty of Object.values(foils)) {
+                    cards += 1;
+                    copies += qty;
+                }
+    return {cards, copies};
 }
 
 // ═══════════════════════════════════════
