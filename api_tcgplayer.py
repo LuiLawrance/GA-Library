@@ -95,6 +95,80 @@ def set_product_id(edition_id: str, product_id: str, debug: bool = False) -> Non
     _set_ids_field(edition_id, "product_id", product_id, debug)
 
 
+# ── Foil-scoped overrides ──
+# A card's regular nonfoil + foil printings share the edition-level fields
+# above, but some cards also have a special foil variant (TCGPlayer's "Curio
+# Foil" umbrella — Aurora/Interference/Fractured Curio Foil, Quicksilver
+# Foil, etc., named differently per set) that TCGPlayer lists under its own,
+# separate product page. These mirror the edition-level get/set functions
+# exactly, just nested one level under "foils" in the same JSON store, and
+# are absent entirely for the vast majority of editions that have no such
+# variant.
+
+def _get_foil_ids_field(edition_id: str, foil_id: str, field: str) -> str | None:
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    return ids_data.get(edition_id, {}).get("foils", {}).get(foil_id, {}).get(field)
+
+
+def _set_foil_ids_field(edition_id: str, foil_id: str, field: str, value: str, debug: bool = False) -> None:
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    ids_data.setdefault(edition_id, {}).setdefault("foils", {}).setdefault(foil_id, {})[field] = value
+
+    with ids_file.open("w", encoding="utf-8") as f:
+        json.dump(ids_data, f, indent=4)
+
+    if debug:
+        print(
+            f"Updated ID_TCGPLAYER.json | "
+            f"edition_id={edition_id} | "
+            f"foil_id={foil_id} | "
+            f"{field}={value}"
+        )
+
+
+def get_foil_overrides(edition_id: str) -> dict:
+    """edition_id's foil-level overrides ({foil_id: {product_id, last_sales,
+    last_listings}}), or {} if it has none."""
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    return ids_data.get(edition_id, {}).get("foils", {})
+
+
+def get_foil_last_sales(edition_id: str, foil_id: str) -> str | None:
+    return _get_foil_ids_field(edition_id, foil_id, "last_sales")
+
+
+def set_foil_last_sales(edition_id: str, foil_id: str, debug: bool = False) -> None:
+    _set_foil_ids_field(edition_id, foil_id, "last_sales", date.today().isoformat(), debug)
+
+
+def get_foil_last_listings(edition_id: str, foil_id: str) -> str | None:
+    return _get_foil_ids_field(edition_id, foil_id, "last_listings")
+
+
+def set_foil_last_listings(edition_id: str, foil_id: str, debug: bool = False) -> None:
+    _set_foil_ids_field(edition_id, foil_id, "last_listings", date.today().isoformat(), debug)
+
+
+def get_foil_product_id(edition_id: str, foil_id: str) -> str | None:
+    return _get_foil_ids_field(edition_id, foil_id, "product_id")
+
+
+def set_foil_product_id(edition_id: str, foil_id: str, product_id: str, debug: bool = False) -> None:
+    _set_foil_ids_field(edition_id, foil_id, "product_id", product_id, debug)
+
+
 def _open_sales_popup(page) -> None:
     """Clicks 'View More Data' to open the sales popup on the currently-loaded
     product page. Caller must have already navigated there."""
@@ -155,11 +229,36 @@ def _parse_sales_rows(page, url: str, debug: bool = False) -> list[dict]:
     return sales
 
 
+def _goto_product_page(page, url: str) -> None:
+    """Navigates to a product's page 1 URL and waits until the browser has
+    actually landed on it. Batch scrapes reuse one Playwright page across many
+    products in sequence (including a Curio Foil override right after its
+    edition's main product) — networkidle can fire while TCGPlayer's page is
+    still showing the PREVIOUS product's content (its listing/sales data
+    loads via a client-side fetch after the initial navigation settles), so a
+    parse immediately after goto() can silently read stale data from whatever
+    was open before. Confirming the product ID is actually in page.url first
+    (retrying the navigation once if not) catches that before it happens,
+    rather than only self-correcting once a later page.goto() (e.g. page 2)
+    gives the fetch enough time to catch up."""
+    product_id = url.removeprefix(BASE_URL).split("?")[0]
+
+    for attempt in range(2):
+        page.goto(url)
+        page.wait_for_load_state("networkidle")
+
+        if product_id in page.url:
+            return
+
+    # Last resort: give the client-side fetch a little longer to catch up
+    # rather than parsing whatever's on screen right now.
+    page.wait_for_timeout(1500)
+
+
 def _scrape_sales_page(page, url: str, debug: bool = False) -> list[dict]:
     """Runs the sales scrape against an already-open Playwright page. Caller
     owns the browser/page lifecycle."""
-    page.goto(url)
-    page.wait_for_load_state("networkidle")
+    _goto_product_page(page, url)
 
     _open_sales_popup(page)
 
@@ -217,8 +316,7 @@ def _scrape_listings_page(page, url: str, debug: bool = False) -> list[dict]:
     owns the browser/page lifecycle."""
     base_url = url.split("?")[0]
 
-    page.goto(url)
-    page.wait_for_load_state("networkidle")
+    _goto_product_page(page, url)
 
     total_pages = _listing_page_count(page)
     listings = _parse_listing_rows(page)
@@ -325,8 +423,7 @@ def _scrape_sales_and_listings_page(page, url: str, debug: bool, want_sales: boo
 
     if want_listings:
         try:
-            page.goto(url)
-            page.wait_for_load_state("networkidle")
+            _goto_product_page(page, url)
             page1_loaded = True
             total_pages = _listing_page_count(page)
             listings = _parse_listing_rows(page)
@@ -337,8 +434,7 @@ def _scrape_sales_and_listings_page(page, url: str, debug: bool, want_sales: boo
     if want_sales:
         try:
             if not page1_loaded:
-                page.goto(url)
-                page.wait_for_load_state("networkidle")
+                _goto_product_page(page, url)
 
             _open_sales_popup(page)
             sales = _parse_sales_rows(page, url, debug)

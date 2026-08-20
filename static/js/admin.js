@@ -16,6 +16,11 @@ let adminPidSetFilterOpen = false;
 let adminPidRarityFilter = new Set();
 let adminPidRarityFilterOpen = false;
 let adminPidFindingIds = new Set();
+// Edition IDs currently toggled to show/edit their Curio Foil's own product
+// ID (see e.curio, from GET /api/admin/pricing/product-ids) instead of the
+// edition's regular one, and to filter the detail panel's Sales/Listings
+// down to just that foil's own separate TCGPlayer product page.
+let adminPidCurioViewSelected = new Set();
 
 let adminPidDetailSelected = null;
 let adminPidDetailHistory = null;
@@ -708,14 +713,60 @@ function syncAdminPidHeaderScrollbarOffset() {
     header.style.paddingRight = `${scrollbarWidth}px`;
 }
 
+// Used both by the row list (renderAdminPidRows) and the detail panel's own
+// product-ID field (renderAdminPricingImageCol) — the same e.curio /
+// adminPidCurioViewSelected state drives both, so toggling from the row list
+// also switches the open detail panel's field (and, via
+// renderAdminPricingDetail's curio filtering, its Sales/Listings) to match.
+//
+// The toggle button and the 🔍 find button always both render, at the same
+// size/spacing, regardless of e.curio or the toggle state — only the find
+// button's disabled/grayed state and the input's bound value/handlers change
+// between regular and Curio Foil view. This is deliberate: an earlier version
+// hid the find button and let the input grow into its place when toggled to
+// Curio Foil view, which meant the input visibly resized on every toggle
+// click — annoying since Curio Foils don't support auto-detect anyway (no
+// way to disambiguate which TCGPlayer listing is the Curio Foil one), so
+// graying out the (inert either way) find button instead keeps the layout
+// completely static across a toggle click.
 function adminPidProductIdFieldHtml(e) {
+    const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
     const finding = adminPidFindingIds.has(e.edition_id);
-    const noListings = e.product_id === ADMIN_PID_NO_LISTINGS_SENTINEL;
 
+    const toggleHtml = e.curio ? `
+        <button type="button" class="admin-pid-curio-toggle ${curioView ? 'active' : ''}"
+                title="${escapeHtml(e.curio.kind)} — toggle to show/edit its own product ID and Sales/Listings"
+                onclick="toggleAdminPidCurioView('${escapeHtml(e.edition_id)}')">✨</button>
+    ` : '';
+
+    if (curioView) {
+        const productId = e.curio.product_id;
+        const noListings = productId === ADMIN_PID_NO_LISTINGS_SENTINEL;
+        const inputStateClass = noListings ? 'admin-pid-input-no-listings' : productId ? 'admin-pid-input-filled' : '';
+
+        return `
+            <div class="admin-pid-pid-wrap">
+                ${toggleHtml}
+                <input type="text" class="admin-pid-input ${inputStateClass}"
+                       data-edition-id="${escapeHtml(e.edition_id)}"
+                       data-foil-id="${escapeHtml(e.curio.foil_id)}"
+                       value="${escapeHtml(productId || '')}"
+                       placeholder="Curio Foil"
+                       title="${noListings ? 'Marked as having no TCGPlayer listings' : 'Curio Foil'}"
+                       onkeydown="if (event.key === 'Enter') this.blur()"
+                       onblur="saveAdminFoilProductId(this)">
+                <button type="button" class="admin-pid-find-btn" disabled
+                        title="Curio Foils require manual entry — auto-detect disabled">🔍</button>
+            </div>
+        `;
+    }
+
+    const noListings = e.product_id === ADMIN_PID_NO_LISTINGS_SENTINEL;
     const inputStateClass = noListings ? 'admin-pid-input-no-listings' : e.product_id ? 'admin-pid-input-filled' : '';
 
     return `
         <div class="admin-pid-pid-wrap">
+            ${toggleHtml}
             <input type="text" class="admin-pid-input ${inputStateClass}"
                    data-edition-id="${escapeHtml(e.edition_id)}"
                    value="${escapeHtml(e.product_id || '')}"
@@ -730,6 +781,113 @@ function adminPidProductIdFieldHtml(e) {
                     onclick="findAdminProductId('${escapeHtml(e.edition_id)}')">${finding ? '…' : noListings ? '🚫' : '🔍'}</button>
         </div>
     `;
+}
+
+// Toggles a row between showing/editing its edition-level product ID and its
+// Curio Foil's own separate one, and — if that card's detail panel happens
+// to be open — re-renders it so the Sales/Listings tables and product-ID
+// field switch to match (see renderAdminPricingDetail's curio filtering).
+// Targeted DOM update rather than a full renderAdminPidRows() call, matching
+// this table's established no-full-re-render performance pattern.
+async function toggleAdminPidCurioView(editionId) {
+    if (adminPidCurioViewSelected.has(editionId)) {
+        adminPidCurioViewSelected.delete(editionId);
+    } else {
+        adminPidCurioViewSelected.add(editionId);
+    }
+
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record) return;
+
+    const row = document.querySelector(`#admin-pid-table .admin-pid-row[data-edition-id="${CSS.escape(editionId)}"]`);
+    const statusCell = row?.querySelector('.admin-pid-col-status');
+    if (statusCell) statusCell.innerHTML = adminPidProductIdFieldHtml(record);
+
+    const salesCell = row?.querySelector('.admin-pid-col-sales');
+    if (salesCell) salesCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'sales');
+
+    const listingsCell = row?.querySelector('.admin-pid-col-listings');
+    if (listingsCell) listingsCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'listings');
+
+    if (adminPidDetailSelected === editionId) {
+        // The add-entry foil dropdown is filtered by curio-toggle state (see
+        // adminPidAddEntryFoilOptions) — the currently-selected foil_id may
+        // no longer be one of the options after this toggle, so re-pick a
+        // valid default instead of leaving it pointing at a filtered-out one.
+        const options = adminPidAddEntryFoilOptions();
+        if (!options?.some(f => f.foil_id === adminPidAddEntryFoilId)) {
+            adminPidAddEntryFoilId = options?.[0]?.foil_id ?? null;
+        }
+
+        // Same kind of fade selectAdminPricingDetail() plays when switching
+        // between cards, scoped to just the Sales/Listings panel here rather
+        // than the image column too — but with its own slightly slower
+        // timing (curio-fade-out/in in admin.css) rather than reusing
+        // fade-out/fade-in's exact numbers: fading only this one (smaller)
+        // panel instead of both panels together otherwise reads as quicker
+        // even though it's the same kind of change.
+        const detail = document.getElementById('admin-pricing-detail');
+        detail?.classList.add('curio-fade-out');
+        await sleep(300);
+
+        renderAdminPricingDetailAll();
+
+        detail?.classList.remove('curio-fade-out');
+        detail?.classList.add('curio-fade-in');
+        setTimeout(() => detail?.classList.remove('curio-fade-in'), 350);
+    }
+}
+
+async function saveAdminFoilProductId(input) {
+    const editionId = input.dataset.editionId;
+    const foilId = input.dataset.foilId;
+    const value = input.value.trim();
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record || !record.curio) return;
+
+    if ((record.curio.product_id || '') === value) return;
+
+    try {
+        const res = await fetch('/api/admin/pricing/product-id', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({edition_id: editionId, foil_id: foilId, product_id: value})
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            input.value = record.curio.product_id || '';
+            input.classList.add('admin-pid-input-error');
+            input.title = data.detail || 'Failed to save';
+            setTimeout(() => {
+                input.classList.remove('admin-pid-input-error');
+                input.title = '';
+            }, 3000);
+            return;
+        }
+
+        record.curio.product_id = data.product_id;
+
+        // The Curio Foil's product ID field can be showing in both the row
+        // list and the open detail panel ("card info") at once — same
+        // record, but two separate DOM nodes (see adminPidProductIdFieldHtml,
+        // used by both renderAdminPidRows and renderAdminPricingImageCol).
+        // Sync every matching instance, not just the one that was actually
+        // edited, so a save in either place is reflected in the other.
+        document.querySelectorAll(
+            `.admin-pid-input[data-edition-id="${CSS.escape(editionId)}"][data-foil-id="${CSS.escape(foilId)}"]`
+        ).forEach(el => {
+            el.value = data.product_id || '';
+            el.classList.toggle('admin-pid-input-filled', adminPidIsScrapable(data.product_id));
+            el.classList.toggle('admin-pid-input-no-listings', data.product_id === ADMIN_PID_NO_LISTINGS_SENTINEL);
+        });
+
+        if (adminPidDetailSelected === editionId) renderAdminPricingDetail();
+    } catch (err) {
+        input.value = record.curio.product_id || '';
+        input.classList.add('admin-pid-input-error');
+        setTimeout(() => input.classList.remove('admin-pid-input-error'), 3000);
+    }
 }
 
 function adminPidSetFilterHtml() {
@@ -887,7 +1045,14 @@ function adminPidLastUpdatedFieldMarkup(e, field) {
         return `<span class="admin-pid-updated-done">${escapeHtml(status.message)}</span>`;
     }
 
-    const days = field === 'sales' ? e.sales_days_since : e.listings_days_since;
+    // The Curio Foil's own product page is scraped independently from the
+    // edition's regular one (see pricing_ga.py's merge-based scrape
+    // orchestration), so it has its own separate last-scraped clock too —
+    // show that day count instead of the edition's when toggled on.
+    const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
+    const days = curioView
+        ? (field === 'sales' ? e.curio.sales_days_since : e.curio.listings_days_since)
+        : (field === 'sales' ? e.sales_days_since : e.listings_days_since);
     const title = `${field === 'sales' ? 'Sales' : 'Listings'}: ${adminPidDaysSinceLabel(days, true)}`;
 
     return `<span class="admin-pid-updated-idle" title="${escapeHtml(title)}">`
@@ -968,12 +1133,18 @@ function openAdminPidTcgPlayer() {
     const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
     if (!record) return;
 
+    // When toggled to the Curio Foil view, open its own separate TCGPlayer
+    // product page instead of the edition's regular one.
+    const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
+    const productId = curioView ? record.curio.product_id : record.product_id;
+    const searchName = curioView ? `${record.name} ${record.curio.kind}` : record.name;
+
     // "~" is a real, saved product_id (meaning "confirmed no listings"), but
     // it isn't an actual TCGPlayer product to link to — fall back to a name
     // search the same as a genuinely missing product_id would.
-    const url = adminPidIsScrapable(record.product_id)
-        ? `https://www.tcgplayer.com/product/${encodeURIComponent(record.product_id)}`
-        : `https://www.tcgplayer.com/search/grand-archive/product?q=${encodeURIComponent(record.name)}&productLineName=grand-archive`;
+    const url = adminPidIsScrapable(productId)
+        ? `https://www.tcgplayer.com/product/${encodeURIComponent(productId)}`
+        : `https://www.tcgplayer.com/search/grand-archive/product?q=${encodeURIComponent(searchName)}&productLineName=grand-archive`;
 
     window.open(url, '_blank', 'noopener');
 }
@@ -1090,14 +1261,33 @@ async function refreshSelectedAdminPricing(target) {
 
     const progress = document.getElementById('admin-pid-progress');
 
+    // Each card refreshes ONLY whichever product its row is currently
+    // toggled to — the edition's main (regular) product, or its Curio Foil's
+    // own separate one — never both at once, matching whatever the admin is
+    // actually looking at for that row (see adminPidProductIdFieldHtml and
+    // renderAdminPricingDetail's own curio-scoped filtering). "main" is a
+    // literal scope value scrape_batch_tcg_by_editions() understands, not
+    // just an absence of scoping.
+    const foilScopes = {};
+    requestedIds.forEach(id => {
+        const record = adminPidData.find(e => e.edition_id === id);
+        const curioView = record?.curio && adminPidCurioViewSelected.has(id);
+        foilScopes[id] = curioView ? record.curio.foil_id : 'main';
+    });
+
     // A card with no product ID — or "~", which admins enter to mark a card as
     // confirmed to have no TCGPlayer listings at all — can't be scraped: filter
     // those out up front instead of sending them to the batch job (which would
     // otherwise open a browser and try to navigate to a product page that
     // doesn't exist). If that's every requested card (in particular, the
     // common single-card case), cancel the refresh outright instead of
-    // starting a job with nothing left to do.
-    const editionIds = requestedIds.filter(id => adminPidIsScrapable(adminPidData.find(e => e.edition_id === id)?.product_id));
+    // starting a job with nothing left to do. Scrapability is checked against
+    // whichever product this card is actually scoped to above, not "either".
+    const editionIds = requestedIds.filter(id => {
+        const record = adminPidData.find(e => e.edition_id === id);
+        const productId = foilScopes[id] === 'main' ? record?.product_id : record?.curio?.product_id;
+        return adminPidIsScrapable(productId);
+    });
     const skippedCount = requestedIds.length - editionIds.length;
 
     if (editionIds.length === 0) {
@@ -1140,10 +1330,13 @@ async function refreshSelectedAdminPricing(target) {
     };
 
     try {
+        const scopedFoilScopes = {};
+        editionIds.forEach(id => { scopedFoilScopes[id] = foilScopes[id]; });
+
         const startRes = await fetch('/api/pricing/refresh/batch/start', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({edition_ids: editionIds, target}),
+            body: JSON.stringify({edition_ids: editionIds, target, foil_scopes: scopedFoilScopes}),
         });
 
         if (!startRes.ok) {
@@ -1170,8 +1363,14 @@ async function refreshSelectedAdminPricing(target) {
 
                     const record = adminPidData.find(r => r.edition_id === editionId);
                     if (record) {
-                        if (result.sales?.ok) record.sales_days_since = 0;
-                        if (result.listings?.ok && !result.listings.gated) record.listings_days_since = 0;
+                        // Only the side this edition was actually scoped to
+                        // (see foilScopes above) was scraped — reset that
+                        // one's day counts, not both.
+                        const target = scopedFoilScopes[editionId] === 'main' ? record : record.curio;
+                        if (target) {
+                            if (result.sales?.ok) target.sales_days_since = 0;
+                            if (result.listings?.ok && !result.listings.gated) target.listings_days_since = 0;
+                        }
                     }
 
                     adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings);
@@ -1263,6 +1462,11 @@ async function selectAdminPricingDetail(editionId) {
     setAdminPricingActiveRow(editionId);
     renderAdminPricingDetailAll();
     updateAdminPidTcgButton();
+    // getAdminPidRefreshTargets() falls back to the open detail card when no
+    // row checkboxes are checked — without this, selecting a card that way
+    // left Refresh Sales/Listings/Selected stuck in whatever disabled state
+    // they started in, only ever updating from a checkbox click.
+    updateAdminPidRefreshButton();
 
     imageCol?.classList.remove('fade-out');
     detail?.classList.remove('fade-out');
@@ -1274,6 +1478,31 @@ async function selectAdminPricingDetail(editionId) {
     }, 200);
 
     await Promise.all([loadAdminPricingDetailHistory(), loadAdminPricingDetailFoils()]);
+}
+
+// Restricts the manual add-entry foil choices to whichever side of the row's
+// Curio Foil toggle is currently active — Nonfoil/regular Foil (the
+// top-level, non-variant options) when off, the Curio Foil variant when on —
+// mirroring the same segregation the refresh buttons already enforce (see
+// refreshSelectedAdminPricing). Never shows the variant's own specific name
+// (e.g. "Aurora Curio Foil") as the option label — this dropdown picks a
+// condition-style Nonfoil/Foil split, not a product name — so the curio
+// option is labeled with whichever top-level kind it actually nests under
+// (its `parent_kind`, from GET .../foils — see the comment there). That's
+// virtually always "Foil" in practice, but read from the real data rather
+// than assumed, so this stays consistent with how the non-curio side already
+// only lists whichever Nonfoil/Foil printings actually exist for the card.
+function adminPidAddEntryFoilOptions() {
+    if (!adminPidDetailFoils) return null;
+
+    const curioView = adminPidDetailSelected && adminPidCurioViewSelected.has(adminPidDetailSelected);
+
+    if (curioView) {
+        const curio = adminPidDetailFoils.find(f => f.is_variant);
+        return curio ? [{foil_id: curio.foil_id, kind: curio.parent_kind || 'Foil'}] : [];
+    }
+
+    return adminPidDetailFoils.filter(f => !f.is_variant);
 }
 
 async function loadAdminPricingDetailFoils() {
@@ -1292,11 +1521,16 @@ async function loadAdminPricingDetailFoils() {
         adminPidDetailFoils = [];
     }
 
-    if (!adminPidAddEntryFoilId && adminPidDetailFoils.length > 0) {
-        adminPidAddEntryFoilId = adminPidDetailFoils[0].foil_id;
+    const options = adminPidAddEntryFoilOptions();
+    if (!adminPidAddEntryFoilId && options?.length > 0) {
+        adminPidAddEntryFoilId = options[0].foil_id;
     }
 
-    renderAdminPricingDetail();
+    // Also re-renders the image column, not just the detail sections — its
+    // per-variant product-ID rows (see renderAdminPricingImageCol) depend on
+    // adminPidDetailFoils too, and this fetch runs in parallel with
+    // loadAdminPricingDetailHistory() with no ordering guarantee between them.
+    renderAdminPricingDetailAll();
 }
 
 async function loadAdminPricingDetailHistory() {
@@ -1338,9 +1572,18 @@ function renderAdminPricingImageCol() {
         return;
     }
 
+    // The Curio Foil's own product page is scraped/refreshed independently
+    // from the edition's regular one (see pricing_ga.py's merge-based scrape
+    // orchestration), so it has its own separate last-scraped clocks too —
+    // show those instead of the edition's when toggled to Curio Foil view.
+    const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
     const historyLoaded = !!adminPidDetailHistory;
-    const lastSales = historyLoaded ? (adminPidDetailHistory.last_sales || 'Never') : '…';
-    const lastListings = historyLoaded ? (adminPidDetailHistory.last_listings || 'Never') : '…';
+    const lastSales = historyLoaded
+        ? ((curioView ? adminPidDetailHistory.curio_last_sales : adminPidDetailHistory.last_sales) || 'Never')
+        : '…';
+    const lastListings = historyLoaded
+        ? ((curioView ? adminPidDetailHistory.curio_last_listings : adminPidDetailHistory.last_listings) || 'Never')
+        : '…';
 
     col.innerHTML = `
         <div class="admin-pid-detail-header">
@@ -1361,7 +1604,7 @@ function renderAdminPricingImageCol() {
             </div>
         </div>
         <div class="admin-pid-detail-pid-row">
-            <label class="admin-pid-detail-label">Product ID</label>
+            <label class="admin-pid-detail-label">${curioView ? 'Curio Foil' : 'Product ID'}</label>
             ${adminPidProductIdFieldHtml(record)}
         </div>
     `;
@@ -1394,14 +1637,24 @@ function renderAdminPricingDetail() {
         return;
     }
 
+    // A Curio Foil has its own separate TCGPlayer product page — its sales
+    // and listings never mix with the edition's regular nonfoil+foil ones,
+    // so when toggled on (from the row list, see toggleAdminPidCurioView)
+    // the tables below show ONLY that foil's rows, and when off they show
+    // everything else (i.e. with the Curio Foil's own rows excluded).
+    const curioFoilId = record.curio?.foil_id;
+    const curioView = !!curioFoilId && adminPidCurioViewSelected.has(record.edition_id);
+    const filterByCurio = rows => !curioFoilId ? rows : rows.filter(r => curioView ? r.foil_id === curioFoilId : r.foil_id !== curioFoilId);
+
     const historyLoaded = !!adminPidDetailHistory;
-    const salesRows = historyLoaded ? adminPidDetailHistory.sales : [];
-    const listingsRows = historyLoaded ? adminPidDetailHistory.listings : [];
+    const salesRows = historyLoaded ? filterByCurio(adminPidDetailHistory.sales) : [];
+    const listingsRows = historyLoaded ? filterByCurio(adminPidDetailHistory.listings) : [];
+    const curioTitleSuffix = curioView ? ' — Curio Foil' : '';
 
     panel.innerHTML = `
         <div class="admin-pid-detail-section" id="admin-pid-section-sales">
             <div class="admin-pid-detail-section-header">
-                <span class="admin-pid-detail-section-title">Sales</span>
+                <span class="admin-pid-detail-section-title">Sales${curioTitleSuffix}</span>
                 <div class="admin-pid-section-actions">
                     ${adminPidBulkPasteTriggerHtml()}
                     ${adminPidAddEntryTriggerHtml('sales')}
@@ -1411,7 +1664,7 @@ function renderAdminPricingDetail() {
         </div>
         <div class="admin-pid-detail-section" id="admin-pid-section-listings">
             <div class="admin-pid-detail-section-header">
-                <span class="admin-pid-detail-section-title">Listings</span>
+                <span class="admin-pid-detail-section-title">Listings${curioTitleSuffix}</span>
                 ${adminPidAddEntryTriggerHtml('listings')}
             </div>
             ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded, 'listings')}
@@ -1606,8 +1859,9 @@ function adminPidTodayIso() {
 }
 
 function adminPidAddEntryFormHtml(type) {
-    const foilsLoaded = !!adminPidDetailFoils;
-    const selectedFoil = foilsLoaded ? adminPidDetailFoils.find(f => f.foil_id === adminPidAddEntryFoilId) : null;
+    const foilOptions = adminPidAddEntryFoilOptions();
+    const foilsLoaded = !!foilOptions;
+    const selectedFoil = foilsLoaded ? foilOptions.find(f => f.foil_id === adminPidAddEntryFoilId) : null;
     const foilLabel = !foilsLoaded ? 'Loading…' : (selectedFoil ? selectedFoil.kind : 'No options');
 
     const foilDropdown = adminPidDropdownHtml({
@@ -1619,7 +1873,7 @@ function adminPidAddEntryFormHtml(type) {
         label: foilLabel,
         value: adminPidAddEntryFoilId,
         disabled: !foilsLoaded,
-        options: foilsLoaded ? adminPidDetailFoils.map(f => ({value: f.foil_id, label: f.kind})) : [],
+        options: foilsLoaded ? foilOptions.map(f => ({value: f.foil_id, label: f.kind})) : [],
         onSelect: 'selectAdminPidFoilOption',
     });
 
@@ -1945,6 +2199,7 @@ function initAdmin() {
     adminPidSetFilterOpen = false;
     adminPidRarityFilter = new Set();
     adminPidRarityFilterOpen = false;
+    adminPidCurioViewSelected = new Set();
     adminPidDetailSelected = null;
     adminPidDetailHistory = null;
     adminPidDetailFoils = null;

@@ -1,7 +1,7 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _sort_collector_number, _update_slug, \
     JSON_EDITIONS, JSON_INFO, JSON_SLUGS, JSON_THEMA, set_search, UPDATE_THRESHOLD
-from api_tcgplayer import NO_LISTINGS_SENTINEL, get_all_ids, get_last_listings, get_last_sales, get_product_id, \
-    set_product_id
+from api_tcgplayer import NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, \
+    get_foil_overrides, get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -735,7 +735,7 @@ async def api_pricing_refresh_status(job_id: str, request: Request):
     return JSONResponse(snapshot)
 
 
-def _run_pricing_batch_job(job_id: str, edition_ids: list, target: str) -> None:
+def _run_pricing_batch_job(job_id: str, edition_ids: list, target: str, foil_scopes: dict) -> None:
     def on_progress(edition_id, result):
         with _pricing_batch_jobs_lock:
             job = _pricing_batch_jobs.get(job_id)
@@ -746,7 +746,9 @@ def _run_pricing_batch_job(job_id: str, edition_ids: list, target: str) -> None:
             job["current_edition_id"] = edition_id
 
     try:
-        scrape_batch_tcg_by_editions(edition_ids, target, debug=False, headless=False, progress_callback=on_progress)
+        scrape_batch_tcg_by_editions(
+            edition_ids, target, debug=False, headless=False, progress_callback=on_progress, foil_scopes=foil_scopes
+        )
 
         with _pricing_batch_jobs_lock:
             job = _pricing_batch_jobs.get(job_id)
@@ -768,12 +770,22 @@ async def api_pricing_refresh_batch_start(request: Request):
     body = await request.json()
     edition_ids = body.get("edition_ids", [])
     target = body.get("target", "both")
+    # Maps edition_id -> "main" or a specific foil_id (e.g. a Curio Foil's),
+    # scoping that edition's refresh to ONLY that one product instead of the
+    # default merged main+overrides behavior — set by the admin UI's per-row
+    # Curio Foil toggle so refreshing only ever touches whichever product
+    # (main or the toggled override) is currently selected for that row.
+    # Editions with no entry here keep the default (unscoped) behavior.
+    foil_scopes = body.get("foil_scopes", {})
 
     if target not in ("both", "sales", "listings"):
         raise HTTPException(status_code=400, detail="target must be 'both', 'sales', or 'listings'")
 
     if not edition_ids:
         raise HTTPException(status_code=400, detail="edition_ids is required")
+
+    if not isinstance(foil_scopes, dict) or not all(isinstance(v, str) for v in foil_scopes.values()):
+        raise HTTPException(status_code=400, detail="foil_scopes must be a mapping of edition_id to string")
 
     job_id = uuid.uuid4().hex
     with _pricing_batch_jobs_lock:
@@ -789,7 +801,7 @@ async def api_pricing_refresh_batch_start(request: Request):
 
     thread = threading.Thread(
         target=_run_pricing_batch_job,
-        args=(job_id, edition_ids, target),
+        args=(job_id, edition_ids, target, foil_scopes),
         daemon=True
     )
     thread.start()
@@ -902,6 +914,23 @@ def _days_since(iso_date: str | None) -> int | None:
         return None
 
     return (date.today() - date.fromisoformat(iso_date)).days
+
+
+def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
+    # A "Curio Foil" (TCGPlayer's umbrella term — Aurora/Interference/
+    # Fractured Curio Foil, Quicksilver Foil, etc.) has its own separate
+    # TCGPlayer product page/ID from the edition's regular nonfoil+foil
+    # product. Confirmed business rule: a card has at most one such special
+    # foil, always modeled as a lone `variant` under one of the edition's
+    # foils — multi-stamp tournament promos instead have 3-4 variants, so
+    # "exactly one variant across all foils" distinguishes a true Curio Foil
+    # from those without needing to match on name (which varies by set).
+    variant_ids = [
+        variant_id
+        for foil_info in edition_info.get("foils", {}).values()
+        for variant_id in foil_info.get("variants", {})
+    ]
+    return variant_ids[0] if len(variant_ids) == 1 else None
 
 
 def _load_users_data() -> dict:
@@ -1074,6 +1103,26 @@ async def api_admin_pricing_product_ids(request: Request):
         edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
         edition_ids = ids_data.get(edition_id, {})
 
+        curio_foil_id = _curio_foil_id_for_edition(edition_info)
+        curio = None
+        if curio_foil_id:
+            foil_info = next(
+                f for f in edition_info.get("foils", {}).values() if curio_foil_id in f.get("variants", {})
+            )
+            curio_override = edition_ids.get("foils", {}).get(curio_foil_id, {})
+            curio = {
+                "foil_id": curio_foil_id,
+                "kind": foil_info["variants"][curio_foil_id].get("kind", ""),
+                "product_id": curio_override.get("product_id"),
+                # The Curio Foil's own product page is scraped independently
+                # from the edition's regular one, with its own separate
+                # last-scraped clocks (see pricing_ga.py's merge-based scrape
+                # orchestration) — sourced from the same get_all_ids() read
+                # already loaded above, no extra I/O.
+                "sales_days_since": _days_since(curio_override.get("last_sales")),
+                "listings_days_since": _days_since(curio_override.get("last_listings")),
+            }
+
         results.append({
             "edition_id": edition_id,
             "card_id": card_id,
@@ -1085,6 +1134,7 @@ async def api_admin_pricing_product_ids(request: Request):
             "product_id": edition_ids.get("product_id"),
             "sales_days_since": _days_since(edition_ids.get("last_sales")),
             "listings_days_since": _days_since(edition_ids.get("last_listings")),
+            "curio": curio,
         })
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
@@ -1098,6 +1148,7 @@ async def api_admin_set_product_id(request: Request):
 
     body = await request.json()
     edition_id = body.get("edition_id", "").strip()
+    foil_id = body.get("foil_id", "").strip() or None
     product_id = body.get("product_id", "").strip()
 
     if not edition_id:
@@ -1112,9 +1163,15 @@ async def api_admin_set_product_id(request: Request):
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
 
-    set_product_id(edition_id, product_id)
+    # foil_id is present when this saves a foil-specific override (e.g. a
+    # Curio Foil's own separate TCGPlayer product) rather than the edition's
+    # main product ID.
+    if foil_id:
+        set_foil_product_id(edition_id, foil_id, product_id)
+    else:
+        set_product_id(edition_id, product_id)
 
-    return JSONResponse({"edition_id": edition_id, "product_id": product_id})
+    return JSONResponse({"edition_id": edition_id, "foil_id": foil_id, "product_id": product_id})
 
 
 @app.get("/api/admin/pricing/{edition_id}/history")
@@ -1160,11 +1217,16 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
         entries.sort(key=lambda r: r["date"], reverse=True)
         return entries
 
+    edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
+    curio_foil_id = _curio_foil_id_for_edition(edition_info)
+
     return JSONResponse({
         "sales": _flatten(JSON_SALES),
         "listings": _flatten(JSON_LISTINGS),
         "last_sales": get_last_sales(edition_id),
         "last_listings": get_last_listings(edition_id),
+        "curio_last_sales": get_foil_last_sales(edition_id, curio_foil_id) if curio_foil_id else None,
+        "curio_last_listings": get_foil_last_listings(edition_id, curio_foil_id) if curio_foil_id else None,
     })
 
 
@@ -1184,6 +1246,7 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
         info_data = json.load(f)
 
     foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
+    overrides = get_foil_overrides(edition_id)
     options = []
 
     for foil_id, foil_info in foils.items():
@@ -1191,10 +1254,21 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
         remaining_population = foil_info.get("population", 0) - variant_population
 
         if remaining_population > 0:
-            options.append({"foil_id": foil_id, "kind": foil_info.get("kind", "").title()})
+            options.append({"foil_id": foil_id, "kind": foil_info.get("kind", "").title(), "is_variant": False, "product_id": None})
 
         for variant_id, variant_info in foil_info.get("variants", {}).items():
-            options.append({"foil_id": variant_id, "kind": variant_info.get("kind", "")})
+            options.append({
+                "foil_id": variant_id,
+                "kind": variant_info.get("kind", ""),
+                "is_variant": True,
+                "product_id": overrides.get(variant_id, {}).get("product_id"),
+                # A variant (e.g. a Curio Foil) nests under exactly one
+                # top-level foil — its printing is whatever THAT parent's
+                # kind is (almost always FOIL in practice, but this reads
+                # the real data rather than assuming), not something the
+                # variant has its own independent Nonfoil/Foil split for.
+                "parent_kind": foil_info.get("kind", "").title(),
+            })
 
     return JSONResponse({"foils": options})
 

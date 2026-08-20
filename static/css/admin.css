@@ -497,6 +497,26 @@
     transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
+/* Curio Foil toggle's own fade, used only on .admin-pricing-detail (see
+   toggleAdminPidCurioView) — same look as .fade-out/.fade-in above, just
+   slower. Switching cards fades both the image column AND this panel
+   together, which reads as a bigger, slower motion; toggling only fades
+   this one (smaller) panel, so matching .fade-out/.fade-in's exact timing
+   made it look noticeably quicker despite the underlying data swap being
+   the same kind of change — these give it its own pace instead of sharing
+   card-switching's, which stays untouched. */
+.admin-pricing-detail.curio-fade-out {
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.admin-pricing-detail.curio-fade-in {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
 .admin-pid-table-scroll::-webkit-scrollbar,
 .admin-pid-detail-table-scroll::-webkit-scrollbar,
 .admin-user-table-scroll::-webkit-scrollbar,
@@ -690,12 +710,66 @@
     background: color-mix(in srgb, var(--error) 12%, var(--bg-card));
 }
 
+/* Anchors the absolutely-positioned .admin-pid-curio-toggle (below) so its
+   right edge lands exactly on this column's own left edge — entirely outside
+   the Product ID column, not sharing its width. Putting the toggle in-flow
+   inside the column (tried first) meant either the input got narrower on
+   curio rows specifically, or — widening the column to compensate — every
+   OTHER row's input got wider than curio rows' input, since all rows share
+   one grid track. Keeping the column at its original width and positioning
+   the toggle outside it keeps every row's input pixel-identical regardless
+   of whether that row has a toggle. */
+.admin-pid-col-status {
+    position: relative;
+}
+
 .admin-pid-pid-wrap {
     flex: 1;
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
+}
+
+/* Only rendered for editions with a Curio Foil variant (see e.curio). Same
+   size as .admin-pid-find-btn so the two read as a matched pair, but instead
+   of sitting in-flow it's pinned outside the Product ID column — right edge
+   flush with the column's own left edge (see the comment on
+   .admin-pid-col-status) — so it never takes width away from the input. */
+.admin-pid-curio-toggle {
+    position: absolute;
+    right: 100%;
+    /* Same 6px gap .admin-pid-pid-wrap uses between the input and the find
+       button, mirrored here so the toggle reads as evenly spaced from the
+       column edge instead of sitting flush against it. */
+    margin-right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.admin-pid-curio-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.admin-pid-curio-toggle.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg-card));
+    color: var(--accent);
 }
 
 .admin-pid-pid-wrap .admin-pid-input {

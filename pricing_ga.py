@@ -319,7 +319,8 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
     return edition_id, foil_id
 
 
-def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = False) -> tuple[int, int]:
+def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = False,
+                         foil_id_override: str | None = None) -> tuple[int, int]:
     from api_ga import JSON_EDITIONS, JSON_INFO
 
     editions_file = new_json(JSON_EDITIONS)
@@ -344,7 +345,12 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
     skipped_unrecognized = 0
 
     for listing in listings:
-        foil_id = foil_ids_by_kind.get(listing["foil_kind"]) if listing["foil_kind"] else None
+        # foil_id_override is set when scraping a foil-specific product page
+        # (e.g. a Curio Foil's own separate TCGPlayer listing) — every row on
+        # that page belongs to that one foil, so the kind-based lookup below
+        # (meant for the edition's shared nonfoil+foil product page) doesn't
+        # apply.
+        foil_id = foil_id_override or (foil_ids_by_kind.get(listing["foil_kind"]) if listing["foil_kind"] else None)
 
         if not foil_id:
             skipped_unrecognized += 1
@@ -376,7 +382,8 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
     return stored, skipped_unrecognized
 
 
-def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) -> tuple[int, int, int, int]:
+def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
+                      foil_id_override: str | None = None) -> tuple[int, int, int, int]:
     from api_ga import JSON_EDITIONS, JSON_INFO
 
     editions_file = new_json(JSON_EDITIONS)
@@ -409,7 +416,9 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) ->
     existing_dates_by_foil = {}
 
     for sale in sales:
-        foil_id = foil_ids_by_kind.get(sale["foil_kind"]) if sale["foil_kind"] else None
+        # See the matching comment in _store_listings_tcg — a foil_id_override
+        # means every row belongs to that one foil-specific product page.
+        foil_id = foil_id_override or (foil_ids_by_kind.get(sale["foil_kind"]) if sale["foil_kind"] else None)
 
         if not foil_id:
             skipped_unrecognized += 1
@@ -716,10 +725,14 @@ def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bo
     }
 
 
-def _listings_gate_result(edition_id: str) -> dict | None:
+def _listings_gate_result(edition_id: str, foil_id: str | None = None) -> dict | None:
     """None if listings are safe to refresh, otherwise the gated result dict
-    to return as-is."""
-    last_listings = api_tcgplayer.get_last_listings(edition_id)
+    to return as-is. Pass foil_id to check a foil override's own gate
+    (independent clock from the edition's main listings) instead."""
+    last_listings = (
+        api_tcgplayer.get_foil_last_listings(edition_id, foil_id)
+        if foil_id else api_tcgplayer.get_last_listings(edition_id)
+    )
 
     if not last_listings:
         return None
@@ -739,16 +752,22 @@ def _listings_gate_result(edition_id: str) -> dict | None:
     return None
 
 
-def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool = False) -> dict:
+def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool = False,
+                           foil_id: str | None = None) -> dict:
     if sales is None:
         return {"ok": False, "error": "Fetch failed. See server logs for details."}
 
-    api_tcgplayer.set_last_sales(edition_id, debug)
+    if foil_id:
+        api_tcgplayer.set_foil_last_sales(edition_id, foil_id, debug)
+    else:
+        api_tcgplayer.set_last_sales(edition_id, debug)
 
     if not sales:
         return {"ok": True, "sales": [], "stored": 0, "skipped_today": 0, "skipped_duplicate": 0, "skipped_unrecognized": 0}
 
-    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, sales, debug)
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(
+        edition_id, sales, debug, foil_id_override=foil_id
+    )
 
     return {
         "ok": True,
@@ -760,11 +779,15 @@ def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool
     }
 
 
-def _process_listings_result(edition_id: str, listings: list[dict] | None, debug: bool = False) -> dict:
+def _process_listings_result(edition_id: str, listings: list[dict] | None, debug: bool = False,
+                              foil_id: str | None = None) -> dict:
     if listings is None:
         return {"ok": False, "error": "Fetch failed. See server logs for details."}
 
-    api_tcgplayer.set_last_listings(edition_id, debug)
+    if foil_id:
+        api_tcgplayer.set_foil_last_listings(edition_id, foil_id, debug)
+    else:
+        api_tcgplayer.set_last_listings(edition_id, debug)
 
     if not listings:
         return {"ok": True, "gated": False, "listings": [], "stored": 0, "skipped_unrecognized": 0}
@@ -788,7 +811,7 @@ def _process_listings_result(edition_id: str, listings: list[dict] | None, debug
 
     cheapest = sorted(cheapest_by_condition.values(), key=lambda listing: condition_rank(listing["condition"]))
 
-    stored, skipped_unrecognized = _store_listings_tcg(edition_id, cheapest, debug)
+    stored, skipped_unrecognized = _store_listings_tcg(edition_id, cheapest, debug, foil_id_override=foil_id)
 
     return {
         "ok": True,
@@ -808,17 +831,55 @@ def _no_product_id_error(product_id: str | None) -> dict:
     return {"ok": False, "error": "No TCGPlayer product ID configured for this edition."}
 
 
-def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None) -> dict:
-    """Web-safe core: no interactive prompts, requires a product_id to already
-    be stored. Returns a result dict rather than printing, so both the CLI
-    and the web admin-refresh endpoint can share this logic. Pass an existing
-    Playwright `page` to reuse a shared browser instead of opening a new one."""
-    gated = _listings_gate_result(edition_id)
+def _merge_target_results(main: dict, override_results: list[dict], list_key: str) -> dict:
+    """Merges a main-product scrape result with zero or more foil-override
+    scrape results of the same shape (all "sales" or all "listings", e.g. a
+    Curio Foil's own separate product page). Returns `main` completely
+    unchanged when there are no overrides — the vast majority of editions
+    have none, and this guarantees zero behavior change for them. Otherwise
+    sums stored/skipped_* counts, concatenates the row lists, requires every
+    part to have succeeded for the merged "ok", joins error messages, and
+    only reports "gated" when every applicable part was gated (if even one
+    part actually fetched fresh data, the whole result isn't just a no-op)."""
+    if not override_results:
+        return main
+
+    parts = [main] + override_results
+    merged = dict(main)
+
+    merged["ok"] = all(part.get("ok") for part in parts)
+    merged["stored"] = sum(part.get("stored", 0) for part in parts)
+    merged["skipped_unrecognized"] = sum(part.get("skipped_unrecognized", 0) for part in parts)
+
+    if list_key == "sales":
+        merged["skipped_today"] = sum(part.get("skipped_today", 0) for part in parts)
+        merged["skipped_duplicate"] = sum(part.get("skipped_duplicate", 0) for part in parts)
+    else:
+        merged["gated"] = all(part.get("gated", False) for part in parts)
+
+    merged[list_key] = [row for part in parts for row in (part.get(list_key) or [])]
+
+    errors = [part["error"] for part in parts if not part.get("ok") and part.get("error")]
+    if errors:
+        merged["error"] = "; ".join(errors)
+    elif "error" in merged:
+        del merged["error"]
+
+    return merged
+
+
+def _scrape_target_listings(edition_id: str, foil_id: str | None, debug: bool, headless: bool, page) -> dict:
+    """Scrapes+processes listings for either the edition's main product
+    (foil_id=None) or one foil override — never raises or short-circuits;
+    every outcome (gated, no product ID, fetch failure, success) comes back
+    as a result dict so the main and override scrapes can always both run
+    and be merged afterward regardless of what happened to either one."""
+    gated = _listings_gate_result(edition_id, foil_id)
 
     if gated is not None:
         return gated
 
-    product_id = api_tcgplayer.get_product_id(edition_id)
+    product_id = api_tcgplayer.get_foil_product_id(edition_id, foil_id) if foil_id else api_tcgplayer.get_product_id(edition_id)
 
     if not product_id or product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
         return _no_product_id_error(product_id)
@@ -826,7 +887,44 @@ def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headles
     url = api_tcgplayer._build_url(product_id)
     listings = api_tcgplayer.fetch_listings(url, debug, headless, page=page)
 
-    return _process_listings_result(edition_id, listings, debug)
+    return _process_listings_result(edition_id, listings, debug, foil_id=foil_id)
+
+
+def scrape_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None,
+                                    foil_scope: str | None = None) -> dict:
+    """Web-safe core: no interactive prompts, requires a product_id to already
+    be stored. Returns a result dict rather than printing, so both the CLI
+    and the web admin-refresh endpoint can share this logic. Pass an existing
+    Playwright `page` to reuse a shared browser instead of opening a new one.
+
+    By default (foil_scope=None) also scrapes any foil-specific product
+    overrides for this edition (e.g. a Curio Foil's own separate TCGPlayer
+    product) and merges their results in — see _merge_target_results().
+    Overrides are scraped before the main product (not that it affects the
+    merged result either way) so a shared browser page doesn't sit on the
+    main product's page for however many listing pages it has before ever
+    visiting the override's.
+
+    Pass foil_scope="main" to scrape ONLY the main product, or a specific
+    foil_id to scrape ONLY that one override — skipping the other side
+    entirely rather than merging. Used by the admin UI's per-row Curio Foil
+    toggle so a refresh only touches whichever product (main or the toggled
+    override) the admin is currently looking at, not both at once."""
+    if foil_scope == "main":
+        return _scrape_target_listings(edition_id, None, debug, headless, page)
+
+    if foil_scope is not None:
+        return _scrape_target_listings(edition_id, foil_scope, debug, headless, page)
+
+    overrides = api_tcgplayer.get_foil_overrides(edition_id)
+    override_results = [
+        _scrape_target_listings(edition_id, foil_id, debug, headless, page)
+        for foil_id, entry in overrides.items() if entry.get("product_id")
+    ]
+
+    main = _scrape_target_listings(edition_id, None, debug, headless, page)
+
+    return _merge_target_results(main, override_results, "listings")
 
 
 def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
@@ -876,12 +974,9 @@ def scrape_listings_tcg(card_name: str, debug: bool = False) -> None:
     print(summary)
 
 
-def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None) -> dict:
-    """Web-safe core: no interactive prompts, requires a product_id to already
-    be stored. Returns a result dict rather than printing, so both the CLI
-    and the web admin-refresh endpoint can share this logic. Pass an existing
-    Playwright `page` to reuse a shared browser instead of opening a new one."""
-    product_id = api_tcgplayer.get_product_id(edition_id)
+def _scrape_target_sales(edition_id: str, foil_id: str | None, debug: bool, headless: bool, page) -> dict:
+    """Sales counterpart to _scrape_target_listings() — see its docstring."""
+    product_id = api_tcgplayer.get_foil_product_id(edition_id, foil_id) if foil_id else api_tcgplayer.get_product_id(edition_id)
 
     if not product_id or product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
         return _no_product_id_error(product_id)
@@ -889,38 +984,111 @@ def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: 
     url = api_tcgplayer._build_url(product_id)
     sales = api_tcgplayer.fetch_sales(url, debug, headless, page=page)
 
-    return _process_sales_result(edition_id, sales, debug)
+    return _process_sales_result(edition_id, sales, debug, foil_id=foil_id)
 
 
-def scrape_sales_and_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False,
-                                              page=None) -> dict:
-    """Combined web-safe core for a full ('both') refresh — scrapes sales and
-    listings in a single shared browser session instead of opening and closing
-    a separate browser for each. Returns {"sales": ..., "listings": ...}, each
-    shaped exactly like the respective solo scrape_*_tcg_by_edition() result.
-    Pass an existing Playwright `page` to reuse an even-wider shared browser
-    (e.g. one spanning multiple editions in a batch refresh)."""
-    product_id = api_tcgplayer.get_product_id(edition_id)
+def scrape_sales_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False, page=None,
+                                 foil_scope: str | None = None) -> dict:
+    """Web-safe core: no interactive prompts, requires a product_id to already
+    be stored. Returns a result dict rather than printing, so both the CLI
+    and the web admin-refresh endpoint can share this logic. Pass an existing
+    Playwright `page` to reuse a shared browser instead of opening a new one.
+    Also scrapes any foil-specific product overrides, or scopes to just the
+    main product or just one override — see scrape_listings_tcg_by_edition()
+    for foil_scope's meaning (including why overrides go first by default)."""
+    if foil_scope == "main":
+        return _scrape_target_sales(edition_id, None, debug, headless, page)
+
+    if foil_scope is not None:
+        return _scrape_target_sales(edition_id, foil_scope, debug, headless, page)
+
+    overrides = api_tcgplayer.get_foil_overrides(edition_id)
+    override_results = [
+        _scrape_target_sales(edition_id, foil_id, debug, headless, page)
+        for foil_id, entry in overrides.items() if entry.get("product_id")
+    ]
+
+    main = _scrape_target_sales(edition_id, None, debug, headless, page)
+
+    return _merge_target_results(main, override_results, "sales")
+
+
+def _scrape_target_both(edition_id: str, foil_id: str | None, debug: bool, headless: bool, page) -> tuple[dict, dict]:
+    """Scrapes sales+listings together in a single page visit (see
+    fetch_sales_and_listings) for either the edition's main product
+    (foil_id=None) or one foil override. Like _scrape_target_listings(), never
+    short-circuits — always returns (sales_result, listings_result)."""
+    product_id = api_tcgplayer.get_foil_product_id(edition_id, foil_id) if foil_id else api_tcgplayer.get_product_id(edition_id)
 
     if not product_id or product_id == api_tcgplayer.NO_LISTINGS_SENTINEL:
         error = _no_product_id_error(product_id)
-        return {"sales": error, "listings": error}
+        return error, error
 
-    gated = _listings_gate_result(edition_id)
+    gated = _listings_gate_result(edition_id, foil_id)
     url = api_tcgplayer._build_url(product_id)
 
     sales, listings = api_tcgplayer.fetch_sales_and_listings(
         url, debug, headless, want_sales=True, want_listings=gated is None, page=page
     )
 
-    sales_result = _process_sales_result(edition_id, sales, debug)
-    listings_result = gated if gated is not None else _process_listings_result(edition_id, listings, debug)
+    sales_result = _process_sales_result(edition_id, sales, debug, foil_id=foil_id)
+    listings_result = gated if gated is not None else _process_listings_result(edition_id, listings, debug, foil_id=foil_id)
 
-    return {"sales": sales_result, "listings": listings_result}
+    return sales_result, listings_result
+
+
+def scrape_sales_and_listings_tcg_by_edition(edition_id: str, debug: bool = False, headless: bool = False,
+                                              page=None, foil_scope: str | None = None) -> dict:
+    """Combined web-safe core for a full ('both') refresh — scrapes sales and
+    listings in a single shared browser session instead of opening and closing
+    a separate browser for each. Returns {"sales": ..., "listings": ...}, each
+    shaped exactly like the respective solo scrape_*_tcg_by_edition() result.
+    Pass an existing Playwright `page` to reuse an even-wider shared browser
+    (e.g. one spanning multiple editions in a batch refresh).
+
+    By default (foil_scope=None) also scrapes any foil-specific product
+    overrides for this edition (each gets its own single-visit sales+listings
+    scrape) and merges their results in — see _merge_target_results().
+    Overrides are scraped before the main product (not that it affects the
+    merged result either way) so a shared browser page doesn't sit on the
+    main product's page for however many listing pages it has before ever
+    visiting the override's.
+
+    Pass foil_scope="main" to scrape ONLY the main product, or a specific
+    foil_id to scrape ONLY that one override — see
+    scrape_listings_tcg_by_edition() for the full rationale (the admin UI's
+    per-row Curio Foil toggle)."""
+    if foil_scope == "main":
+        sales, listings = _scrape_target_both(edition_id, None, debug, headless, page)
+        return {"sales": sales, "listings": listings}
+
+    if foil_scope is not None:
+        sales, listings = _scrape_target_both(edition_id, foil_scope, debug, headless, page)
+        return {"sales": sales, "listings": listings}
+
+    overrides = api_tcgplayer.get_foil_overrides(edition_id)
+    override_sales = []
+    override_listings = []
+
+    for foil_id, entry in overrides.items():
+        if not entry.get("product_id"):
+            continue
+
+        sales_result, listings_result = _scrape_target_both(edition_id, foil_id, debug, headless, page)
+        override_sales.append(sales_result)
+        override_listings.append(listings_result)
+
+    main_sales, main_listings = _scrape_target_both(edition_id, None, debug, headless, page)
+
+    return {
+        "sales": _merge_target_results(main_sales, override_sales, "sales"),
+        "listings": _merge_target_results(main_listings, override_listings, "listings"),
+    }
 
 
 def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: bool = False,
-                                  headless: bool = False, progress_callback=None) -> dict[str, dict]:
+                                  headless: bool = False, progress_callback=None,
+                                  foil_scopes: dict[str, str] | None = None) -> dict[str, dict]:
     """Runs a full refresh — sales, listings, or both — across many editions
     using a single shared browser session, instead of opening and closing a
     browser per edition (or per edition per target). progress_callback(edition_id,
@@ -929,23 +1097,33 @@ def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: boo
 
     `result` is always shaped {"sales": ... | None, "listings": ... | None},
     matching scrape_sales_and_listings_tcg_by_edition()'s return value, with
-    whichever side wasn't requested left as None."""
+    whichever side wasn't requested left as None.
+
+    foil_scopes optionally maps edition_id -> foil_scope ("main", a specific
+    foil_id, or absent/None for the default merged main+overrides behavior) —
+    see scrape_listings_tcg_by_edition() for what foil_scope does. Used by the
+    admin UI's per-row Curio Foil toggle so each edition in a batch refresh
+    can be scoped independently to whichever product (main or its toggled
+    override) the admin has selected for that row."""
     from playwright.sync_api import sync_playwright
 
     results = {}
+    foil_scopes = foil_scopes or {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         page = browser.new_page()
 
         for edition_id in edition_ids:
+            scope = foil_scopes.get(edition_id)
+
             try:
                 if target == "both":
-                    result = scrape_sales_and_listings_tcg_by_edition(edition_id, debug, headless, page=page)
+                    result = scrape_sales_and_listings_tcg_by_edition(edition_id, debug, headless, page=page, foil_scope=scope)
                 elif target == "sales":
-                    result = {"sales": scrape_sales_tcg_by_edition(edition_id, debug, headless, page=page), "listings": None}
+                    result = {"sales": scrape_sales_tcg_by_edition(edition_id, debug, headless, page=page, foil_scope=scope), "listings": None}
                 else:
-                    result = {"sales": None, "listings": scrape_listings_tcg_by_edition(edition_id, debug, headless, page=page)}
+                    result = {"sales": None, "listings": scrape_listings_tcg_by_edition(edition_id, debug, headless, page=page, foil_scope=scope)}
             except Exception as e:
                 # One edition failing unexpectedly (e.g. a page-structure change
                 # mid-batch) shouldn't abort the rest of the batch.
