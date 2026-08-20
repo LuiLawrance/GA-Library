@@ -1,10 +1,12 @@
 // ═══════════════════════════════════════
-// modal-anim.js — shared modal resize/morph animations
+// modal-anim.js — shared modal/page resize, morph, and fade-swap animations
 // Used by: decks_ga (Deck Settings ↔ Import/Export, Import/Export tabs, Add Card),
-//          inventory (Bin Settings ↔ Import/Export, Import/Export tabs, Add Card)
+//          inventory (Bin Settings ↔ Import/Export, Import/Export tabs, Add Card),
+//          app.js (page-to-page navigation), admin.js (pricing/user detail panels),
+//          drawer.js (edition switch)
 // ═══════════════════════════════════════
 //
-// Two reusable pieces:
+// Three reusable pieces:
 //
 //   animateBoxResize(box, mutate) — smoothly resizes a single, persistent box (same
 //   overlay throughout) between two states caused by `mutate`, a synchronous DOM/class
@@ -18,8 +20,16 @@
 //   backdrop-filter composite and flashes) or animating width/height directly (which
 //   fights CSS min/max-width clamps and forces a layout+paint every frame).
 //
-// Both rely on the shared `.morph-resizing` / min-max-width-suspend CSS conventions
-// already used by the pages that call them (see inventory.css).
+//   fadeSwap(els, mutate) — fades `els` out, runs `mutate` (the actual content swap),
+//   then fades back in. Used any time a whole panel's *content* is being replaced
+//   wholesale rather than resized/morphed in place: page navigation, admin detail-panel
+//   switches, drawer edition switches.
+//
+// animateBoxResize/morphBoxIn rely on the shared `.morph-resizing` / min-max-width-suspend
+// CSS conventions already used by the pages that call them (see inventory.css). fadeSwap
+// relies on each caller's own `.fade-out`/`.fade-in` (or equivalently-shaped) CSS class
+// pair already defined for the element(s) it's fading (see main.css, admin.css,
+// drawer.css) — it only drives the class toggling and timing, not the visual itself.
 
 const _resizeAnims = new WeakMap();
 
@@ -118,4 +128,32 @@ function resetMorphBox(box) {
     box.getAnimations().forEach(a => a.cancel());
     box.classList.remove('morph-resizing');
     box.style.transform = '';
+}
+
+// Fades `els` out, awaits `mutate` (sync or async — the actual content swap: new innerHTML,
+// a re-render, a src change), then fades back in. `els` is a single element or array of
+// elements to fade together; falsy entries (e.g. an optional-chained lookup that missed)
+// are ignored so callers can pass those straight through.
+//
+// outClass/inClass/outMs/inMs must match one real CSS class pair already defined for every
+// element being faded — fadeSwap only toggles the classes and waits out their durations, it
+// doesn't set any styles itself. The default pair is the base 'fade-out'/'fade-in' shape
+// (opacity 0→1, translateY(8px)→0, 150ms out / 200ms in) duplicated per-page as
+// .content.fade-out/.fade-in (main.css), .admin-content and the pricing/user detail panels
+// (admin.css), and .drawer-card-image/.drawer-card-info (drawer.css). Pass a different pair
+// for a different pace, e.g. admin.css's slower curio-fade-out/curio-fade-in (300/350ms) or
+// curio-fade-out-bulk/curio-fade-in-bulk (450/500ms).
+async function fadeSwap(els, mutate, {outClass = 'fade-out', inClass = 'fade-in', outMs = 150, inMs = 200} = {}) {
+    const list = (Array.isArray(els) ? els : [els]).filter(Boolean);
+
+    list.forEach(el => el.classList.add(outClass));
+    await sleep(outMs);
+
+    await mutate();
+
+    list.forEach(el => {
+        el.classList.remove(outClass);
+        el.classList.add(inClass);
+    });
+    setTimeout(() => list.forEach(el => el.classList.remove(inClass)), inMs);
 }

@@ -1310,48 +1310,37 @@ async function selectDrawerEditionFor(drawerId, editionId) {
     // for the app's page-to-page transition (main.css) and the admin pricing
     // detail switch (admin.js selectAdminPricingDetail), so switching editions
     // reads consistently with the rest of the app.
-    mainImage.classList.add('fade-out');
-    cardInfo?.classList.add('fade-out');
-    await sleep(150);
+    await fadeSwap([mainImage, cardInfo], () => {
+        // The new edition's thema/pricing content below can be taller or shorter
+        // than the old one's, which would otherwise snap the editions grid into
+        // its new position while it's invisible (mid fade). Captured now (info is
+        // already faded out, so this is before any of that content changes) and
+        // played once it's done — see captureEditionsGridTop/playEditionsGridShift.
+        const flip = captureEditionsGridTop(drawer);
 
-    // The new edition's thema/pricing content below can be taller or shorter
-    // than the old one's, which would otherwise snap the editions grid into
-    // its new position while it's invisible (mid fade). Captured now (info is
-    // already faded out, so this is before any of that content changes) and
-    // played once it's done — see captureEditionsGridTop/playEditionsGridShift.
-    const flip = captureEditionsGridTop(drawer);
+        mainImage.src = `/images/${editionId}.jpg`;
 
-    mainImage.src = `/images/${editionId}.jpg`;
+        drawer.dataset.selectedEdition = editionId;
 
-    drawer.dataset.selectedEdition = editionId;
-
-    if (edition) {
-        const setEl = drawer.querySelector('.drawer-set');
-        if (setEl) {
-            setEl.innerHTML = drawerSetLineHTML(edition);
+        if (edition) {
+            const setEl = drawer.querySelector('.drawer-set');
+            if (setEl) {
+                setEl.innerHTML = drawerSetLineHTML(edition);
+            }
         }
-    }
 
-    // If a data-driven tab is active, re-render for the new edition
-    const activeTab = cfg.getActiveTab();
-    if (activeTab === 'thema') {
-        const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
-        if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
-    } else if (activeTab === 'pricing') {
-        const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
-        if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition);
-    }
+        // If a data-driven tab is active, re-render for the new edition
+        const activeTab = cfg.getActiveTab();
+        if (activeTab === 'thema') {
+            const themaPanel = cardInfo?.querySelector('.drawer-tab-thema');
+            if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
+        } else if (activeTab === 'pricing') {
+            const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
+            if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition);
+        }
 
-    playEditionsGridShift(flip);
-
-    mainImage.classList.remove('fade-out');
-    cardInfo?.classList.remove('fade-out');
-    mainImage.classList.add('fade-in');
-    cardInfo?.classList.add('fade-in');
-    setTimeout(() => {
-        mainImage.classList.remove('fade-in');
-        cardInfo?.classList.remove('fade-in');
-    }, 200);
+        playEditionsGridShift(flip);
+    });
 
     drawer.querySelectorAll('.drawer-edition-tile img').forEach(img => {
         img.classList.remove('edition-selected');

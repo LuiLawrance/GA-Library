@@ -880,17 +880,12 @@ async function toggleAdminPidCurioView(editionId, bulk = false) {
         // panel instead of both panels together otherwise reads as quicker
         // even though it's the same kind of change.
         const detail = document.getElementById('admin-pricing-detail');
-        const outClass = bulk ? 'curio-fade-out-bulk' : 'curio-fade-out';
-        const inClass = bulk ? 'curio-fade-in-bulk' : 'curio-fade-in';
-
-        detail?.classList.add(outClass);
-        await sleep(bulk ? 450 : 300);
-
-        renderAdminPricingDetailAll();
-
-        detail?.classList.remove(outClass);
-        detail?.classList.add(inClass);
-        setTimeout(() => detail?.classList.remove(inClass), bulk ? 500 : 350);
+        await fadeSwap(detail, () => renderAdminPricingDetailAll(), {
+            outClass: bulk ? 'curio-fade-out-bulk' : 'curio-fade-out',
+            inClass: bulk ? 'curio-fade-in-bulk' : 'curio-fade-in',
+            outMs: bulk ? 450 : 300,
+            inMs: bulk ? 500 : 350,
+        });
     }
 }
 
@@ -1503,35 +1498,24 @@ async function selectAdminPricingDetail(editionId) {
     const imageCol = document.getElementById('admin-pricing-image-col');
     const detail = document.getElementById('admin-pricing-detail');
 
-    imageCol?.classList.add('fade-out');
-    detail?.classList.add('fade-out');
-    await sleep(150);
+    await fadeSwap([imageCol, detail], () => {
+        adminPidDetailSelected = editionId;
+        adminPidDetailHistory = null;
+        adminPidDetailFoils = null;
+        adminPidAddEntryOpenType = null;
+        adminPidAddEntryFoilId = null;
+        adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
+        adminPidBulkPasteOpen = false;
 
-    adminPidDetailSelected = editionId;
-    adminPidDetailHistory = null;
-    adminPidDetailFoils = null;
-    adminPidAddEntryOpenType = null;
-    adminPidAddEntryFoilId = null;
-    adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
-    adminPidBulkPasteOpen = false;
-
-    setAdminPricingActiveRow(editionId);
-    renderAdminPricingDetailAll();
-    updateAdminPidTcgButton();
-    // getAdminPidRefreshTargets() falls back to the open detail card when no
-    // row checkboxes are checked — without this, selecting a card that way
-    // left Refresh Sales/Listings/Selected stuck in whatever disabled state
-    // they started in, only ever updating from a checkbox click.
-    updateAdminPidRefreshButton();
-
-    imageCol?.classList.remove('fade-out');
-    detail?.classList.remove('fade-out');
-    imageCol?.classList.add('fade-in');
-    detail?.classList.add('fade-in');
-    setTimeout(() => {
-        imageCol?.classList.remove('fade-in');
-        detail?.classList.remove('fade-in');
-    }, 200);
+        setAdminPricingActiveRow(editionId);
+        renderAdminPricingDetailAll();
+        updateAdminPidTcgButton();
+        // getAdminPidRefreshTargets() falls back to the open detail card when no
+        // row checkboxes are checked — without this, selecting a card that way
+        // left Refresh Sales/Listings/Selected stuck in whatever disabled state
+        // they started in, only ever updating from a checkbox click.
+        updateAdminPidRefreshButton();
+    });
 
     await Promise.all([loadAdminPricingDetailHistory(), loadAdminPricingDetailFoils()]);
 }

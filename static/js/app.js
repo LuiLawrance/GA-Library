@@ -25,42 +25,38 @@ const routes = {
 async function navigate(path, pushState = true) {
     const content = document.getElementById('content');
 
-    content.classList.add('fade-out');
-    await sleep(150);
+    let pathname;
+    await fadeSwap(content, async () => {
+        // Reset drawer tab states when navigating away
+        if (typeof drawerActiveTab !== 'undefined') drawerActiveTab = 'info';
+        if (typeof invDrawerActiveTab !== 'undefined') invDrawerActiveTab = 'info';
 
-    // Reset drawer tab states when navigating away
-    if (typeof drawerActiveTab !== 'undefined') drawerActiveTab = 'info';
-    if (typeof invDrawerActiveTab !== 'undefined') invDrawerActiveTab = 'info';
+        // Reset card drawer globals so stale state from deck page doesn't bleed into inventory
+        if (typeof selectedCardId !== 'undefined') selectedCardId = null;
+        if (typeof drawerIsOpen !== 'undefined') drawerIsOpen = false;
 
-    // Reset card drawer globals so stale state from deck page doesn't bleed into inventory
-    if (typeof selectedCardId !== 'undefined') selectedCardId = null;
-    if (typeof drawerIsOpen !== 'undefined') drawerIsOpen = false;
+        // Same, for the inventory page's drawer instance (inv-card-drawer) — a stale
+        // value here caused openDrawer() to think a freshly-loaded, empty drawer was
+        // already open and populated.
+        if (typeof selectedInvCardId !== 'undefined') selectedInvCardId = null;
+        if (typeof invDrawerIsOpen !== 'undefined') invDrawerIsOpen = false;
 
-    // Same, for the inventory page's drawer instance (inv-card-drawer) — a stale
-    // value here caused openDrawer() to think a freshly-loaded, empty drawer was
-    // already open and populated.
-    if (typeof selectedInvCardId !== 'undefined') selectedInvCardId = null;
-    if (typeof invDrawerIsOpen !== 'undefined') invDrawerIsOpen = false;
+        if (pushState) {
+            window.history.pushState({}, '', path);
+        }
 
-    if (pushState) {
-        window.history.pushState({}, '', path);
-    }
+        pathname = path.split('?')[0];
 
-    const pathname = path.split('?')[0];
+        document.querySelectorAll('.navbar a').forEach(a => {
+            a.classList.toggle('active', a.getAttribute('href') === pathname);
+        });
 
-    document.querySelectorAll('.navbar a').forEach(a => {
-        a.classList.toggle('active', a.getAttribute('href') === pathname);
+        const fragment = routes[pathname] || routes['/'];
+        const res = await fetch(fragment);
+        const html = await res.text();
+
+        content.innerHTML = html;
     });
-
-    const fragment = routes[pathname] || routes['/'];
-    const res = await fetch(fragment);
-    const html = await res.text();
-
-    content.innerHTML = html;
-    content.classList.remove('fade-out');
-    content.classList.add('fade-in');
-
-    setTimeout(() => content.classList.remove('fade-in'), 200);
 
     loginMode = 'login';
 
