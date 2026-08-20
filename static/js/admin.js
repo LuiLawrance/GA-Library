@@ -33,7 +33,7 @@ const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played'
 
 // Suggested marketplace options for manual entries — the field itself still
 // accepts arbitrary free text, these are just one-click shortcuts.
-const ADMIN_PID_MARKETPLACE_OPTIONS = ['TCGPlayer', "Merlin's", 'Manual'];
+const ADMIN_PID_MARKETPLACE_OPTIONS = ['TCGPlayer', 'Manual'];
 
 // Matches RARITY_MAP's value order in pricing_ga.py, so the rarity filter
 // lists options from most common to rarest instead of alphabetically.
@@ -603,21 +603,14 @@ function renderAdminPricingIds() {
     renderAdminPidRows();
 }
 
-// Rebuilds just the row list (and summary/select-all/refresh-button state that
-// depend on it) without touching the header — toggling a single set in the Set
-// filter calls this directly instead of renderAdminPricingIds() so the dropdown
-// menu itself is never recreated, which would otherwise reset its scroll and
-// replay its open animation (a visible "flash") on every checkbox click.
-function renderAdminPidRows() {
-    const summary = document.getElementById('admin-pid-summary');
-    const table = document.getElementById('admin-pid-table');
-    if (!summary || !table) return;
-
-    const withId = adminPidData.filter(e => e.product_id).length;
+// Shared by renderAdminPidRows() (needs the actual rows) and
+// updateAdminPidSummaryText() (only needs the count) so the two can't drift
+// out of sync with each other.
+function adminPidFilteredEditions() {
     const query = (document.getElementById('admin-pid-search')?.value || '').trim().toLowerCase();
     const missingOnly = document.getElementById('admin-pid-missing-only')?.checked;
 
-    const filtered = adminPidData.filter(e => {
+    return adminPidData.filter(e => {
         if (missingOnly && e.product_id) return false;
 
         if (adminPidSetFilter.size > 0 && !adminPidSetFilter.has(e.set_prefix)) return false;
@@ -631,12 +624,41 @@ function renderAdminPidRows() {
 
         return true;
     });
+}
+
+// Recomputes just the "X of Y editions have a product ID" line — cheap enough
+// to call after a single product ID save instead of re-rendering every row
+// just to reflect one changed count.
+function updateAdminPidSummaryText() {
+    const summary = document.getElementById('admin-pid-summary');
+    if (!summary) return;
+
+    const withId = adminPidData.filter(e => e.product_id).length;
+    const filteredCount = adminPidFilteredEditions().length;
+
+    summary.textContent = `${withId} of ${adminPidData.length} editions have a product ID`
+        + (filteredCount !== adminPidData.length ? ` — showing ${filteredCount}` : '');
+}
+
+// Rebuilds just the row list (and summary/select-all/refresh-button state that
+// depend on it) without touching the header — toggling a single set in the Set
+// filter calls this directly instead of renderAdminPricingIds() so the dropdown
+// menu itself is never recreated, which would otherwise reset its scroll and
+// replay its open animation (a visible "flash") on every checkbox click.
+function renderAdminPidRows() {
+    const summary = document.getElementById('admin-pid-summary');
+    const table = document.getElementById('admin-pid-table');
+    if (!summary || !table) return;
+
+    const withId = adminPidData.filter(e => e.product_id).length;
+    const filtered = adminPidFilteredEditions();
 
     summary.textContent = `${withId} of ${adminPidData.length} editions have a product ID`
         + (filtered.length !== adminPidData.length ? ` — showing ${filtered.length}` : '');
 
     const rows = filtered.map(e => `
         <div class="admin-pid-row ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
+             data-edition-id="${escapeHtml(e.edition_id)}"
              onclick="selectAdminPricingDetail('${escapeHtml(e.edition_id)}')">
             <span class="admin-pid-col-check" onclick="event.stopPropagation()">
                 <input type="checkbox" class="admin-pid-row-check" data-edition-id="${escapeHtml(e.edition_id)}"
@@ -984,7 +1006,19 @@ async function saveAdminProductId(input) {
         }
 
         record.product_id = data.product_id;
-        renderAdminPricingIds();
+
+        if (document.getElementById('admin-pid-missing-only')?.checked) {
+            // Whether this row still belongs in the filtered list may have
+            // just changed (product ID went from missing to filled, or back)
+            // — needs an actual row re-render for correctness, not just a
+            // style update. Still skips the header rebuild renderAdminPricingIds()
+            // would otherwise do (the Set/Rarity dropdowns don't depend on this).
+            renderAdminPidRows();
+        } else {
+            input.classList.toggle('admin-pid-input-filled', !!data.product_id);
+            updateAdminPidSummaryText();
+        }
+
         if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
     } catch (err) {
         input.value = record.product_id || '';
@@ -1191,6 +1225,23 @@ function summarizeAdminPricingRefresh(sales, listings) {
     };
 }
 
+// Moves the "active" highlight to the clicked row by toggling classes on the
+// two affected DOM nodes directly, instead of going through renderAdminPricingIds()
+// — with thousands of editions loaded, re-rendering the entire header + row
+// list on every card click (previously ~800ms) was pure waste: nothing about
+// the row list's content changes when merely switching which card's detail
+// view is showing, only which single row is highlighted.
+function setAdminPricingActiveRow(editionId) {
+    document.querySelectorAll('#admin-pid-table .admin-pid-row.admin-pid-row-active').forEach(row => {
+        row.classList.remove('admin-pid-row-active');
+    });
+
+    if (!editionId) return;
+
+    const row = document.querySelector(`#admin-pid-table .admin-pid-row[data-edition-id="${CSS.escape(editionId)}"]`);
+    row?.classList.add('admin-pid-row-active');
+}
+
 async function selectAdminPricingDetail(editionId) {
     if (adminPidDetailSelected === editionId) return;
 
@@ -1209,7 +1260,7 @@ async function selectAdminPricingDetail(editionId) {
     adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
     adminPidBulkPasteOpen = false;
 
-    renderAdminPricingIds();
+    setAdminPricingActiveRow(editionId);
     renderAdminPricingDetailAll();
     updateAdminPidTcgButton();
 
