@@ -1365,11 +1365,12 @@ async def api_admin_pricing_import_sales(edition_id: str, request: Request):
 
     body = await request.json()
     raw_text = body.get("text", "")
+    foil_id = body.get("foil_id", "").strip() or None
 
     if not raw_text.strip():
         raise HTTPException(status_code=400, detail="Pasted text is required")
 
-    result = import_pasted_sales_tcg_by_edition(edition_id, raw_text)
+    result = import_pasted_sales_tcg_by_edition(edition_id, raw_text, foil_id=foil_id)
 
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"])

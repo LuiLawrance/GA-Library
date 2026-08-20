@@ -1754,11 +1754,15 @@ function closeAdminPidBulkPaste() {
 }
 
 function adminPidBulkPasteFormHtml() {
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    const curioView = record?.curio && adminPidCurioViewSelected.has(adminPidDetailSelected);
+
     return `
         <div class="admin-pid-add-entry-menu admin-pid-bulk-paste-menu">
             <span class="admin-pid-bulk-paste-hint">
                 Highlight and copy the sales history table straight off TCGPlayer, then paste it here —
                 works around the ~5-row cap when scraping while logged out.
+                ${curioView ? ' Imports to the Curio Foil, not the regular product.' : ''}
             </span>
             <textarea class="admin-pid-bulk-paste-textarea" id="admin-pid-bulk-paste-textarea"
                       placeholder="7/9/26&#10;NM&#10;1&#9;$0.05"></textarea>
@@ -1792,11 +1796,20 @@ async function submitAdminPidBulkPasteSales() {
     status.textContent = '';
     status.className = 'admin-pid-add-entry-status';
 
+    // Segregated the same way refresh/manual-add already are (see
+    // refreshSelectedAdminPricing, adminPidAddEntryFoilOptions): pasted rows
+    // come from whichever product's page the admin actually copied them from,
+    // so toggled-on attributes every row to the Curio Foil, never mixing it
+    // with the edition's regular nonfoil/foil data.
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    const curioView = record?.curio && adminPidCurioViewSelected.has(editionId);
+    const foilId = curioView ? record.curio.foil_id : undefined;
+
     try {
         const res = await fetch(`/api/admin/pricing/${editionId}/import-sales`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text}),
+            body: JSON.stringify({text, foil_id: foilId}),
         });
         const data = await res.json();
 

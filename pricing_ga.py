@@ -547,6 +547,22 @@ def _foil_kind_for_id(foils: dict, foil_id: str) -> str | None:
     return None
 
 
+def _foil_print_kind_for_id(foils: dict, foil_id: str) -> str | None:
+    """Like _foil_kind_for_id(), but for a variant (e.g. a Curio Foil)
+    returns its PARENT foil's NONFOIL/FOIL kind instead of the variant's own
+    descriptive name ("Aurora Curio Foil" isn't "FOIL" or "NONFOIL", so
+    comparing it against those directly always fails). A variant doesn't
+    have its own independent print kind — it's nested under, and inherits,
+    whichever top-level foil it belongs to (mirrors the same parent-lookup
+    _curio_foil_id_for_edition's caller does in app.py's /foils endpoint)."""
+    for fid, finfo in foils.items():
+        if fid == foil_id:
+            return finfo.get("kind")
+        if foil_id in finfo.get("variants", {}):
+            return finfo.get("kind")
+    return None
+
+
 def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: float, quantity: int = 1,
                       condition: str = "", marketplace: str = "Manual", entry_date: str | None = None,
                       debug: bool = False) -> dict:
@@ -571,7 +587,7 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
 
     card_id_lookup = editions_data.get(edition_id, {}).get("card_id")
     foils = info_data.get(card_id_lookup, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
-    foil_kind = _foil_kind_for_id(foils, foil_id)
+    foil_kind = _foil_print_kind_for_id(foils, foil_id)
 
     if foil_kind and foil_kind.strip().upper() == "FOIL" and not condition.strip().lower().endswith("foil"):
         condition = f"{condition} Foil".strip()
@@ -589,11 +605,26 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
     # A manual entry is us recording pricing data for this edition just as much
     # as a scrape or pasted import is — count it the same way so the admin
     # console's "last updated" badge (and, for listings, the refresh gate)
-    # reflect it.
+    # reflect it. A variant foil_id (e.g. a Curio Foil's) gets its own
+    # foil-scoped clock stamped instead of the edition's main one — same
+    # distinction the scrape/paste-import paths already make. Checked
+    # structurally against the card data (is foil_id nested as a variant
+    # under any of this edition's foils?) rather than via
+    # get_foil_overrides(), which would still be empty if this is the very
+    # first thing ever recorded for that variant (e.g. before its product ID
+    # has been entered).
+    is_variant = any(foil_id in finfo.get("variants", {}) for finfo in foils.values())
+
     if entry_type == "sales":
-        api_tcgplayer.set_last_sales(edition_id, debug)
+        if is_variant:
+            api_tcgplayer.set_foil_last_sales(edition_id, foil_id, debug)
+        else:
+            api_tcgplayer.set_last_sales(edition_id, debug)
     else:
-        api_tcgplayer.set_last_listings(edition_id, debug)
+        if is_variant:
+            api_tcgplayer.set_foil_last_listings(edition_id, foil_id, debug)
+        else:
+            api_tcgplayer.set_last_listings(edition_id, debug)
 
     if debug:
         print(
@@ -703,17 +734,31 @@ def parse_pasted_sales(text: str) -> tuple[list[dict], list[str]]:
     return entries, errors
 
 
-def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bool = False) -> dict:
+def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bool = False,
+                                        foil_id: str | None = None) -> dict:
     """Stores sales data an admin copy-pasted directly from TCGPlayer's sales
     history table, exactly like a scrape would — a workaround for the scraper
-    being capped at ~5 rows while logged out of TCGPlayer."""
+    being capped at ~5 rows while logged out of TCGPlayer.
+
+    Pass foil_id (e.g. a Curio Foil's) to attribute every pasted row to that
+    one foil directly instead of matching each row's Nonfoil/Foil condition
+    text against the edition's top-level foils — the pasted text comes from
+    that foil's own separate TCGPlayer page, which has no mixed nonfoil/foil
+    rows to disambiguate in the first place (mirrors foil_id_override in
+    _store_sales_tcg / the scrape path's per-foil scoping)."""
     entries, errors = parse_pasted_sales(raw_text)
 
     if not entries:
         return {"ok": False, "error": "Could not parse any sales entries from the pasted text."}
 
-    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(edition_id, entries, debug)
-    api_tcgplayer.set_last_sales(edition_id, debug)
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(
+        edition_id, entries, debug, foil_id_override=foil_id
+    )
+
+    if foil_id:
+        api_tcgplayer.set_foil_last_sales(edition_id, foil_id, debug)
+    else:
+        api_tcgplayer.set_last_sales(edition_id, debug)
 
     return {
         "ok": True,
