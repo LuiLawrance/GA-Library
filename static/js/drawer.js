@@ -875,6 +875,17 @@ function buildTabPricingPanel(edition) {
     if (foilEntry) sections.push(buildPricingFoilSection(foilEntry[0], 'Foil', pricing));
     specials.forEach(([fid, f]) => sections.push(buildPricingFoilSection(fid, toFoilLabel(f.kind), pricing)));
 
+    // Curio Foils (and other variant foils, e.g. multi-stamp tournament
+    // promos) are nested under their parent foil rather than listed as their
+    // own top-level foil — but the backend still fetches sales/listings for
+    // each variant_id (see api_card_detail in app.py), so surface a section
+    // for each one here too.
+    entries.forEach(([, f]) => {
+        Object.entries(f.variants || {}).forEach(([vid, v]) => {
+            sections.push(buildPricingFoilSection(vid, toFoilLabel(v.kind), pricing));
+        });
+    });
+
     return sections.join('');
 }
 
