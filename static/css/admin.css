@@ -277,7 +277,8 @@
 }
 
 .admin-pid-filter-toggle input[type="checkbox"],
-.admin-pid-col-check input[type="checkbox"] {
+.admin-pid-col-check input[type="checkbox"],
+.admin-pid-curio-select-all {
     appearance: none;
     -webkit-appearance: none;
     width: 16px;
@@ -292,20 +293,41 @@
 }
 
 .admin-pid-filter-toggle input[type="checkbox"]:focus-visible,
-.admin-pid-col-check input[type="checkbox"]:focus-visible {
+.admin-pid-col-check input[type="checkbox"]:focus-visible,
+.admin-pid-curio-select-all:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .admin-pid-filter-toggle input[type="checkbox"]:checked,
-.admin-pid-col-check input[type="checkbox"]:checked {
+.admin-pid-col-check input[type="checkbox"]:checked,
+.admin-pid-curio-select-all:checked {
     background: var(--accent);
     border-color: var(--accent);
 }
 
-.admin-pid-col-check input[type="checkbox"]:indeterminate {
+.admin-pid-col-check input[type="checkbox"]:indeterminate,
+.admin-pid-curio-select-all:indeterminate {
     background: color-mix(in srgb, var(--accent) 45%, transparent);
     border-color: var(--accent);
+}
+
+/* Sits in the header's Product ID column, positioned exactly like the
+   per-row .admin-pid-curio-toggle buttons below it (see the comment on
+   that rule) — outside the column, flush with its left edge plus the same
+   6px gap — so the "select all" checkbox and the row toggles it controls
+   line up in one column down the page. */
+.admin-pid-curio-select-all {
+    position: absolute;
+    right: 100%;
+    margin-right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.admin-pid-curio-select-all:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
 }
 
 .admin-pid-refresh-group {
@@ -515,6 +537,23 @@
     opacity: 1;
     transform: translateY(0);
     transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+/* Used instead of curio-fade-out/in above when the toggle came from the
+   header's "select all" checkbox (see toggleAllAdminPidCurioView) rather
+   than a single row's button — slower still, since a bulk action reads as
+   rushed at the single-row pace even though it's animating the exact same
+   one panel (whichever card happens to be open). */
+.admin-pricing-detail.curio-fade-out-bulk {
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.admin-pricing-detail.curio-fade-in-bulk {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.5s ease, transform 0.5s ease;
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar,

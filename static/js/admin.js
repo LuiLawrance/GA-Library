@@ -584,7 +584,11 @@ function renderAdminPidHeader() {
             <span class="admin-pid-col-name">CARD</span>
             <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
             <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
-            <span class="admin-pid-col-status">Product ID</span>
+            <span class="admin-pid-col-status">
+                <input type="checkbox" class="admin-pid-curio-select-all" id="admin-pid-curio-select-all"
+                       title="Toggle Curio Foil view for every visible card" onchange="toggleAllAdminPidCurioView(this)">
+                Product ID
+            </span>
             <span class="admin-pid-col-sales">Sales</span>
             <span class="admin-pid-col-listings">Listings</span>
         </div>
@@ -601,6 +605,46 @@ function renderAdminPidHeader() {
         newSelectAll.checked = selectAllChecked;
         newSelectAll.indeterminate = selectAllIndeterminate;
     }
+
+    updateAdminPidCurioSelectAllState();
+}
+
+// Recomputes the header's "select all Curio Foil toggles" checkbox
+// (checked/indeterminate/disabled) from current state, the same way
+// renderAdminPidRows() derives admin-pid-select-all's — but computed fresh
+// each call instead of snapshot-restored across a header rebuild, since
+// unlike that one this doesn't need the row list itself to derive it from.
+// Scoped to the currently-filtered rows, matching toggleSelectAllAdminPricing's
+// own scope (filtered out rows aren't touched by either "select all").
+function updateAdminPidCurioSelectAllState() {
+    const box = document.getElementById('admin-pid-curio-select-all');
+    if (!box) return;
+
+    const curioEligibleIds = adminPidFilteredEditions().filter(e => e.curio).map(e => e.edition_id);
+    const onCount = curioEligibleIds.filter(id => adminPidCurioViewSelected.has(id)).length;
+
+    box.disabled = curioEligibleIds.length === 0;
+    box.checked = curioEligibleIds.length > 0 && onCount === curioEligibleIds.length;
+    box.indeterminate = onCount > 0 && !box.checked;
+}
+
+// Header checkbox counterpart to the per-row Curio Foil toggle — turns it
+// on/off for every currently-filtered curio-eligible card at once, the same
+// way admin-pid-select-all does for row checkboxes (see
+// toggleSelectAllAdminPricing). Reuses toggleAdminPidCurioView() per row
+// (only actually flipping rows not already at the target state) rather than
+// duplicating its DOM-update/fade-animation logic here.
+function toggleAllAdminPidCurioView(headerCheckbox) {
+    const targetState = headerCheckbox.checked;
+    const curioEligible = adminPidFilteredEditions().filter(e => e.curio);
+
+    curioEligible.forEach(e => {
+        if (adminPidCurioViewSelected.has(e.edition_id) !== targetState) {
+            toggleAdminPidCurioView(e.edition_id, true);
+        }
+    });
+
+    headerCheckbox.indeterminate = false;
 }
 
 function renderAdminPricingIds() {
@@ -693,6 +737,7 @@ function renderAdminPidRows() {
     }
 
     updateAdminPidRefreshButton();
+    updateAdminPidCurioSelectAllState();
     syncAdminPidHeaderScrollbarOffset();
 }
 
@@ -789,7 +834,13 @@ function adminPidProductIdFieldHtml(e) {
 // field switch to match (see renderAdminPricingDetail's curio filtering).
 // Targeted DOM update rather than a full renderAdminPidRows() call, matching
 // this table's established no-full-re-render performance pattern.
-async function toggleAdminPidCurioView(editionId) {
+//
+// bulk=true (only ever passed by toggleAllAdminPidCurioView) swaps in the
+// slower curio-fade-*-bulk timing instead of curio-fade-*/in — a header
+// "select all" click reads as rushed at the single-row pace, even though
+// it's still only ever animating this one panel (whichever card happens to
+// be open), same as an individual row's click.
+async function toggleAdminPidCurioView(editionId, bulk = false) {
     if (adminPidCurioViewSelected.has(editionId)) {
         adminPidCurioViewSelected.delete(editionId);
     } else {
@@ -809,6 +860,8 @@ async function toggleAdminPidCurioView(editionId) {
     const listingsCell = row?.querySelector('.admin-pid-col-listings');
     if (listingsCell) listingsCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'listings');
 
+    updateAdminPidCurioSelectAllState();
+
     if (adminPidDetailSelected === editionId) {
         // The add-entry foil dropdown is filtered by curio-toggle state (see
         // adminPidAddEntryFoilOptions) — the currently-selected foil_id may
@@ -827,14 +880,17 @@ async function toggleAdminPidCurioView(editionId) {
         // panel instead of both panels together otherwise reads as quicker
         // even though it's the same kind of change.
         const detail = document.getElementById('admin-pricing-detail');
-        detail?.classList.add('curio-fade-out');
-        await sleep(300);
+        const outClass = bulk ? 'curio-fade-out-bulk' : 'curio-fade-out';
+        const inClass = bulk ? 'curio-fade-in-bulk' : 'curio-fade-in';
+
+        detail?.classList.add(outClass);
+        await sleep(bulk ? 450 : 300);
 
         renderAdminPricingDetailAll();
 
-        detail?.classList.remove('curio-fade-out');
-        detail?.classList.add('curio-fade-in');
-        setTimeout(() => detail?.classList.remove('curio-fade-in'), 350);
+        detail?.classList.remove(outClass);
+        detail?.classList.add(inClass);
+        setTimeout(() => detail?.classList.remove(inClass), bulk ? 500 : 350);
     }
 }
 
