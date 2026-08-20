@@ -3,7 +3,7 @@
         <span class="page-label">Admin Console</span>
         <nav class="admin-subnav">
             <button class="admin-subnav-btn active" data-section="pricing" onclick="switchAdminSection('pricing')">
-                Pricing
+                Cards
             </button>
             <button class="admin-subnav-btn" data-section="users" onclick="switchAdminSection('users')">
                 Users
@@ -47,47 +47,70 @@
         </div>
 
         <div class="admin-section" id="admin-section-pricing">
-            <span class="admin-section-title">Pricing</span>
-            <div class="admin-pid-controls">
-                <div class="admin-pid-controls-row">
-                    <input type="text" class="admin-pid-search" id="admin-pid-search"
-                           placeholder="Search cards or sets..." oninput="renderAdminPricingIds()">
-                    <label class="admin-pid-filter-toggle">
-                        <input type="checkbox" id="admin-pid-missing-only" onchange="renderAdminPricingIds()">
-                        Missing only
-                    </label>
-                    <button class="admin-pid-tcg-btn" id="admin-pid-tcg-btn" onclick="openAdminPidTcgPlayer()" disabled>
-                        <img src="/marketplaces/TCG%20Player.png" alt="" class="admin-pid-tcg-icon">
-                        TCG Player
-                    </button>
+            <div class="admin-pid-controls-row admin-cards-header-row">
+                <div class="admin-cards-subnav">
+                    <span class="admin-pill-indicator"></span>
+                    <button class="admin-cards-subnav-btn" data-view="info" onclick="switchAdminCardsView('info')">Info</button>
+                    <button class="admin-cards-subnav-btn active" data-view="pricing" onclick="switchAdminCardsView('pricing')">Pricing</button>
                 </div>
-                <div class="admin-pid-controls-row">
-                    <div class="admin-pid-status-group">
-                        <div class="admin-pid-summary" id="admin-pid-summary"></div>
-                        <div class="admin-pid-progress hidden" id="admin-pid-progress"></div>
-                    </div>
-                    <div class="admin-pid-refresh-group">
-                        <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-sales"
-                                onclick="refreshSelectedAdminPricing('sales')" disabled>Refresh Sales</button>
-                        <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-listings"
-                                onclick="refreshSelectedAdminPricing('listings')" disabled>Refresh Listings</button>
-                        <button class="admin-pid-refresh-btn" id="admin-pid-refresh-btn-both"
-                                onclick="refreshSelectedAdminPricing('both')" disabled>Refresh Selected</button>
-                    </div>
-                </div>
+                <input type="text" class="admin-pid-search" id="admin-pid-search"
+                       placeholder="Search cards or sets..." oninput="renderAdminPricingIds()">
+                <label class="admin-pid-filter-toggle">
+                    <input type="checkbox" id="admin-pid-missing-only" onchange="renderAdminPricingIds()">
+                    Missing only
+                </label>
             </div>
 
-            <div class="admin-pricing-layout">
-                <div class="admin-pricing-list" id="admin-pricing-list">
-                    <div class="admin-pid-table-header" id="admin-pid-table-header"></div>
-                    <div class="admin-pid-table-scroll">
-                        <div class="admin-pid-table" id="admin-pid-table"></div>
+            <div class="admin-cards-view hidden" id="admin-cards-view-info">
+                <div class="admin-pid-detail-empty">Card info management is coming soon.</div>
+            </div>
+
+            <div class="admin-cards-view" id="admin-cards-view-pricing">
+                <div class="admin-pid-controls">
+                    <div class="admin-pid-controls-grid">
+                        <div class="admin-pid-controls-cell-list">
+                            <div class="admin-pid-status-group">
+                                <div class="admin-pid-summary" id="admin-pid-summary"></div>
+                                <div class="admin-pid-progress hidden" id="admin-pid-progress"></div>
+                            </div>
+                            <button class="admin-pid-tcg-btn" id="admin-pid-tcg-btn" onclick="openAdminPidTcgPlayer()"
+                                    title="TCG Player" disabled>
+                                <img src="/marketplaces/TCG%20Player.png" alt="TCG Player" class="admin-pid-tcg-icon">
+                            </button>
+                        </div>
+                        <div class="admin-pid-controls-cell-image"></div>
+                        <div class="admin-pid-controls-cell-detail">
+                            <div class="admin-pid-source-toggle" id="admin-pid-source-toggle">
+                                <span class="admin-pill-indicator"></span>
+                                <button type="button" class="admin-pid-source-toggle-btn active" data-mode="regular"
+                                        onclick="switchAdminPidDetailMode('regular')">Regular</button>
+                                <button type="button" class="admin-pid-source-toggle-btn" data-mode="discord"
+                                        onclick="switchAdminPidDetailMode('discord')">Discord</button>
+                            </div>
+                            <div class="admin-pid-refresh-group">
+                                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-sales"
+                                        onclick="refreshSelectedAdminPricing('sales')" disabled>Refresh Sales</button>
+                                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-listings"
+                                        onclick="refreshSelectedAdminPricing('listings')" disabled>Refresh Listings</button>
+                                <button class="admin-pid-refresh-btn" id="admin-pid-refresh-btn-both"
+                                        onclick="refreshSelectedAdminPricing('both')" disabled>Refresh Selected</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div class="admin-pricing-image-col" id="admin-pricing-image-col">
-                    <div class="admin-pid-detail-empty">Select a card from the list to view its pricing details.</div>
+
+                <div class="admin-pricing-layout">
+                    <div class="admin-pricing-list" id="admin-pricing-list">
+                        <div class="admin-pid-table-header" id="admin-pid-table-header"></div>
+                        <div class="admin-pid-table-scroll">
+                            <div class="admin-pid-table" id="admin-pid-table"></div>
+                        </div>
+                    </div>
+                    <div class="admin-pricing-image-col" id="admin-pricing-image-col">
+                        <div class="admin-pid-detail-empty">Select a card from the list to view its pricing details.</div>
+                    </div>
+                    <div class="admin-pricing-detail" id="admin-pricing-detail"></div>
                 </div>
-                <div class="admin-pricing-detail" id="admin-pricing-detail"></div>
             </div>
         </div>
     </div>

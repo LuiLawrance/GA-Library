@@ -78,6 +78,77 @@
     color: var(--text-muted);
 }
 
+/* Sits inline to the left of the card search box (in .admin-cards-header-row
+   below) rather than spanning its own full-width row — it's a small mode
+   switch, not a second nav bar. */
+.admin-cards-header-row {
+    margin-bottom: 16px;
+    flex-shrink: 0;
+}
+
+/* Pill toggle between the Cards section's own sub-views (Info / Pricing) —
+   deliberately a filled pill rather than the top-level .admin-subnav's
+   underline-tab look, so it reads as a mode switch inside Cards rather than
+   a second, competing top-level nav. */
+.admin-cards-subnav {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    flex-shrink: 0;
+}
+
+.admin-cards-subnav-btn {
+    position: relative;
+    z-index: 1;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+    padding: 6px 16px;
+    cursor: pointer;
+    transition: color 0.25s;
+}
+
+.admin-cards-subnav-btn:hover {
+    color: var(--text);
+}
+
+.admin-cards-subnav-btn.active {
+    color: var(--bg);
+}
+
+/* Sliding highlight shared by both pill toggles in this section (Info/Pricing
+   and Regular/Discord) — JS (positionPillIndicator) measures the active
+   button and sets width/height/top and a translateX transform directly, so
+   this only needs to define the visual + the transition, not any sizing. */
+.admin-pill-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.admin-cards-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+
 .admin-pid-controls {
     display: flex;
     flex-direction: column;
@@ -90,6 +161,92 @@
     display: flex;
     align-items: center;
     gap: 16px;
+}
+
+/* Mirrors .admin-pricing-layout's exact column widths (1.4fr / fixed 320px /
+   1fr, same 24px gap) so the TCG button (in the list cell) and refresh
+   buttons (in the detail cell) land flush with the list/detail columns
+   below, even though this is a separate row above them. */
+.admin-pid-controls-grid {
+    display: grid;
+    /* minmax(0, …) instead of a bare fr: without it, each fr track's implicit
+       minimum is its cell's min-content width, which differs between this row's
+       (mostly empty) cells and .admin-pricing-layout's (list/detail content)
+       cells — silently breaking the column-matching this grid exists for. */
+    grid-template-columns: minmax(0, 1.4fr) 320px minmax(0, 1fr);
+    gap: 24px;
+    align-items: center;
+}
+
+.admin-pid-controls-cell-list {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-width: 0;
+}
+
+.admin-pid-controls-cell-image {
+    min-width: 0;
+}
+
+/* The Regular/Discord pill's left edge lands on this cell's left edge, which
+   — since this cell shares .admin-pricing-layout's own grid-template-columns
+   (see .admin-pid-controls-grid) — is the same pixel as the detail column's
+   left edge below, i.e. flush with the Sales/Listings area. At common desktop
+   widths the detail column isn't wide enough to also fit all three refresh
+   buttons on the same line, so this wraps rather than overflowing off-page:
+   .admin-pid-refresh-group's own margin-left:auto (not justify-content here,
+   which would misbehave once refresh-group is alone on its own wrapped line)
+   keeps it pinned to the right whether it's sharing the first line or has
+   wrapped to a second one. */
+.admin-pid-controls-cell-detail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    row-gap: 8px;
+    column-gap: 12px;
+    min-width: 0;
+}
+
+/* Regular/Discord pill — sits left of the refresh buttons in the same row.
+   Same filled-pill shape as .admin-cards-subnav (the Info/Pricing toggle),
+   but its own sizing tuned to match .admin-pid-refresh-btn's height exactly,
+   since that's the button it's sitting directly next to. */
+.admin-pid-source-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px;
+    flex-shrink: 0;
+}
+
+.admin-pid-source-toggle-btn {
+    position: relative;
+    z-index: 1;
+    font-family: 'Sora', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.25s;
+}
+
+.admin-pid-source-toggle-btn:hover {
+    color: var(--text);
+}
+
+.admin-pid-source-toggle-btn.active {
+    color: var(--bg);
 }
 
 .admin-pid-search {
@@ -159,19 +316,17 @@
 }
 
 .admin-pid-tcg-btn {
-    margin-left: auto;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    font-family: 'Sora', sans-serif;
-    font-size: 0.82rem;
-    font-weight: 500;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
     color: var(--text);
     background: transparent;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 8px 16px;
     cursor: pointer;
     transition: border-color 0.15s, opacity 0.15s;
 }
@@ -257,17 +412,23 @@
     content: "— ";
 }
 
+/* Same grid-template-columns/gap as .admin-pid-controls-grid above (including
+   the minmax(0, …) — see the comment there for why a bare fr isn't enough) —
+   kept as two separate grid declarations rather than one shared element
+   (there's a controls block between them), but identical track definitions
+   guarantee their column edges land on the same pixels in every case. */
 .admin-pricing-layout {
     flex: 1;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) 320px minmax(0, 1fr);
     gap: 24px;
     min-height: 0;
     overflow: hidden;
 }
 
 .admin-pricing-list {
-    flex: 1.4;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -293,7 +454,6 @@
 }
 
 .admin-pricing-image-col {
-    flex: 0 0 320px;
     min-width: 0;
     overflow: hidden;
     display: flex;
@@ -310,7 +470,6 @@
 }
 
 .admin-pricing-detail {
-    flex: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
@@ -974,12 +1133,18 @@
     z-index: 1000;
 }
 
-/* Temporarily lifts the panel's own scroll-clipping while the bulk-paste
-   popup is open, so it isn't cut off — restored the instant it closes. Kept
-   as a plain CSS override (position/top/right/left still come from the
-   shared .admin-pid-add-entry-menu rule) rather than JS-computed coordinates,
-   since this page's global `zoom` scale doesn't compose correctly with
-   manually-set position values. */
+/* Temporarily lifts the panel's own scroll-clipping while the bulk-paste or
+   add-entry popup is open, so it isn't cut off — restored the instant it
+   closes. Kept as a plain CSS override (position/top/right/left still come
+   from the shared .admin-pid-add-entry-menu rule) rather than JS-computed
+   positioning, since this page's global `zoom` scale doesn't compose
+   correctly with manually-set position values. .admin-pricing-layout is the
+   third ancestor in the clipping chain (list/image/detail columns, its own
+   overflow:hidden exists so the list/detail columns can scroll internally
+   instead of growing the page) — without lifting it too, a popup nested
+   deep enough (e.g. the marketplace dropdown inside the add-entry popup)
+   still gets clipped even though the two closer ancestors are already lifted. */
+.admin-pricing-layout.admin-pid-popover-open,
 .admin-pricing-detail.admin-pid-popover-open,
 .admin-pid-detail-section.admin-pid-popover-open {
     overflow: visible;
@@ -1094,6 +1259,30 @@
 
 .admin-pid-dropdown-option.selected {
     color: var(--accent);
+}
+
+/* The marketplace field reuses .admin-pid-dropdown-btn for its box (border,
+   background, padding) but the box wraps a real <input> instead of a
+   <button>, so the input itself needs to blend in rather than look like a
+   second, nested field. */
+.admin-pid-marketplace-input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: text;
+}
+
+.admin-pid-marketplace-input:focus {
+    outline: none;
+}
+
+.admin-pid-marketplace-input::placeholder {
+    color: var(--text-muted);
 }
 
 /* The Rarity- and Set-column header filters both reuse cards.css's

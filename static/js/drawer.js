@@ -295,11 +295,11 @@ const PRICING_CHART_MAX_POINTS = 5;
 // color is lightened (Near Mint stays full-strength, worse grades fade out).
 const PRICING_CONDITION_ORDER = ['Near Mint', 'Lightly Played', 'Moderately Played', 'Heavily Played', 'Damaged'];
 
-// A sale/listing's "info" carries the raw condition text, which for foil
+// A sale/listing's "condition" carries the raw condition text, which for foil
 // entries ends in " Foil" (e.g. "Near Mint Foil") — stripped here since the
 // chart is already scoped to one foil's own section, so the suffix is redundant.
-function normalizePricingCondition(info) {
-    return (info || '').replace(/\s+Foil$/i, '').trim() || 'Unknown';
+function normalizePricingCondition(condition) {
+    return (condition || '').replace(/\s+Foil$/i, '').trim() || 'Unknown';
 }
 
 // Each condition gets its own hue rather than a lightened tint of one base
@@ -342,7 +342,7 @@ function groupPricingByCondition(entries) {
     const groups = new Map();
 
     for (const e of entries) {
-        const condition = normalizePricingCondition(e.info);
+        const condition = normalizePricingCondition(e.condition);
         if (!groups.has(condition)) groups.set(condition, []);
         groups.get(condition).push(e);
     }
@@ -477,7 +477,7 @@ function buildPricingSeriesMarks(series, xAt, yAt) {
            data-series-key="${escapeHtml(key)}"
            data-color="${escapeHtml(color)}"
            data-date="${escapeHtml(p.date)}"
-           data-condition="${escapeHtml(p.info || '')}"
+           data-condition="${escapeHtml(p.condition || '')}"
            data-quantity="${p.quantity ?? 1}"
            data-price="${Number(p.price).toFixed(2)}"
            onmouseenter="showPricingTooltip(event)"

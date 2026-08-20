@@ -1,4 +1,6 @@
 let adminActiveSection = 'pricing';
+let adminCardsView = 'pricing';
+let adminPidDetailMode = 'regular';
 let adminUsersLoaded = false;
 let adminUsersData = [];
 let adminUserDetailSelected = null;
@@ -29,6 +31,10 @@ let adminPidBulkPastePending = false;
 // grading vocabulary as scraped TCGPlayer data.
 const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played', 'Heavily Played', 'Damaged'];
 
+// Suggested marketplace options for manual entries — the field itself still
+// accepts arbitrary free text, these are just one-click shortcuts.
+const ADMIN_PID_MARKETPLACE_OPTIONS = ['TCGPlayer', "Merlin's", 'Manual'];
+
 // Matches RARITY_MAP's value order in pricing_ga.py, so the rarity filter
 // lists options from most common to rarest instead of alphabetically.
 const ADMIN_PID_RARITY_ORDER = ['C', 'U', 'R', 'SR', 'UR', 'PR', 'CSR', 'CUR', 'CPR'];
@@ -42,6 +48,23 @@ const ADMIN_PID_NO_LISTINGS_SENTINEL = '~';
 // excludes both a blank/missing ID and the "~" no-listings marker.
 function adminPidIsScrapable(productId) {
     return !!productId && productId !== ADMIN_PID_NO_LISTINGS_SENTINEL;
+}
+
+// Sliding highlight shared by the Cards section's two pill toggles (Info/Pricing,
+// Regular/Discord) — measures the currently-active button and positions the
+// '.admin-pill-indicator' sibling under it via width/height/top + a translateX
+// transform, so the CSS transition (see .admin-pill-indicator) animates it sliding
+// there from wherever it was. Call after toggling which button has 'active', and
+// again once a previously-hidden container becomes visible (offsetWidth reads 0
+// while display:none, so a call made while hidden has nothing to measure).
+function positionPillIndicator(container) {
+    const indicator = container?.querySelector('.admin-pill-indicator');
+    const active = container?.querySelector('.active');
+    if (!indicator || !active) return;
+    indicator.style.width = active.offsetWidth + 'px';
+    indicator.style.height = active.offsetHeight + 'px';
+    indicator.style.top = active.offsetTop + 'px';
+    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
 }
 
 async function switchAdminSection(section) {
@@ -70,9 +93,39 @@ async function switchAdminSection(section) {
         loadAdminUsers();
     }
 
+    if (section === 'pricing') {
+        // Just became visible (or already was) — reposition without sliding from a
+        // stale/never-measured spot.
+        positionPillIndicator(document.querySelector('.admin-cards-subnav'));
+        positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
+    }
+
     content?.classList.remove('fade-out');
     content?.classList.add('fade-in');
     setTimeout(() => content?.classList.remove('fade-in'), 200);
+}
+
+// Switches between the Cards section's own sub-views (Info / Pricing) — a
+// pill toggle inside the section itself, separate from switchAdminSection()
+// above which switches the top-level Cards/Users tabs.
+function switchAdminCardsView(view) {
+    const section = document.getElementById('admin-section-pricing');
+    if (!section || adminCardsView === view) return;
+
+    adminCardsView = view;
+
+    section.querySelectorAll('.admin-cards-subnav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === view);
+    });
+    positionPillIndicator(section.querySelector('.admin-cards-subnav'));
+
+    section.querySelectorAll('.admin-cards-view').forEach(panel => {
+        panel.classList.toggle('hidden', panel.id !== `admin-cards-view-${view}`);
+    });
+
+    if (view === 'pricing' && !adminPidLoaded) {
+        loadAdminPricingIds();
+    }
 }
 
 async function loadAdminUsers() {
@@ -1283,6 +1336,13 @@ function renderAdminPricingDetail() {
         return;
     }
 
+    if (adminPidDetailMode === 'discord') {
+        panel.innerHTML = '<div class="admin-pid-detail-empty">Discord listings management is coming soon.</div>';
+        panel.classList.remove('admin-pid-popover-open');
+        panel.closest('.admin-pricing-layout')?.classList.remove('admin-pid-popover-open');
+        return;
+    }
+
     const historyLoaded = !!adminPidDetailHistory;
     const salesRows = historyLoaded ? adminPidDetailHistory.sales : [];
     const listingsRows = historyLoaded ? adminPidDetailHistory.listings : [];
@@ -1307,16 +1367,39 @@ function renderAdminPricingDetail() {
         </div>
     `;
 
-    // Lifts each section's own overflow clipping while its popup (bulk-paste or
+    // Lifts each ancestor's own overflow clipping while its popup (bulk-paste or
     // add-entry) is open so the dropdown isn't cut off, without needing any
     // JS-computed positioning — the popup itself stays on plain CSS positioning
     // (see .admin-pid-add-entry-menu), since this page's global `zoom` scale
-    // doesn't compose correctly with manually-set position values.
+    // doesn't compose correctly with manually-set position values. Three levels
+    // need lifting: the section, the detail panel, and .admin-pricing-layout
+    // (the list/image/detail column row) — a popup nested deep enough (e.g. the
+    // marketplace dropdown inside the add-entry popup) reaches past all three.
     const salesPopoverOpen = adminPidBulkPasteOpen || adminPidAddEntryOpenType === 'sales';
     const listingsPopoverOpen = adminPidAddEntryOpenType === 'listings';
-    panel.classList.toggle('admin-pid-popover-open', salesPopoverOpen || listingsPopoverOpen);
+    const anyPopoverOpen = salesPopoverOpen || listingsPopoverOpen;
+    panel.classList.toggle('admin-pid-popover-open', anyPopoverOpen);
+    panel.closest('.admin-pricing-layout')?.classList.toggle('admin-pid-popover-open', anyPopoverOpen);
     document.getElementById('admin-pid-section-sales')?.classList.toggle('admin-pid-popover-open', salesPopoverOpen);
     document.getElementById('admin-pid-section-listings')?.classList.toggle('admin-pid-popover-open', listingsPopoverOpen);
+}
+
+// Regular/Discord pill — swaps the whole detail panel's content (both Sales
+// and Listings sections together) for the currently-selected card, since
+// Discord listings need an entirely different UI (sporadic chat-server
+// posts) rather than just a different filter on the same sections. The card
+// list and image column are unaffected — picking a card works the same
+// either way, only what's shown once one's selected changes.
+function switchAdminPidDetailMode(mode) {
+    if (adminPidDetailMode === mode) return;
+    adminPidDetailMode = mode;
+
+    document.querySelectorAll('#admin-pid-source-toggle .admin-pid-source-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
+
+    renderAdminPricingDetail();
 }
 
 function adminPidAddEntryTriggerHtml(type) {
@@ -1494,7 +1577,7 @@ function adminPidAddEntryFormHtml(type) {
         menuId: 'admin-pid-condition-dropdown-menu',
         btnId: 'admin-pid-condition-dropdown-btn',
         labelId: 'admin-pid-condition-dropdown-label',
-        hiddenId: 'admin-pid-add-info',
+        hiddenId: 'admin-pid-add-condition',
         label: adminPidAddEntryCondition,
         value: adminPidAddEntryCondition,
         disabled: false,
@@ -1511,7 +1594,7 @@ function adminPidAddEntryFormHtml(type) {
             </div>
             <input type="date" class="admin-pid-add-entry-input" id="admin-pid-add-date" value="${adminPidTodayIso()}" max="${adminPidTodayIso()}">
             ${conditionDropdown}
-            <input type="text" class="admin-pid-add-entry-input" id="admin-pid-add-marketplace" placeholder="Marketplace" value="Manual">
+            ${adminPidMarketplaceFieldHtml()}
             <div class="admin-pid-add-entry-actions">
                 <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-add-entry-btn"
                         onclick="submitAdminPricingManualEntry('${type}')" ${foilsLoaded ? '' : 'disabled'}>Add</button>
@@ -1584,11 +1667,67 @@ function closeAdminPidFoilDropdown() {
 
 function selectAdminPidConditionOption(condition) {
     adminPidAddEntryCondition = condition;
-    selectAdminPidDropdownOption('admin-pid-condition-dropdown-menu', 'admin-pid-condition-dropdown-btn', 'admin-pid-add-info', 'admin-pid-condition-dropdown-label', condition, condition);
+    selectAdminPidDropdownOption('admin-pid-condition-dropdown-menu', 'admin-pid-condition-dropdown-btn', 'admin-pid-add-condition', 'admin-pid-condition-dropdown-label', condition, condition);
 }
 
 function closeAdminPidConditionDropdown() {
     closeAdminPidDropdown('admin-pid-condition-dropdown-menu', 'admin-pid-condition-dropdown-btn');
+}
+
+// Marketplace field — styled like the foil/condition dropdowns above (shares
+// their .admin-pid-dropdown-* CSS), but unlike those it's a real text input,
+// not a hidden-value + label pair: picking an option just fills the input,
+// and the admin can still type anything else over it.
+function adminPidMarketplaceFieldHtml() {
+    // Reads the value back out via this.dataset rather than interpolating it
+    // into the onclick string directly — escapeHtml() only HTML-escapes (so
+    // "Merlin's" becomes Merlin&#39;s), and the browser decodes that entity
+    // back to a literal ' before the onclick text is parsed as JS, which
+    // would terminate the string early and break the handler.
+    const optionsHtml = ADMIN_PID_MARKETPLACE_OPTIONS.map(m => `
+        <div class="admin-pid-dropdown-option" data-value="${escapeHtml(m)}"
+             onclick="selectAdminPidMarketplaceOption(this.dataset.value)">
+            ${escapeHtml(m)}
+        </div>
+    `).join('');
+
+    return `
+        <div class="admin-pid-dropdown-wrap" id="admin-pid-marketplace-dropdown-wrap">
+            <div class="admin-pid-dropdown-btn" id="admin-pid-marketplace-dropdown-btn">
+                <input type="text" class="admin-pid-marketplace-input" id="admin-pid-add-marketplace"
+                       placeholder="Marketplace" value="TCGPlayer" onfocus="openAdminPidMarketplaceDropdown()">
+                <span class="admin-pid-dropdown-arrow"
+                      onclick="toggleAdminPidDropdown('admin-pid-marketplace-dropdown-menu', 'admin-pid-marketplace-dropdown-btn')">&#8249;</span>
+            </div>
+            <div class="admin-pid-dropdown-menu hidden" id="admin-pid-marketplace-dropdown-menu">
+                ${optionsHtml}
+            </div>
+        </div>
+    `;
+}
+
+function openAdminPidMarketplaceDropdown() {
+    document.getElementById('admin-pid-marketplace-dropdown-menu')?.classList.remove('hidden');
+    document.getElementById('admin-pid-marketplace-dropdown-btn')?.classList.add('open');
+}
+
+function closeAdminPidMarketplaceDropdown() {
+    closeAdminPidDropdown('admin-pid-marketplace-dropdown-menu', 'admin-pid-marketplace-dropdown-btn');
+}
+
+function selectAdminPidMarketplaceOption(value) {
+    const input = document.getElementById('admin-pid-add-marketplace');
+    if (input) input.value = value;
+
+    document.querySelectorAll('#admin-pid-marketplace-dropdown-menu .admin-pid-dropdown-option').forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.value === value);
+    });
+
+    // Stays open after picking an option — closing here (even briefly, before
+    // input.focus() below reopens it via its own onfocus) produced a visible
+    // flicker. It now only closes on an actual outside click, same as the
+    // other dropdowns in this menu.
+    input?.focus();
 }
 
 async function submitAdminPricingManualEntry(type) {
@@ -1601,7 +1740,7 @@ async function submitAdminPricingManualEntry(type) {
     const priceInput = document.getElementById('admin-pid-add-price');
     const qtyInput = document.getElementById('admin-pid-add-qty');
     const dateInput = document.getElementById('admin-pid-add-date');
-    const infoInput = document.getElementById('admin-pid-add-info');
+    const conditionInput = document.getElementById('admin-pid-add-condition');
     const marketplaceInput = document.getElementById('admin-pid-add-marketplace');
 
     const price = parseFloat(priceInput.value);
@@ -1641,7 +1780,7 @@ async function submitAdminPricingManualEntry(type) {
                 price,
                 quantity,
                 date: dateInput.value,
-                info: infoInput.value.trim(),
+                condition: conditionInput.value.trim(),
                 marketplace: marketplaceInput.value.trim() || 'Manual',
             })
         });
@@ -1693,7 +1832,7 @@ function adminPidDetailHistoryTableHtml(rows, loaded, type) {
     const rowsHtml = rows.map(r => `
         <div class="admin-pid-detail-row">
             <span>${escapeHtml(r.date)}</span>
-            <span>${escapeHtml(r.info || '')}</span>
+            <span>${escapeHtml(r.condition || '')}</span>
             <span>$${Number(r.price).toFixed(2)}</span>
             <span>×${escapeHtml(String(r.quantity))}</span>
             <button type="button" class="admin-pid-detail-delete-btn" title="Delete entry"
@@ -1758,6 +1897,7 @@ function initAdmin() {
     adminPidDetailSelected = null;
     adminPidDetailHistory = null;
     adminPidDetailFoils = null;
+    adminPidDetailMode = 'regular';
     adminPidAddEntryOpenType = null;
     adminPidAddEntryFoilId = null;
     adminPidAddEntryCondition = null;
@@ -1767,6 +1907,8 @@ function initAdmin() {
     document.querySelector('.footer')?.classList.add('footer-hidden');
     updateAdminPidTcgButton();
     updateAdminUserRoleButtons();
+    positionPillIndicator(document.querySelector('.admin-cards-subnav'));
+    positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
     loadAdminPricingIds();
 }
 
@@ -1775,6 +1917,7 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-bulk-paste-wrap')) closeAdminPidBulkPaste();
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
+    if (!e.target.closest('#admin-pid-marketplace-dropdown-wrap')) closeAdminPidMarketplaceDropdown();
     if (!e.target.closest('.admin-pid-col-rarity .set-dropdown-wrap')) closeAdminPidRarityFilter();
     if (!e.target.closest('.admin-pid-col-set .set-dropdown-wrap')) closeAdminPidSetFilter();
 }, true);

@@ -1213,7 +1213,7 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
     entry_type = body.get("type")
     foil_id = body.get("foil_id", "").strip()
     marketplace = body.get("marketplace", "").strip() or "Manual"
-    info = body.get("info", "").strip()
+    condition = body.get("condition", "").strip()
     entry_date = body.get("date", "").strip()
 
     if entry_type not in ("sales", "listings"):
@@ -1247,7 +1247,7 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
         entry_date = None
 
     try:
-        entry = add_manual_entry(edition_id, foil_id, entry_type, price, quantity, info, marketplace, entry_date)
+        entry = add_manual_entry(edition_id, foil_id, entry_type, price, quantity, condition, marketplace, entry_date)
     except KeyError:
         raise HTTPException(status_code=400, detail="Invalid foil_id for this edition")
 

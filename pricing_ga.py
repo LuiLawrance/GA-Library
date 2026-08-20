@@ -21,12 +21,12 @@ RARITY_MAP = {
 }
 
 
-def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, info: str, debug: bool = False) -> None:
+def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, condition: str, debug: bool = False) -> None:
     entry = {
         "date": date.today().isoformat(),
         "marketplace": marketplace,
         "price": price,
-        "info": info,
+        "condition": condition,
     }
 
     card_id = _append_entry(JSON_LISTINGS, edition_id, foil_id, entry)
@@ -39,16 +39,16 @@ def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, 
             f"foil_id={foil_id} | "
             f"marketplace={marketplace} | "
             f"price={price} | "
-            f"info={info}"
+            f"condition={condition}"
         )
 
 
-def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, info: str, debug: bool = False) -> None:
+def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, condition: str, debug: bool = False) -> None:
     entry = {
         "date": date.today().isoformat(),
         "marketplace": marketplace,
         "price": price,
-        "info": info,
+        "condition": condition,
     }
 
     card_id = _append_entry(JSON_SALES, edition_id, foil_id, entry)
@@ -61,7 +61,7 @@ def _add_sale(edition_id: str, foil_id: str, marketplace: str, price: float, inf
             f"foil_id={foil_id} | "
             f"marketplace={marketplace} | "
             f"price={price} | "
-            f"info={info}"
+            f"condition={condition}"
         )
 
 
@@ -187,14 +187,14 @@ def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
     price = float(input("Enter price: ").strip())
     quantity_input = input("Enter quantity: ").strip()
     quantity = int(quantity_input) if quantity_input else 1
-    info = input("Enter info: ").strip()
+    condition = input("Enter condition: ").strip()
 
     entry = {
         "date": date.today().isoformat(),
         "marketplace": marketplace,
         "price": price,
         "quantity": quantity,
-        "info": info,
+        "condition": condition,
     }
 
     card_id = _append_entry(file_path, edition_id, foil_id, entry)
@@ -207,7 +207,7 @@ def _prompt_entry(card_name: str, file_path: str, debug: bool = False) -> None:
             f"foil_id={foil_id} | "
             f"marketplace={marketplace} | "
             f"price={price} | "
-            f"info={info}"
+            f"condition={condition}"
         )
 
 
@@ -355,7 +355,7 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
             "marketplace": "TCGPlayer",
             "price": listing["price"],
             "quantity": listing["quantity"],
-            "info": listing["condition"],
+            "condition": listing["condition"],
         }
 
         listings_data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).append(entry)
@@ -434,7 +434,7 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False) ->
             "marketplace": "TCGPlayer",
             "price": sale["price"],
             "quantity": sale["quantity"],
-            "info": sale["condition"],
+            "condition": sale["condition"],
         }
 
         sales_data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).append(entry)
@@ -539,7 +539,7 @@ def _foil_kind_for_id(foils: dict, foil_id: str) -> str | None:
 
 
 def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: float, quantity: int = 1,
-                      info: str = "", marketplace: str = "Manual", entry_date: str | None = None,
+                      condition: str = "", marketplace: str = "Manual", entry_date: str | None = None,
                       debug: bool = False) -> dict:
     """Web-safe core: appends a single sale/listing entry without interactive
     prompts, for the admin console's manual-entry form."""
@@ -550,7 +550,8 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
     # Match the "<condition> Foil" convention scraped/pasted entries already use
     # (see _store_sales_tcg / parse_pasted_sales) — otherwise a manually-added
     # foil sale is stored under the right foil_id but reads identically to a
-    # nonfoil one in the combined history list, since "info" is all that's shown.
+    # nonfoil one in the combined history list, since "condition" is all that's
+    # shown.
     editions_file = new_json(JSON_EDITIONS)
     with editions_file.open("r", encoding="utf-8") as f:
         editions_data = json.load(f)
@@ -563,15 +564,15 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
     foils = info_data.get(card_id_lookup, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
     foil_kind = _foil_kind_for_id(foils, foil_id)
 
-    if foil_kind and foil_kind.strip().upper() == "FOIL" and not info.strip().lower().endswith("foil"):
-        info = f"{info} Foil".strip()
+    if foil_kind and foil_kind.strip().upper() == "FOIL" and not condition.strip().lower().endswith("foil"):
+        condition = f"{condition} Foil".strip()
 
     entry = {
         "date": entry_date or date.today().isoformat(),
         "marketplace": marketplace,
         "price": price,
         "quantity": quantity,
-        "info": info,
+        "condition": condition,
     }
 
     card_id = _append_entry(file_path, edition_id, foil_id, entry)
@@ -595,7 +596,7 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
             f"marketplace={marketplace} | "
             f"price={price} | "
             f"quantity={quantity} | "
-            f"info={info}"
+            f"condition={condition}"
         )
 
     return entry
