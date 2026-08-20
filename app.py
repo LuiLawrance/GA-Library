@@ -177,6 +177,13 @@ def _pick_default_foil(foils: dict):
     return min(foils.items(), key=lambda kv: priority(kv[1]))[0]
 
 
+def _curio_foil_id(foils: dict) -> str | None:
+    # See _curio_foil_id_for_edition's comment for the "exactly one variant
+    # across all foils" business rule this relies on.
+    variant_ids = [variant_id for foil_info in foils.values() for variant_id in foil_info.get("variants", {})]
+    return variant_ids[0] if len(variant_ids) == 1 else None
+
+
 def _last_sale_price_from_records(records: list):
     return max(records, key=lambda r: r["date"])["price"] if records else None
 
@@ -198,18 +205,43 @@ def _last_listing_price_from_records(records: list):
 
 def _last_sale_price(sales_data: dict, card_id: str, edition_id: str, foils: dict):
     foil_id = _pick_default_foil(foils)
-    if not foil_id:
-        return None
-    records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
-    return _last_sale_price_from_records(records)
+    price = None
+    if foil_id:
+        records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+        price = _last_sale_price_from_records(records)
+
+    if price is not None:
+        return price
+
+    # Nonfoil/Foil have no sale of their own — fall back to this edition's
+    # Curio Foil (e.g. Aurora/Interference Curio Foil), a separate TCGPlayer
+    # product nested as a variant under one of the foils, so its own price
+    # history isn't otherwise reachable from the default-foil pick above.
+    curio_foil_id = _curio_foil_id(foils)
+    if curio_foil_id:
+        curio_records = sales_data.get(card_id, {}).get(edition_id, {}).get(curio_foil_id, [])
+        return _last_sale_price_from_records(curio_records)
+
+    return None
 
 
 def _lowest_listing_price(listings_data: dict, card_id: str, edition_id: str, foils: dict):
     foil_id = _pick_default_foil(foils)
-    if not foil_id:
-        return None
-    records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
-    return _lowest_listing_price_from_records(records)
+    price = None
+    if foil_id:
+        records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+        price = _lowest_listing_price_from_records(records)
+
+    if price is not None:
+        return price
+
+    # See _last_sale_price's matching fallback — same reasoning, for listings.
+    curio_foil_id = _curio_foil_id(foils)
+    if curio_foil_id:
+        curio_records = listings_data.get(card_id, {}).get(edition_id, {}).get(curio_foil_id, [])
+        return _lowest_listing_price_from_records(curio_records)
+
+    return None
 
 
 @app.get("/api/cards/search")
@@ -925,12 +957,7 @@ def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
     # foils — multi-stamp tournament promos instead have 3-4 variants, so
     # "exactly one variant across all foils" distinguishes a true Curio Foil
     # from those without needing to match on name (which varies by set).
-    variant_ids = [
-        variant_id
-        for foil_info in edition_info.get("foils", {}).values()
-        for variant_id in foil_info.get("variants", {})
-    ]
-    return variant_ids[0] if len(variant_ids) == 1 else None
+    return _curio_foil_id(edition_info.get("foils", {}))
 
 
 def _load_users_data() -> dict:
