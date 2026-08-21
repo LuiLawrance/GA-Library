@@ -335,12 +335,30 @@ function closeWatchlistModal() {
         btn.disabled = true;
         btn.textContent = 'Add to Watchlist';
     }
+    // Closing mid-resize shouldn't leave a stale animation holding the box at the wrong
+    // size for next time — it uses fill:'forwards' so it keeps holding even while hidden.
+    resetBoxResize(document.querySelector('#watchlist-add-modal .inv-modal-wide'));
+}
+
+// Thin adapter over the shared animateBoxResize() for this modal's box.
+function animateWatchlistModalResize(mutate) {
+    animateBoxResize(document.querySelector('#watchlist-add-modal .inv-modal-wide'), mutate);
 }
 
 function watchlistBackToSearch() {
-    document.getElementById('watchlist-step-foil').classList.add('hidden');
-    document.getElementById('watchlist-step-search').classList.remove('hidden');
-    document.getElementById('watchlist-back-btn').classList.add('hidden');
+    if (document.getElementById('watchlist-step-foil').classList.contains('hidden')) return;
+    animateWatchlistModalResize(() => {
+        document.getElementById('watchlist-step-foil').classList.add('hidden');
+        document.getElementById('watchlist-step-search').classList.remove('hidden');
+        document.getElementById('watchlist-back-btn').classList.add('hidden');
+        // Restore grid columns to match existing results
+        const results = document.getElementById('watchlist-card-results');
+        const tileCount = results ? results.querySelectorAll('.inv-search-tile').length : 0;
+        if (tileCount > 0) {
+            const cols = Math.min(tileCount, 5);
+            if (results) results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
+        }
+    });
     watchlistCardId = null;
     watchlistCardName = null;
     watchlistCardData = null;
@@ -421,21 +439,30 @@ async function searchWatchlistCards() {
     const results = document.getElementById('watchlist-card-results');
     if (!results || !query) return;
 
-    results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Searching...</p></div>`;
+    // A prior search may have widened the grid to fit multiple result columns — reset it
+    // before showing a single-message placeholder, or the placeholder inherits that stale
+    // width instead of shrinking back down to its natural size.
+    const resetResultsGrid = () => {
+        results.style.gridTemplateColumns = '';
+        results.classList.remove('has-scroll');
+    };
+
+    animateWatchlistModalResize(() => {
+        resetResultsGrid();
+        results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Searching...</p></div>`;
+    });
 
     try {
         const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
-        results.innerHTML = '';
 
         if (!data.cards?.length) {
-            results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>${data.message || 'No cards found.'}</p></div>`;
+            animateWatchlistModalResize(() => {
+                resetResultsGrid();
+                results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>${data.message || 'No cards found.'}</p></div>`;
+            });
             return;
         }
-
-        const cols = Math.min(data.cards.length, 5);
-        results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
-        results.classList.toggle('has-scroll', data.cards.length >= 6);
 
         const uniqueIds = new Set(data.cards.map(c => c.card_id));
         if (uniqueIds.size === 1) {
@@ -444,25 +471,48 @@ async function searchWatchlistCards() {
             return;
         }
 
-        data.cards.forEach((card, i) => {
-            const tile = document.createElement('div');
-            tile.className = 'inv-search-tile';
-            tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
-            tile.innerHTML = `
-                <div class="edition-tile-wrap">
-                    <img src="/images/${card.edition_id}.jpg" alt="${escapeHtml(card.name)}">
-                    <div class="inv-search-tile-overlay">＋</div>
-                </div>`;
-            tile.onclick = () => goToWatchlistFoilStep(card.card_id, card.edition_id, card.name);
-            tile.addEventListener('animationend', () => tile.classList.add('animated'));
-            results.appendChild(tile);
+        // The tile images reserve their aspect ratio via CSS (aspect-ratio: 5/7 on
+        // .inv-search-tile img), so the grid's height is known immediately without
+        // waiting on images to load.
+        animateWatchlistModalResize(() => {
+            results.innerHTML = '';
+            const cols = Math.min(data.cards.length, 5);
+            results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
+            results.classList.toggle('has-scroll', data.cards.length >= 6);
+
+            data.cards.forEach((card, i) => {
+                const tile = document.createElement('div');
+                tile.className = 'inv-search-tile tile-hoverable';
+                tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
+                tile.innerHTML = `
+                    <div class="edition-tile-wrap tile-zoom">
+                        <img src="/images/${card.edition_id}.jpg" alt="${escapeHtml(card.name)}">
+                        <div class="card-tile-dim"></div>
+                        <div class="inv-search-tile-add tile-action-btn">+</div>
+                    </div>`;
+                tile.onclick = () => goToWatchlistFoilStep(card.card_id, card.edition_id, card.name);
+                tile.addEventListener('animationend', () => tile.classList.add('animated'));
+                results.appendChild(tile);
+            });
         });
     } catch {
-        results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Search failed.</p></div>`;
+        animateWatchlistModalResize(() => {
+            resetResultsGrid();
+            results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Search failed.</p></div>`;
+        });
     }
 }
 
 function openWatchlistModalToFoilStep(cardId, editionId, cardName, onlyThisEdition = false) {
+    // This bypasses the search step entirely, but goToWatchlistFoilStep's resize
+    // animation still measures the (hidden) search step's current size as its "from" —
+    // a stale wide grid left over from an earlier search would otherwise make the box
+    // start too wide instead of growing cleanly from its narrow default.
+    const results = document.getElementById('watchlist-card-results');
+    if (results) {
+        results.style.gridTemplateColumns = '';
+        results.classList.remove('has-scroll');
+    }
     document.getElementById('watchlist-add-modal').classList.remove('hidden');
     goToWatchlistFoilStep(cardId, editionId, cardName, onlyThisEdition);
 }
@@ -481,13 +531,37 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName, onlyThisEditio
     document.getElementById('watchlist-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);">Loading...</div>';
     document.getElementById('watchlist-modal-submit').disabled = true;
 
-    document.getElementById('watchlist-step-search').classList.add('hidden');
-    document.getElementById('watchlist-step-foil').classList.remove('hidden');
-    document.getElementById('watchlist-back-btn').classList.remove('hidden');
+    // The foils list area is capped/scrollable within the foil step's fixed-height
+    // container (.inv-modal-foils { overflow-y: auto } inside the 380px-tall
+    // .inv-foil-step-body), so the box's own size is fully determined right here —
+    // populating the foils list further down (async, after fetch) never changes it.
+    const watchlistBox = document.querySelector('#watchlist-add-modal .inv-modal-wide');
+    const stepResizeDone = animateBoxResize(watchlistBox, () => {
+        document.getElementById('watchlist-step-search').classList.add('hidden');
+        document.getElementById('watchlist-step-foil').classList.remove('hidden');
+        document.getElementById('watchlist-back-btn').classList.remove('hidden');
+    });
+
+    // The card-data fetch runs in parallel with that resize, but the resize that
+    // follows once it resolves (below) waits for this first one to actually finish —
+    // this fetch is often fast enough to resolve within a handful of milliseconds,
+    // and firing a second resize that quickly would cancel the step-swap resize
+    // before it's had any real time to be visible, which is what made clicking a
+    // results tile look like nothing happened at all.
+    const [fetchResult] = await Promise.all([
+        fetch(`/api/cards/${cardId}`).then(res => res.json()).then(data => ({ok: true, data})).catch(() => ({ok: false})),
+        stepResizeDone
+    ]);
+
+    if (!fetchResult.ok) {
+        animateWatchlistModalResize(() => {
+            document.getElementById('watchlist-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
+        });
+        return;
+    }
 
     try {
-        const res = await fetch(`/api/cards/${cardId}`);
-        const data = await res.json();
+        const data = fetchResult.data;
         watchlistCardData = data.card;
 
         let editions = Object.entries(watchlistCardData.editions || {}).sort((a, b) => {
@@ -504,55 +578,65 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName, onlyThisEditio
             editions = editions.filter(([eid]) => eid === editionId);
         }
 
-        const foilList = document.getElementById('watchlist-modal-foils');
-        foilList.innerHTML = '';
+        // Unlike decks_ga/inventory's Add Card modal, this modal's foil step never
+        // switches to a fixed-width class — its box stays width:max-content, sized to
+        // fit whatever's actually in the foils list. So swapping "Loading..." for the
+        // real foil buttons here can genuinely change the box's natural size, and needs
+        // its own resize animation rather than assuming the size settled back when the
+        // step was first revealed.
+        animateWatchlistModalResize(() => {
+            const foilList = document.getElementById('watchlist-modal-foils');
+            foilList.innerHTML = '';
 
-        // Collect every real foil/variant combo across the listed editions
-        // before rendering anything — whether there's actually a choice to
-        // present isn't known until the whole set is gathered.
-        const optionEntries = [];
-        editions.forEach(([eid, einfo]) => {
-            const rarityMap = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
-            const rarity = rarityMap[einfo.rarity] || '?';
-            Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
-                // A foil whose entire population is a single variant (see
-                // _curio_foil_id_for_edition in app.py — the "exactly one
-                // variant" rule that identifies a true Curio Foil, e.g.
-                // Lunar Conduit/RDOA) has no separate base printing of its
-                // own — every copy that would otherwise be a plain "Foil" IS
-                // the Curio Foil — so offer only the Curio Foil option
-                // instead of a redundant, nonexistent plain-Foil one too.
-                const sole = soleCurioVariant(finfo);
-                if (sole) {
-                    const [vid, vinfo] = sole;
-                    optionEntries.push({eid, fid: vid, kind: vinfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: false});
-                    return;
-                }
+            // Collect every real foil/variant combo across the listed editions
+            // before rendering anything — whether there's actually a choice to
+            // present isn't known until the whole set is gathered.
+            const optionEntries = [];
+            editions.forEach(([eid, einfo]) => {
+                const rarityMap = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
+                const rarity = rarityMap[einfo.rarity] || '?';
+                Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
+                    // A foil whose entire population is a single variant (see
+                    // _curio_foil_id_for_edition in app.py — the "exactly one
+                    // variant" rule that identifies a true Curio Foil, e.g.
+                    // Lunar Conduit/RDOA) has no separate base printing of its
+                    // own — every copy that would otherwise be a plain "Foil" IS
+                    // the Curio Foil — so offer only the Curio Foil option
+                    // instead of a redundant, nonexistent plain-Foil one too.
+                    const sole = soleCurioVariant(finfo);
+                    if (sole) {
+                        const [vid, vinfo] = sole;
+                        optionEntries.push({eid, fid: vid, kind: vinfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: false});
+                        return;
+                    }
 
-                optionEntries.push({eid, fid, kind: finfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: false});
-                Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
-                    optionEntries.push({eid, fid: vid, kind: vinfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: true});
+                    optionEntries.push({eid, fid, kind: finfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: false});
+                    Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
+                        optionEntries.push({eid, fid: vid, kind: vinfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: true});
+                    });
                 });
             });
+
+            let firstOpt = null;
+            // If the caller identified a specific printing (e.g. a tile clicked in
+            // the all-editions search results), preselect that one instead of
+            // always defaulting to the first in collector-number order.
+            let matchOpt = null;
+
+            optionEntries.forEach(entry => {
+                const opt = buildWatchlistFoilOption(entry.eid, entry.fid, entry.kind, entry.setPrefix, entry.rarity, entry.collectorNum, entry.isVariant);
+                if (!firstOpt) firstOpt = {opt, eid: entry.eid, fid: entry.fid};
+                if (!matchOpt && entry.eid === editionId) matchOpt = {opt, eid: entry.eid, fid: entry.fid};
+                foilList.appendChild(opt);
+            });
+
+            const initialOpt = matchOpt || firstOpt;
+            if (initialOpt) selectWatchlistFoilOption(initialOpt.opt, initialOpt.eid, initialOpt.fid);
         });
-
-        let firstOpt = null;
-        // If the caller identified a specific printing (e.g. a tile clicked in
-        // the all-editions search results), preselect that one instead of
-        // always defaulting to the first in collector-number order.
-        let matchOpt = null;
-
-        optionEntries.forEach(entry => {
-            const opt = buildWatchlistFoilOption(entry.eid, entry.fid, entry.kind, entry.setPrefix, entry.rarity, entry.collectorNum, entry.isVariant);
-            if (!firstOpt) firstOpt = {opt, eid: entry.eid, fid: entry.fid};
-            if (!matchOpt && entry.eid === editionId) matchOpt = {opt, eid: entry.eid, fid: entry.fid};
-            foilList.appendChild(opt);
-        });
-
-        const initialOpt = matchOpt || firstOpt;
-        if (initialOpt) selectWatchlistFoilOption(initialOpt.opt, initialOpt.eid, initialOpt.fid);
     } catch {
-        document.getElementById('watchlist-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
+        animateWatchlistModalResize(() => {
+            document.getElementById('watchlist-modal-foils').innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
+        });
     }
 }
 

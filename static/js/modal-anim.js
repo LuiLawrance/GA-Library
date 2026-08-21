@@ -35,7 +35,11 @@ const _resizeAnims = new WeakMap();
 
 // Runs `mutate` (any synchronous DOM/class swap that changes `box`'s natural size) and
 // smoothly resizes `box` from its size before to its size after. Animates width+height
-// together (harmless when only one dimension actually changes).
+// together (harmless when only one dimension actually changes). Returns a promise that
+// resolves once the resize (if any was needed) finishes — callers that fire a SECOND
+// resize on the same box shortly after (e.g. once async data loads in) should await this
+// first, since a second call cancels whatever's still running on that box (see below) and
+// would otherwise cut the first resize short before it's had any real time to be visible.
 function animateBoxResize(box, mutate, {duration = 300} = {}) {
     // Cancel any previous resize animation on THIS box first, before measuring anything —
     // its held fill:'forwards' value overrides CSS regardless of class changes, so
@@ -53,7 +57,7 @@ function animateBoxResize(box, mutate, {duration = 300} = {}) {
     const toHeight = box.offsetHeight;
 
     // Skip animating when the box isn't visible yet, or the size genuinely didn't change.
-    if (!fromWidth || !fromHeight || (fromWidth === toWidth && fromHeight === toHeight)) return;
+    if (!fromWidth || !fromHeight || (fromWidth === toWidth && fromHeight === toHeight)) return Promise.resolve();
 
     // Whatever CSS min/max-width and max-height apply to the box's NEW state are already
     // in effect (mutate() already toggled classes) — e.g. a narrower max-width for the new
@@ -70,14 +74,22 @@ function animateBoxResize(box, mutate, {duration = 300} = {}) {
     ], {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
     _resizeAnims.set(box, anim);
 
-    anim.finished.then(() => {
+    // Cleanup — and the "done" signal returned to the caller — is driven by a plain
+    // timer, not anim.finished: that promise isn't guaranteed to settle promptly (some
+    // environments never resolve it at all), and a caller sequencing a second resize
+    // after this one needs a reliable signal, not one that can hang indefinitely.
+    return sleep(duration).then(() => {
+        // Only clean up if nothing newer has already taken over this box — a second
+        // animateBoxResize() call on the same box before this timer fires already did
+        // its own cancel+takeover, so redoing it here would stomp on that one instead.
+        if (_resizeAnims.get(box) !== anim) return;
         anim.cancel();
-        if (_resizeAnims.get(box) === anim) _resizeAnims.delete(box);
+        _resizeAnims.delete(box);
         box.style.overflow = '';
         box.style.minWidth = '';
         box.style.maxWidth = '';
         box.style.maxHeight = '';
-    }).catch(() => {});
+    });
 }
 
 // Cancels any in-flight animateBoxResize() animation on `box` and clears the temporary
