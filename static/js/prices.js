@@ -256,8 +256,25 @@ async function showPriceGraph(cardId, editionId, foilId, cardName, updateUrl = t
         if (!res.ok) throw new Error('Failed to load card');
         const data = await res.json();
         const edition = data.card?.editions?.[editionId];
-        const foilInfo = edition?.foils?.[foilId];
-        const pricing = edition?.pricing?.[foilId] || {sales: [], listings: []};
+        // foilId may be a Curio Foil's variant id rather than a top-level
+        // foil id — resolveFoilInfo checks each foil's variants too, since a
+        // plain edition.foils[foilId] lookup would miss those and mislabel
+        // the header as "Standard".
+        const foilInfo = resolveFoilInfo(edition?.foils, foilId);
+        // A sole Curio Foil (see soleCurioVariant) has no base printing of
+        // its own, so TCGPlayer sales/listings scraped against its parent's
+        // own foil_id (its override product page isn't always configured —
+        // see soleVariantOf's comment in drawer.js, which this mirrors)
+        // belong to the variant too, not a nonexistent plain-Foil printing.
+        // Fold that parent data in alongside the variant's own so the graph
+        // isn't missing price history that's really its.
+        const mergeFoilId = findSoleCurioParent(edition?.foils, foilId);
+        const primaryPricing = edition?.pricing?.[foilId] || {sales: [], listings: []};
+        const secondaryPricing = mergeFoilId ? (edition?.pricing?.[mergeFoilId] || {sales: [], listings: []}) : {sales: [], listings: []};
+        const pricing = {
+            sales: [...primaryPricing.sales, ...secondaryPricing.sales],
+            listings: [...primaryPricing.listings, ...secondaryPricing.listings],
+        };
         // Callers restoring a selection from the URL (see initPrices) only
         // have the raw ids, not a display name — fall back to the name the
         // card detail endpoint now resolves server-side.
@@ -649,6 +666,18 @@ function soleCurioVariant(foilInfo) {
     const [, variantInfo] = variants[0];
     const basePop = (foilInfo.population ?? 0) - (variantInfo.population ?? 0);
     return basePop <= 0 ? variants[0] : null;
+}
+
+// Given a Curio Foil variant's own id, finds the parent foil id whose entire
+// population it accounts for (see soleCurioVariant) — that parent's own
+// scraped pricing data belongs to this variant too (see showPriceGraph).
+// Returns null for a variant with a real base printing alongside it.
+function findSoleCurioParent(foils, foilId) {
+    for (const [parentId, finfo] of Object.entries(foils || {})) {
+        const sole = soleCurioVariant(finfo);
+        if (sole && sole[0] === foilId) return parentId;
+    }
+    return null;
 }
 
 function foilOptionLabel(kind) {

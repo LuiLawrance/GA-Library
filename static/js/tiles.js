@@ -24,6 +24,18 @@ function priceBadgesHTML(lastPrice, lowestListing) {
     return html;
 }
 
+// ── Look up a foil's info by id, checking each foil's variants (e.g. a
+// Curio Foil) when it isn't a top-level foil id itself. Mirrors
+// _foil_kind_for_id in pricing_ga.py. ──
+function resolveFoilInfo(foils, foilId) {
+    if (!foils) return null;
+    if (foils[foilId]) return foils[foilId];
+    for (const finfo of Object.values(foils)) {
+        if (finfo.variants?.[foilId]) return finfo.variants[foilId];
+    }
+    return null;
+}
+
 // ── Foil priority: normal/nonfoil > foil > anything else ──
 function pickDefaultFoil(foils) {
     const priority = kind => {
