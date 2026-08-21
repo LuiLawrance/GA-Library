@@ -1330,7 +1330,16 @@ async function saveAdminProductId(input) {
             // would otherwise do (the Set/Rarity dropdowns don't depend on this).
             renderAdminPidRows();
         } else {
-            input.classList.toggle('admin-pid-input-filled', !!data.product_id);
+            // Regenerates the whole field (input + find button) rather than
+            // just toggling admin-pid-input-filled on the input — the "~"
+            // no-listings state also needs admin-pid-input-no-listings and
+            // the find button's disabled/🚫 state, which a lone class toggle
+            // here previously missed entirely (typing "~" wouldn't visibly
+            // gray anything out or lock auto-detect until the next full
+            // reload re-rendered the row from scratch).
+            const row = document.querySelector(`#admin-pid-table .admin-pid-row[data-edition-id="${CSS.escape(editionId)}"]`);
+            const statusCell = row?.querySelector('.admin-pid-col-status');
+            if (statusCell) statusCell.innerHTML = adminPidProductIdFieldHtml(record);
             updateAdminPidSummaryText();
         }
 
@@ -2347,6 +2356,15 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
 
 function initAdmin() {
     adminActiveSection = 'pricing';
+    // The Cards section's own Info/Pricing sub-view — the fresh DOM this
+    // fragment load just injected always starts on Pricing (see
+    // admin.html), but adminCardsView itself is a plain JS variable that
+    // survives navigating away and back (this module isn't reloaded, only
+    // the page's HTML is) — without resetting it here too, leaving on Info
+    // and coming back would render Info's reduced list columns (see
+    // renderAdminPidHeader/renderAdminPidRows) inside the fresh, unmorphed
+    // Pricing-width layout, rather than actually starting on Pricing.
+    adminCardsView = 'pricing';
     adminUsersLoaded = false;
     adminUsersData = [];
     adminUserDetailSelected = null;
