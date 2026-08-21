@@ -55,22 +55,10 @@ function adminPidIsScrapable(productId) {
     return !!productId && productId !== ADMIN_PID_NO_LISTINGS_SENTINEL;
 }
 
-// Sliding highlight shared by the Cards section's two pill toggles (Info/Pricing,
-// Regular/Discord) — measures the currently-active button and positions the
-// '.admin-pill-indicator' sibling under it via width/height/top + a translateX
-// transform, so the CSS transition (see .admin-pill-indicator) animates it sliding
-// there from wherever it was. Call after toggling which button has 'active', and
-// again once a previously-hidden container becomes visible (offsetWidth reads 0
-// while display:none, so a call made while hidden has nothing to measure).
-function positionPillIndicator(container) {
-    const indicator = container?.querySelector('.admin-pill-indicator');
-    const active = container?.querySelector('.active');
-    if (!indicator || !active) return;
-    indicator.style.width = active.offsetWidth + 'px';
-    indicator.style.height = active.offsetHeight + 'px';
-    indicator.style.top = active.offsetTop + 'px';
-    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
-}
+// positionPillIndicator (used below for the Cards section's two pill
+// toggles: Info/Pricing, Regular/Discord) now lives in modal-anim.js, shared
+// alongside the rest of this page's animation helpers (animateBoxResize,
+// fadeSwap) for any future page that wants the same sliding-pill look.
 
 async function switchAdminSection(section) {
     const page = document.getElementById('admin-page');
@@ -112,23 +100,84 @@ async function switchAdminSection(section) {
 
 // Switches between the Cards section's own sub-views (Info / Pricing) — a
 // pill toggle inside the section itself, separate from switchAdminSection()
-// above which switches the top-level Cards/Users tabs.
-function switchAdminCardsView(view) {
+// above which switches the top-level Cards/Users tabs. Info and Pricing are
+// NOT two separate panels: they share the one grid list + card info window
+// (see #admin-cards-view in admin.html), and selecting a card shows the exact
+// same info window in either sub-view.
+//
+// The list's row content (Card/Rarity/Set only vs. the full Pricing set) is
+// hidden (fadeSwap) and blanked before the resize below — with thousands of
+// editions potentially loaded, every row is width:100% of .admin-pricing-list,
+// so leaving them mounted while that width changes (even smoothly, even with
+// no per-row CSS transition of its own) still forces every one of them to
+// reflow on every animation frame, which read as glitchy.
+//
+// The card info window (.admin-pricing-image-col/.admin-pricing-detail) is
+// deliberately NOT part of that fade — it stays visible throughout and
+// simply gets carried along for free by animateGridColumns below (see
+// modal-anim.js): that animates .admin-pricing-layout's own
+// grid-template-columns rather than giving the list item an explicit width
+// of its own to animate, so the info window sitting in the NEXT track over
+// visibly slides with the list as the grid recalculates each frame, instead
+// of needing a separate hide/reposition/reveal of its own. Its content still
+// updates instantly (inside the same mutate, right before that slide starts)
+// since the card selection itself IS reset on every switch — see below.
+async function switchAdminCardsView(view) {
     const section = document.getElementById('admin-section-pricing');
     if (!section || adminCardsView === view) return;
-
-    adminCardsView = view;
 
     section.querySelectorAll('.admin-cards-subnav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
     });
     positionPillIndicator(section.querySelector('.admin-cards-subnav'));
 
-    section.querySelectorAll('.admin-cards-view').forEach(panel => {
-        panel.classList.toggle('hidden', panel.id !== `admin-cards-view-${view}`);
+    const layout = section.querySelector('.admin-pricing-layout');
+    const header = document.getElementById('admin-pid-table-header');
+    const table = document.getElementById('admin-pid-table');
+    const enteringInfo = view === 'info';
+
+    await fadeSwap([header, table], async () => {
+        // Deselect whatever card was open (and clear its bulk-refresh
+        // checkboxes) rather than carrying it — and its now-stale Sales/
+        // Listings history/foils/popover state — across into the other
+        // sub-view. Same reset selectAdminPricingDetail() does when
+        // switching to a DIFFERENT card, just landing on "nothing selected"
+        // instead of a new editionId.
+        adminPidDetailSelected = null;
+        adminPidDetailHistory = null;
+        adminPidDetailFoils = null;
+        adminPidAddEntryOpenType = null;
+        adminPidAddEntryFoilId = null;
+        adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
+        adminPidBulkPasteOpen = false;
+        adminPidSelected = new Set();
+
+        // Set ahead of both render calls below (rather than inside
+        // animateGridColumns' own mutate) — renderAdminPricingImageCol's
+        // empty-state wording and renderAdminPricingDetail's early return
+        // both read this, and need the NEW mode's value from the moment
+        // they're called, not just once the grid animation's mutate runs.
+        adminCardsView = view;
+
+        header.innerHTML = '';
+        table.innerHTML = '';
+
+        // Updates the (now-deselected, so always "Select a card…") info
+        // window's content ahead of the slide below, so it's already showing
+        // the right thing by the time that's visible instead of changing
+        // mid-slide.
+        renderAdminPricingDetailAll();
+
+        await animateGridColumns(layout, () => {
+            section.classList.toggle('admin-cards-mode-info', enteringInfo);
+        });
+
+        renderAdminPricingIds();
     });
 
-    if (view === 'pricing' && !adminPidLoaded) {
+    // The list itself is shared, so either sub-view being opened first needs
+    // it loaded — not just 'pricing' like before.
+    if (!adminPidLoaded) {
         loadAdminPricingIds();
     }
 }
@@ -554,9 +603,17 @@ async function loadAdminPricingIds() {
 // touching the data rows below it — opening/closing the dropdown doesn't
 // change which rows are visible, so re-rendering all of them on every click
 // (previously ~600ms+ with thousands of editions loaded) was pure waste.
+//
+// In Info mode (adminCardsView) this renders only Card/Rarity/Set — no
+// Check/Product ID/Sales/Listings, which are pricing-only — using the
+// .admin-pid-row-info grid-template-columns (admin.css) instead of the full
+// 7-column one. See switchAdminCardsView for why that swap isn't animated
+// column-by-column.
 function renderAdminPidHeader() {
     const header = document.getElementById('admin-pid-table-header');
     if (!header) return;
+
+    const infoMode = adminCardsView === 'info';
 
     // header.innerHTML below rebuilds both filter dropdowns from scratch, which
     // would otherwise silently reset their option lists back to the top (and
@@ -571,12 +628,19 @@ function renderAdminPidHeader() {
     // Same idea for the select-all checkbox: its checked/indeterminate state is
     // derived from the current row selection by renderAdminPidRows(), which this
     // header-only rebuild doesn't call — save/restore it so it doesn't flash back
-    // to an unchecked default every time the header is rebuilt.
+    // to an unchecked default every time the header is rebuilt. Not rendered at
+    // all in Info mode, so there's nothing to save/restore there.
     const prevSelectAll = document.getElementById('admin-pid-select-all');
     const selectAllChecked = prevSelectAll ? prevSelectAll.checked : false;
     const selectAllIndeterminate = prevSelectAll ? prevSelectAll.indeterminate : false;
 
-    header.innerHTML = `
+    header.innerHTML = infoMode ? `
+        <div class="admin-pid-row admin-pid-row-header admin-pid-row-info">
+            <span class="admin-pid-col-name">CARD</span>
+            <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
+            <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
+        </div>
+    ` : `
         <div class="admin-pid-row admin-pid-row-header">
             <span class="admin-pid-col-check">
                 <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
@@ -709,10 +773,19 @@ function renderAdminPidRows() {
     const table = document.getElementById('admin-pid-table');
     if (!summary || !table) return;
 
+    const infoMode = adminCardsView === 'info';
     const filtered = adminPidFilteredEditions();
     updateAdminPidSummaryText();
 
-    const rows = filtered.map(e => `
+    const rows = filtered.map(e => infoMode ? `
+        <div class="admin-pid-row admin-pid-row-info ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
+             data-edition-id="${escapeHtml(e.edition_id)}"
+             onclick="selectAdminPricingDetail('${escapeHtml(e.edition_id)}')">
+            <span class="admin-pid-col-name">${escapeHtml(e.name)}</span>
+            <span class="admin-pid-col-rarity">${escapeHtml(e.rarity || '—')}</span>
+            <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
+        </div>
+    ` : `
         <div class="admin-pid-row ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
              data-edition-id="${escapeHtml(e.edition_id)}"
              onclick="selectAdminPricingDetail('${escapeHtml(e.edition_id)}')">
@@ -734,17 +807,22 @@ function renderAdminPidRows() {
 
     table.innerHTML = rows || '<div class="admin-pid-empty">No editions match.</div>';
 
-    const filteredIds = filtered.map(e => e.edition_id);
-    const selectedInFiltered = filteredIds.filter(id => adminPidSelected.has(id));
-    const selectAllBox = document.getElementById('admin-pid-select-all');
+    // Select-all/refresh state only exists in Pricing mode's markup — Info
+    // mode has no checkboxes at all, so there's nothing for these to sync.
+    if (!infoMode) {
+        const filteredIds = filtered.map(e => e.edition_id);
+        const selectedInFiltered = filteredIds.filter(id => adminPidSelected.has(id));
+        const selectAllBox = document.getElementById('admin-pid-select-all');
 
-    if (selectAllBox) {
-        selectAllBox.checked = filteredIds.length > 0 && selectedInFiltered.length === filteredIds.length;
-        selectAllBox.indeterminate = selectedInFiltered.length > 0 && !selectAllBox.checked;
+        if (selectAllBox) {
+            selectAllBox.checked = filteredIds.length > 0 && selectedInFiltered.length === filteredIds.length;
+            selectAllBox.indeterminate = selectedInFiltered.length > 0 && !selectAllBox.checked;
+        }
+
+        updateAdminPidRefreshButton();
+        updateAdminPidCurioSelectAllState();
     }
 
-    updateAdminPidRefreshButton();
-    updateAdminPidCurioSelectAllState();
     syncAdminPidHeaderScrollbarOffset();
 }
 
@@ -1617,7 +1695,10 @@ function renderAdminPricingImageCol() {
     if (!col) return;
 
     if (!adminPidDetailSelected) {
-        col.innerHTML = '<div class="admin-pid-detail-empty">Select a card from the list to view its pricing details.</div>';
+        const emptyMessage = adminCardsView === 'info'
+            ? 'Select a card from the list to view its details.'
+            : 'Select a card from the list to view its pricing details.';
+        col.innerHTML = `<div class="admin-pid-detail-empty">${emptyMessage}</div>`;
         return;
     }
 
@@ -1673,6 +1754,16 @@ function renderAdminPricingImageCol() {
 function renderAdminPricingDetail() {
     const panel = document.getElementById('admin-pricing-detail');
     if (!panel) return;
+
+    // Sales/Listings (and their Refresh/Add Entry actions) are pricing-only
+    // — the panel's own grid track also collapses to 0 width in this mode
+    // (see .admin-cards-mode-info .admin-pricing-layout in admin.css), but
+    // leaving its content rendering here too would mean it's just sitting
+    // there built and clipped behind overflow:hidden for nothing.
+    if (adminCardsView === 'info') {
+        panel.innerHTML = '';
+        return;
+    }
 
     if (!adminPidDetailSelected) {
         panel.innerHTML = '';

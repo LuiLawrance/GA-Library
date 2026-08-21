@@ -2,16 +2,25 @@
 // modal-anim.js — shared modal/page resize, morph, and fade-swap animations
 // Used by: decks_ga (Deck Settings ↔ Import/Export, Import/Export tabs, Add Card),
 //          inventory (Bin Settings ↔ Import/Export, Import/Export tabs, Add Card),
-//          app.js (page-to-page navigation), admin.js (pricing/user detail panels),
-//          drawer.js (edition switch)
+//          app.js (page-to-page navigation), admin.js (pricing/user detail panels,
+//          Cards section's Info/Pricing sub-view swap, Info/Pricing and
+//          Regular/Discord pill toggles), drawer.js (edition switch)
 // ═══════════════════════════════════════
 //
-// Three reusable pieces:
+// Five reusable pieces:
 //
 //   animateBoxResize(box, mutate) — smoothly resizes a single, persistent box (same
 //   overlay throughout) between two states caused by `mutate`, a synchronous DOM/class
 //   swap. Used for step swaps within one modal: Import/Export's Import↔Export tabs,
 //   Add Card's search↔confirm steps.
+//
+//   animateGridColumns(el, mutate) — animateBoxResize's sibling for a CSS Grid
+//   container's own grid-template-columns instead of a box's width/height. Used for
+//   admin's Info/Pricing list-column resize — animating the GRID's tracks (rather than
+//   giving the list item its own explicit width to animate) is what makes a sibling
+//   sitting in one of the OTHER tracks (the card info window, in the fixed 320px track)
+//   visibly slide along for free, as a normal side effect of the grid recalculating each
+//   frame, instead of needing its own separate position animation.
 //
 //   morphBoxIn(box, fromRect) / resetMorphBox(box) — animates a box growing/shrinking
 //   from `fromRect`'s size down to its own natural size via transform:scale(), for
@@ -25,11 +34,22 @@
 //   wholesale rather than resized/morphed in place: page navigation, admin detail-panel
 //   switches, drawer edition switches.
 //
+//   positionPillIndicator(container) — measures whichever child of `container` has
+//   `.active` and positions a sliding `.pill-indicator` sibling under it via
+//   width/height/top + a translateX transform, so a plain CSS transition on
+//   `.pill-indicator` (see admin.css) animates it sliding there from wherever it was.
+//   Call after toggling which child has `.active`, and again once a previously-hidden
+//   container becomes visible (offsetWidth reads 0 while display:none, so a call made
+//   while hidden has nothing to measure).
+//
 // animateBoxResize/morphBoxIn rely on the shared `.morph-resizing` / min-max-width-suspend
 // CSS conventions already used by the pages that call them (see inventory.css). fadeSwap
 // relies on each caller's own `.fade-out`/`.fade-in` (or equivalently-shaped) CSS class
 // pair already defined for the element(s) it's fading (see main.css, admin.css,
 // drawer.css) — it only drives the class toggling and timing, not the visual itself.
+// positionPillIndicator similarly expects each caller's own container to already have a
+// `.pill-indicator` element in it (see admin.css's two pill toggles) — it only computes
+// and applies the position, not the pill's look.
 
 const _resizeAnims = new WeakMap();
 
@@ -104,6 +124,57 @@ function resetBoxResize(box) {
     box.style.maxHeight = '';
 }
 
+const _gridColumnAnims = new WeakMap();
+
+// animateBoxResize's sibling for a CSS Grid container's own grid-template-columns,
+// rather than a box's width/height. Runs `mutate` (a synchronous DOM/class swap that
+// changes which grid-template-columns rule applies to `el`) and smoothly animates
+// between whatever those tracks resolve to before and after.
+//
+// Reads getComputedStyle(el).gridTemplateColumns for both keyframes rather than the
+// authored value (e.g. `minmax(0, 1.4fr)`) — animating a track between an `fr`/minmax()
+// value and a plain `<length>` isn't well-defined/animatable per spec (no defined
+// interpolation between a flex unit and a length unit), so both endpoints need to
+// already be resolved to plain px for a smooth transition to actually happen rather than
+// silently snapping. The number of tracks must stay the same across `mutate` for the
+// same reason — adding/removing a track isn't animatable either.
+//
+// Doesn't touch any of `el`'s children directly — anything sitting in a track that
+// ISN'T changing size just gets carried along for free as the grid recalculates each
+// frame, which is the whole point of animating the grid itself instead of giving one
+// item its own explicit width to animate (see animateBoxResize): a sibling in another
+// track can visibly slide alongside the resizing one with no separate position
+// animation of its own.
+function animateGridColumns(el, mutate, {duration = 300} = {}) {
+    // Cancel any previous animation on THIS element first, before measuring anything —
+    // see animateBoxResize's own comment on this same pattern for why.
+    _gridColumnAnims.get(el)?.cancel();
+    _gridColumnAnims.delete(el);
+
+    const fromCols = getComputedStyle(el).gridTemplateColumns;
+
+    mutate();
+
+    const toCols = getComputedStyle(el).gridTemplateColumns;
+
+    if (fromCols === toCols) return Promise.resolve();
+
+    const anim = el.animate([
+        {gridTemplateColumns: fromCols},
+        {gridTemplateColumns: toCols}
+    ], {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
+    _gridColumnAnims.set(el, anim);
+
+    // Cleanup driven by a plain timer rather than anim.finished — see animateBoxResize's
+    // own comment on this same pattern for why.
+    return sleep(duration).then(() => {
+        if (_gridColumnAnims.get(el) !== anim) return;
+        anim.cancel();
+        _gridColumnAnims.delete(el);
+        el.style.gridTemplateColumns = '';
+    });
+}
+
 // Animates `box` growing/shrinking from `fromRect` (any {width, height}, e.g. a
 // getBoundingClientRect() or a plain object) down to its own natural size, via
 // transform:scale(). The caller must already have made `box` the sole visible content of
@@ -168,4 +239,21 @@ async function fadeSwap(els, mutate, {outClass = 'fade-out', inClass = 'fade-in'
         el.classList.add(inClass);
     });
     setTimeout(() => list.forEach(el => el.classList.remove(inClass)), inMs);
+}
+
+// Sliding highlight for a pill-style toggle — measures whichever child of `container`
+// currently has `.active` and positions the `.pill-indicator` sibling under it via
+// width/height/top + a translateX transform, so a plain CSS transition on
+// `.pill-indicator` (not driven by this function — see admin.css) animates it sliding
+// there from wherever it was. Call after toggling which child has `.active`, and again
+// once a previously-hidden container becomes visible (offsetWidth reads 0 while
+// display:none, so a call made while hidden has nothing to measure).
+function positionPillIndicator(container) {
+    const indicator = container?.querySelector('.pill-indicator');
+    const active = container?.querySelector('.active');
+    if (!indicator || !active) return;
+    indicator.style.width = active.offsetWidth + 'px';
+    indicator.style.height = active.offsetHeight + 'px';
+    indicator.style.top = active.offsetTop + 'px';
+    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
 }

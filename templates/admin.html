@@ -49,7 +49,7 @@
         <div class="admin-section" id="admin-section-pricing">
             <div class="admin-pid-controls-row admin-cards-header-row">
                 <div class="admin-cards-subnav">
-                    <span class="admin-pill-indicator"></span>
+                    <span class="pill-indicator"></span>
                     <button class="admin-cards-subnav-btn" data-view="info" onclick="switchAdminCardsView('info')">Info</button>
                     <button class="admin-cards-subnav-btn active" data-view="pricing" onclick="switchAdminCardsView('pricing')">Pricing</button>
                 </div>
@@ -61,11 +61,10 @@
                 </label>
             </div>
 
-            <div class="admin-cards-view hidden" id="admin-cards-view-info">
-                <div class="admin-pid-detail-empty">Card info management is coming soon.</div>
-            </div>
-
-            <div class="admin-cards-view" id="admin-cards-view-pricing">
+            <!-- Info and Pricing share this single grid/detail view — switchAdminCardsView
+                 toggles admin-cards-mode-info on the section (see admin.css) to collapse
+                 the pricing-only columns/controls rather than swapping in a separate view. -->
+            <div class="admin-cards-view" id="admin-cards-view">
                 <div class="admin-pid-controls">
                     <div class="admin-pid-controls-grid">
                         <div class="admin-pid-controls-cell-list">
@@ -81,7 +80,7 @@
                         <div class="admin-pid-controls-cell-image"></div>
                         <div class="admin-pid-controls-cell-detail">
                             <div class="admin-pid-source-toggle" id="admin-pid-source-toggle">
-                                <span class="admin-pill-indicator"></span>
+                                <span class="pill-indicator"></span>
                                 <button type="button" class="admin-pid-source-toggle-btn active" data-mode="regular"
                                         onclick="switchAdminPidDetailMode('regular')">Regular</button>
                                 <button type="button" class="admin-pid-source-toggle-btn" data-mode="discord"

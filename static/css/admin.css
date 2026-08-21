@@ -1,4 +1,9 @@
 .admin-page {
+    /* .admin-cards-mode-info .admin-pricing-layout's first track width (see
+       further down) — the list item itself has no explicit width of its
+       own, it just stretches to fill whatever this track resolves to. */
+    --admin-pid-info-list-width: 480px;
+
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -128,10 +133,13 @@
 }
 
 /* Sliding highlight shared by both pill toggles in this section (Info/Pricing
-   and Regular/Discord) — JS (positionPillIndicator) measures the active
-   button and sets width/height/top and a translateX transform directly, so
-   this only needs to define the visual + the transition, not any sizing. */
-.admin-pill-indicator {
+   and Regular/Discord) — positionPillIndicator (modal-anim.js) measures the
+   active button and sets width/height/top and a translateX transform
+   directly, so this only needs to define the visual + the transition, not
+   any sizing. .pill-indicator (not admin-prefixed) is that shared helper's
+   own expected class name — any future page using it needs this same rule
+   (or an equivalently-shaped one) defined in its own CSS. */
+.pill-indicator {
     position: absolute;
     top: 0;
     left: 0;
@@ -149,12 +157,64 @@
     min-height: 0;
 }
 
+/* Info sub-view: switchAdminCardsView toggles admin-cards-mode-info on
+   #admin-section-pricing rather than swapping in a separate panel — the
+   same list + card info window Pricing uses stays mounted, just morphed to
+   hide the pricing-only parts. The controls bar above the grid (TCG button,
+   Regular/Discord toggle, refresh buttons) collapses via max-height/opacity
+   since none of it applies outside Pricing. */
+.admin-cards-mode-info .admin-pid-controls {
+    opacity: 0;
+    max-height: 0;
+    margin-bottom: 0;
+    pointer-events: none;
+}
+
+.admin-cards-mode-info .admin-pid-filter-toggle {
+    display: none;
+}
+
+/* The list's own width comes from .admin-pricing-layout's first track below
+   (it's a plain stretch-to-fill grid item, no explicit width of its own) —
+   animating THAT track (via animateGridColumns, see switchAdminCardsView in
+   admin.js) rather than the list item directly is what makes the card info
+   window next to it (.admin-pricing-image-col, in the fixed 320px track)
+   visibly slide along as a normal side effect of the grid recalculating each
+   frame, instead of needing its own separate position animation. The list's
+   Sales/Listings-adjacent Check/Product ID/Sales/Listings columns still
+   swap to Info's reduced set instantly rather than animating live (see
+   .admin-pid-row-info below) — doing THAT live, on every row at once, would
+   force a full grid layout recalculation on every visible row on every
+   frame with thousands potentially loaded, which is what made an earlier
+   version of this transition glitchy; the outer track above only affects
+   its 3 direct children (list/image/detail), so animating it doesn't have
+   that same cost. */
+.admin-cards-mode-info .admin-pricing-layout {
+    grid-template-columns: var(--admin-pid-info-list-width) 320px 0px;
+}
+
+/* Info mode's reduced row markup (see renderAdminPidHeader/renderAdminPidRows
+   in admin.js) — just Card/Rarity/Set, no Check/Product ID/Sales/Listings
+   tracks at all, rather than the Pricing row's 7-column
+   grid-template-columns collapsed down to fewer visible ones. Selector is
+   .admin-pid-row.admin-pid-row-info (not just .admin-pid-row-info) so its
+   specificity actually beats .admin-pid-row's own grid-template-columns
+   further down this file — same specificity plus later source order there
+   would otherwise win. */
+.admin-pid-row.admin-pid-row-info {
+    grid-template-columns: 2fr 0.6fr 0.8fr;
+}
+
 .admin-pid-controls {
     display: flex;
     flex-direction: column;
     gap: 10px;
     margin-bottom: 16px;
     flex-shrink: 0;
+    overflow: hidden;
+    max-height: 160px;
+    transition: opacity 0.25s ease, max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+        margin-bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .admin-pid-controls-row {
@@ -528,7 +588,9 @@
 .admin-pricing-image-col.fade-out,
 .admin-pricing-detail.fade-out,
 .admin-user-profile-col.fade-out,
-.admin-user-detail.fade-out {
+.admin-user-detail.fade-out,
+.admin-pid-table-header.fade-out,
+.admin-pid-table.fade-out {
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.15s ease, transform 0.15s ease;
@@ -537,7 +599,9 @@
 .admin-pricing-image-col.fade-in,
 .admin-pricing-detail.fade-in,
 .admin-user-profile-col.fade-in,
-.admin-user-detail.fade-in {
+.admin-user-detail.fade-in,
+.admin-pid-table-header.fade-in,
+.admin-pid-table.fade-in {
     opacity: 1;
     transform: translateY(0);
     transition: opacity 0.2s ease, transform 0.2s ease;
