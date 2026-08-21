@@ -1649,11 +1649,29 @@ async function goToFoilStep(cardId, editionId, cardName) {
         editions.forEach(([eid, einfo]) => {
             const rarity = rarityMapInv[einfo.rarity] || '?';
             Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
-                const opt = buildFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false);
-                if (!firstOpt) firstOpt = {opt, eid, fid};
-                foilList.appendChild(opt);
-                Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
+                const variants = finfo.variants || {};
+
+                // Some cards (e.g. "Lunar Conduit", RDOA) are printed ONLY as
+                // their special Curio Foil (Quicksilver/Aurora/Interference/
+                // etc.) — no separate Nonfoil/Foil product was ever made, so
+                // the variant's population accounts for the parent foil's
+                // entire population. Offering that parent as a selectable
+                // option then just points at a print that doesn't exist —
+                // skip it and show only the Curio Foil. Same rule as
+                // _curio_foil_id_for_edition / api_admin_pricing_foils in
+                // app.py.
+                const variantPopulation = Object.values(variants).reduce((sum, v) => sum + (v.population || 0), 0);
+                const remainingPopulation = (finfo.population || 0) - variantPopulation;
+
+                if (remainingPopulation > 0) {
+                    const opt = buildFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false);
+                    if (!firstOpt) firstOpt = {opt, eid, fid};
+                    foilList.appendChild(opt);
+                }
+
+                Object.entries(variants).forEach(([vid, vinfo]) => {
                     const vopt = buildFoilOption(eid, vid, vinfo.kind, einfo.set_prefix, rarity, einfo.collector_number, true);
+                    if (!firstOpt) firstOpt = {opt: vopt, eid, fid: vid};
                     foilList.appendChild(vopt);
                 });
             });

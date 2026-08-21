@@ -842,15 +842,34 @@ function buildPricingStats(sales, listings) {
         </div>`;
 }
 
-function buildPricingFoilSection(foilId, label, pricing) {
-    const data = pricing?.[foilId] || {listings: [], sales: []};
+function buildPricingFoilSection(foilId, label, pricing, mergeFoilId = null) {
+    const primary = pricing?.[foilId] || {listings: [], sales: []};
+    const secondary = mergeFoilId ? (pricing?.[mergeFoilId] || {listings: [], sales: []}) : {listings: [], sales: []};
+    const sales = [...primary.sales, ...secondary.sales];
+    const listings = [...primary.listings, ...secondary.listings];
 
     return `
         <div class="pricing-section">
             <div class="collector-section-label">${label}</div>
-            ${buildPricingStats(data.sales, data.listings)}
-            ${buildPricingComboChart(data.sales, data.listings)}
+            ${buildPricingStats(sales, listings)}
+            ${buildPricingComboChart(sales, listings)}
         </div>`;
+}
+
+// A foil family whose entire population is a single variant (see
+// _curio_foil_id_for_edition in app.py — the "exactly one variant" rule
+// that identifies a true Curio Foil) has no separate base printing of its
+// own: every copy that would otherwise be a plain "Foil" IS the Curio Foil.
+// TCGPlayer sales/listings scraped against the parent's own foil_id (its
+// override product page isn't always configured) belong to that variant
+// too, not to a nonexistent plain-foil printing — so this returns the sole
+// variant to fold in, or null when the foil has a real base printing.
+function soleVariantOf([, foilObj]) {
+    const variants = Object.entries(foilObj.variants || {});
+    if (variants.length !== 1) return null;
+    const [variantId, variantInfo] = variants[0];
+    const basePop = (foilObj.population ?? 0) - (variantInfo.population ?? 0);
+    return basePop <= 0 ? [variantId, variantInfo] : null;
 }
 
 function buildTabPricingPanel(edition) {
@@ -869,20 +888,32 @@ function buildTabPricingPanel(edition) {
         return k !== 'nonfoil' && k !== 'foil';
     });
 
+    // Curio-only foils (no distinct base printing) are labeled and graphed
+    // under the variant's own kind rather than the generic Non-Foil/Foil/
+    // special label, folding the parent foil_id's data in alongside the
+    // variant's own — see soleVariantOf above.
+    function sectionFor(entry, fallbackLabel) {
+        const [foilId] = entry;
+        const sole = soleVariantOf(entry);
+        return sole
+            ? buildPricingFoilSection(foilId, toFoilLabel(sole[1].kind), pricing, sole[0])
+            : buildPricingFoilSection(foilId, fallbackLabel, pricing);
+    }
+
     const sections = [];
 
-    if (nonfoilEntry) sections.push(buildPricingFoilSection(nonfoilEntry[0], 'Non-Foil', pricing));
-    if (foilEntry) sections.push(buildPricingFoilSection(foilEntry[0], 'Foil', pricing));
-    specials.forEach(([fid, f]) => sections.push(buildPricingFoilSection(fid, toFoilLabel(f.kind), pricing)));
+    if (nonfoilEntry) sections.push(sectionFor(nonfoilEntry, 'Non-Foil'));
+    if (foilEntry) sections.push(sectionFor(foilEntry, 'Foil'));
+    specials.forEach(entry => sections.push(sectionFor(entry, toFoilLabel(entry[1].kind))));
 
-    // Curio Foils (and other variant foils, e.g. multi-stamp tournament
-    // promos) are nested under their parent foil rather than listed as their
-    // own top-level foil — but the backend still fetches sales/listings for
-    // each variant_id (see api_card_detail in app.py), so surface a section
-    // for each one here too.
-    entries.forEach(([, f]) => {
-        Object.entries(f.variants || {}).forEach(([vid, v]) => {
-            sections.push(buildPricingFoilSection(vid, toFoilLabel(v.kind), pricing));
+    // Any variants not already folded into their parent's section above
+    // (e.g. multi-stamp tournament promos, which have several variants
+    // rather than the lone one a Curio Foil has) still get their own section.
+    entries.forEach(entry => {
+        const sole = soleVariantOf(entry);
+        Object.entries(entry[1].variants || {}).forEach(([variantId, variantInfo]) => {
+            if (sole && sole[0] === variantId) return;
+            sections.push(buildPricingFoilSection(variantId, toFoilLabel(variantInfo.kind), pricing));
         });
     });
 

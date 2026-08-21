@@ -957,7 +957,28 @@ def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
     # foils — multi-stamp tournament promos instead have 3-4 variants, so
     # "exactly one variant across all foils" distinguishes a true Curio Foil
     # from those without needing to match on name (which varies by set).
-    return _curio_foil_id(edition_info.get("foils", {}))
+    foils = edition_info.get("foils", {})
+    curio_foil_id = _curio_foil_id(foils)
+
+    if not curio_foil_id:
+        return None
+
+    # But that alone isn't enough to be admin-UI curio-eligible: some cards
+    # (e.g. "Lunar Conduit", RDOA) are printed ONLY as their special foil —
+    # no separate nonfoil/foil product exists at all, so the curio variant's
+    # own parent foil has nothing left after its population is entirely
+    # consumed by the variant (same "remaining_population > 0" check the
+    # /foils endpoint below uses to decide whether a top-level Nonfoil/Foil
+    # option even exists). With no regular product to toggle back to, a
+    # Curio Foil toggle would just be two buttons pointing at the same one
+    # product — so treat these as ordinary (non-curio) editions instead,
+    # using their single product ID field like any other card.
+    has_regular_printing = any(
+        finfo.get("population", 0) - sum(v.get("population", 0) for v in finfo.get("variants", {}).values()) > 0
+        for finfo in foils.values()
+    )
+
+    return curio_foil_id if has_regular_printing else None
 
 
 def _load_users_data() -> dict:
@@ -1131,6 +1152,14 @@ async def api_admin_pricing_product_ids(request: Request):
         edition_ids = ids_data.get(edition_id, {})
 
         curio_foil_id = _curio_foil_id_for_edition(edition_info)
+        # A card printed ONLY as its special foil (e.g. "Lunar Conduit",
+        # RDOA — see _curio_foil_id_for_edition's comment) has no toggle
+        # (curio above stays None, same as an ordinary edition), but its one
+        # and only product ID still IS that Curio Foil's — flagging it lets
+        # the frontend label the (single, non-toggled) product ID field and
+        # Sales/Listings the same way toggled-on curio view would, without
+        # actually offering anything to toggle.
+        curio_only = bool(_curio_foil_id(edition_info.get("foils", {}))) and not curio_foil_id
         curio = None
         if curio_foil_id:
             foil_info = next(
@@ -1162,6 +1191,7 @@ async def api_admin_pricing_product_ids(request: Request):
             "sales_days_since": _days_since(edition_ids.get("last_sales")),
             "listings_days_since": _days_since(edition_ids.get("last_listings")),
             "curio": curio,
+            "curio_only": curio_only,
         })
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))

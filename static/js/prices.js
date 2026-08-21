@@ -506,25 +506,47 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName, onlyThisEditio
 
         const foilList = document.getElementById('watchlist-modal-foils');
         foilList.innerHTML = '';
+
+        // Collect every real foil/variant combo across the listed editions
+        // before rendering anything — whether there's actually a choice to
+        // present isn't known until the whole set is gathered.
+        const optionEntries = [];
+        editions.forEach(([eid, einfo]) => {
+            const rarityMap = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
+            const rarity = rarityMap[einfo.rarity] || '?';
+            Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
+                // A foil whose entire population is a single variant (see
+                // _curio_foil_id_for_edition in app.py — the "exactly one
+                // variant" rule that identifies a true Curio Foil, e.g.
+                // Lunar Conduit/RDOA) has no separate base printing of its
+                // own — every copy that would otherwise be a plain "Foil" IS
+                // the Curio Foil — so offer only the Curio Foil option
+                // instead of a redundant, nonexistent plain-Foil one too.
+                const sole = soleCurioVariant(finfo);
+                if (sole) {
+                    const [vid, vinfo] = sole;
+                    optionEntries.push({eid, fid: vid, kind: vinfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: false});
+                    return;
+                }
+
+                optionEntries.push({eid, fid, kind: finfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: false});
+                Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
+                    optionEntries.push({eid, fid: vid, kind: vinfo.kind, setPrefix: einfo.set_prefix, rarity, collectorNum: einfo.collector_number, isVariant: true});
+                });
+            });
+        });
+
         let firstOpt = null;
         // If the caller identified a specific printing (e.g. a tile clicked in
         // the all-editions search results), preselect that one instead of
         // always defaulting to the first in collector-number order.
         let matchOpt = null;
 
-        editions.forEach(([eid, einfo]) => {
-            const rarityMap = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
-            const rarity = rarityMap[einfo.rarity] || '?';
-            Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
-                const opt = buildWatchlistFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false);
-                if (!firstOpt) firstOpt = {opt, eid, fid};
-                if (!matchOpt && eid === editionId) matchOpt = {opt, eid, fid};
-                foilList.appendChild(opt);
-                Object.entries(finfo.variants || {}).forEach(([vid, vinfo]) => {
-                    const vopt = buildWatchlistFoilOption(eid, vid, vinfo.kind, einfo.set_prefix, rarity, einfo.collector_number, true);
-                    foilList.appendChild(vopt);
-                });
-            });
+        optionEntries.forEach(entry => {
+            const opt = buildWatchlistFoilOption(entry.eid, entry.fid, entry.kind, entry.setPrefix, entry.rarity, entry.collectorNum, entry.isVariant);
+            if (!firstOpt) firstOpt = {opt, eid: entry.eid, fid: entry.fid};
+            if (!matchOpt && entry.eid === editionId) matchOpt = {opt, eid: entry.eid, fid: entry.fid};
+            foilList.appendChild(opt);
         });
 
         const initialOpt = matchOpt || firstOpt;
@@ -534,8 +556,23 @@ async function goToWatchlistFoilStep(cardId, editionId, cardName, onlyThisEditio
     }
 }
 
+// Mirrors soleVariantOf in drawer.js — returns the [variantId, variantInfo]
+// entry to fold in as the sole Curio Foil option, or null when this foil has
+// a real base printing of its own alongside its variant(s).
+function soleCurioVariant(foilInfo) {
+    const variants = Object.entries(foilInfo.variants || {});
+    if (variants.length !== 1) return null;
+    const [, variantInfo] = variants[0];
+    const basePop = (foilInfo.population ?? 0) - (variantInfo.population ?? 0);
+    return basePop <= 0 ? variants[0] : null;
+}
+
+function foilOptionLabel(kind) {
+    return kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
+}
+
 function buildWatchlistFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant) {
-    const label = kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
+    const label = foilOptionLabel(kind);
     const opt = document.createElement('div');
     opt.className = 'inv-foil-option';
     opt.dataset.editionId = editionId;

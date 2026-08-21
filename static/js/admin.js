@@ -815,6 +815,13 @@ function adminPidProductIdFieldHtml(e) {
 
     const noListings = e.product_id === ADMIN_PID_NO_LISTINGS_SENTINEL;
     const inputStateClass = noListings ? 'admin-pid-input-no-listings' : e.product_id ? 'admin-pid-input-filled' : '';
+    // A card printed ONLY as its special foil (e.curio_only — see
+    // _curio_foil_id_for_edition's comment in app.py) has no toggle at all
+    // (there's nothing else to toggle to), but its one product ID still IS
+    // that Curio Foil's — so its empty-state placeholder says as much,
+    // matching what toggled-on curio view would show, even though this is
+    // just the ordinary (untoggled) field.
+    const missingLabel = e.curio_only ? 'Curio Foil' : 'Missing';
 
     return `
         <div class="admin-pid-pid-wrap">
@@ -822,8 +829,8 @@ function adminPidProductIdFieldHtml(e) {
             <input type="text" class="admin-pid-input ${inputStateClass}"
                    data-edition-id="${escapeHtml(e.edition_id)}"
                    value="${escapeHtml(e.product_id || '')}"
-                   placeholder="Missing"
-                   title="${noListings ? 'Marked as having no TCGPlayer listings' : ''}"
+                   placeholder="${missingLabel}"
+                   title="${noListings ? 'Marked as having no TCGPlayer listings' : e.curio_only ? 'Curio Foil' : ''}"
                    ${finding ? 'disabled' : ''}
                    onkeydown="if (event.key === 'Enter') this.blur()"
                    onblur="saveAdminProductId(this)">
@@ -1652,7 +1659,7 @@ function renderAdminPricingImageCol() {
             </div>
         </div>
         <div class="admin-pid-detail-pid-row">
-            <label class="admin-pid-detail-label">${curioView ? 'Curio Foil' : 'Product ID'}</label>
+            <label class="admin-pid-detail-label">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
             ${adminPidProductIdFieldHtml(record)}
         </div>
     `;
@@ -1697,7 +1704,10 @@ function renderAdminPricingDetail() {
     const historyLoaded = !!adminPidDetailHistory;
     const salesRows = historyLoaded ? filterByCurio(adminPidDetailHistory.sales) : [];
     const listingsRows = historyLoaded ? filterByCurio(adminPidDetailHistory.listings) : [];
-    const curioTitleSuffix = curioView ? ' — Curio Foil' : '';
+    // A curio_only card (no toggle at all — see e.curio_only's comment)
+    // still has all of its history belonging to that one Curio Foil, so the
+    // suffix shows unconditionally for it, same as toggled-on curio view.
+    const curioTitleSuffix = (curioView || record.curio_only) ? ' — Curio Foil' : '';
 
     panel.innerHTML = `
         <div class="admin-pid-detail-section" id="admin-pid-section-sales">
