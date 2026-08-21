@@ -677,16 +677,26 @@ function adminPidFilteredEditions() {
 
 // Recomputes just the "X of Y editions have a product ID" line — cheap enough
 // to call after a single product ID save instead of re-rendering every row
-// just to reflect one changed count.
+// just to reflect one changed count. Both numbers are scoped to whatever's
+// currently filtered/visible (search, Set/Rarity filters, Missing only) —
+// not the full unfiltered adminPidData — so the line stays an accurate
+// description of the list actually on screen instead of drifting from it
+// the moment any filter is active. Per row, checks whichever product ID
+// that row is actually showing right now — its Curio Foil's if that row's
+// toggle is on, its regular one otherwise — same as adminPidProductIdFieldHtml
+// itself picks, so e.g. 3 curio-toggled cards with no curio ID set yet read
+// as missing here even though their (currently hidden) regular ID is filled.
 function updateAdminPidSummaryText() {
     const summary = document.getElementById('admin-pid-summary');
     if (!summary) return;
 
-    const withId = adminPidData.filter(e => e.product_id).length;
-    const filteredCount = adminPidFilteredEditions().length;
+    const filtered = adminPidFilteredEditions();
+    const withId = filtered.filter(e => {
+        const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
+        return curioView ? e.curio.product_id : e.product_id;
+    }).length;
 
-    summary.textContent = `${withId} of ${adminPidData.length} editions have a product ID`
-        + (filteredCount !== adminPidData.length ? ` — showing ${filteredCount}` : '');
+    summary.textContent = `${withId} of ${filtered.length} editions have a product ID`;
 }
 
 // Rebuilds just the row list (and summary/select-all/refresh-button state that
@@ -699,11 +709,8 @@ function renderAdminPidRows() {
     const table = document.getElementById('admin-pid-table');
     if (!summary || !table) return;
 
-    const withId = adminPidData.filter(e => e.product_id).length;
     const filtered = adminPidFilteredEditions();
-
-    summary.textContent = `${withId} of ${adminPidData.length} editions have a product ID`
-        + (filtered.length !== adminPidData.length ? ` — showing ${filtered.length}` : '');
+    updateAdminPidSummaryText();
 
     const rows = filtered.map(e => `
         <div class="admin-pid-row ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
@@ -861,6 +868,7 @@ async function toggleAdminPidCurioView(editionId, bulk = false) {
     if (listingsCell) listingsCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'listings');
 
     updateAdminPidCurioSelectAllState();
+    updateAdminPidSummaryText();
 
     if (adminPidDetailSelected === editionId) {
         // The add-entry foil dropdown is filtered by curio-toggle state (see

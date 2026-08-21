@@ -316,13 +316,37 @@
    per-row .admin-pid-curio-toggle buttons below it (see the comment on
    that rule) — outside the column, flush with its left edge plus the same
    6px gap — so the "select all" checkbox and the row toggles it controls
-   line up in one column down the page. */
+   line up in one column down the page. Sized to match those same toggle
+   buttons (26px) rather than the smaller 16px checkboxes elsewhere in this
+   table, since it's standing in for a whole column of them.
+   The explicit padding:0 below isn't decorative — login.css's global
+   `input { padding: 10px 14px }` rule (unscoped by type, so it reaches
+   every input on the page including this checkbox) inflates a checkbox's
+   box past its declared width/height despite box-sizing:border-box, since
+   a checkbox is a replaced form control rather than ordinary box content;
+   overriding padding back to 0 is what actually makes width/height stick. */
 .admin-pid-curio-select-all {
     position: absolute;
     right: 100%;
     margin-right: 6px;
     top: 50%;
     transform: translateY(-50%);
+    width: 26px;
+    height: 26px;
+    padding: 0;
+}
+
+/* Card-select checkboxes (both the per-row ones and their "select all" in
+   the header) match the Curio Foil select-all checkbox's size (26px) rather
+   than the smaller 16px .admin-pid-filter-toggle checkbox elsewhere on this
+   page. Same login.css `input { padding }` override as
+   .admin-pid-curio-select-all above (see its comment) is needed here too —
+   without it these were already rendering larger than their declared 16px,
+   just not next to anything to notice it against. */
+.admin-pid-col-check input[type="checkbox"] {
+    width: 26px;
+    height: 26px;
+    padding: 0;
 }
 
 .admin-pid-curio-select-all:disabled {
