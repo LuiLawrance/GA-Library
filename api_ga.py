@@ -503,6 +503,16 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         if not flavor:
             flavor = None
 
+        date_update = edition.get("last_update")
+
+        if date_update:
+            date_update = date_update.split("T")[0]
+
+        date_release = edition["set"].get("release_date")
+
+        if date_release:
+            date_release = date_release.split("T")[0]
+
         editions = info_data[card_id]["editions"]
 
         if edition_id not in editions:
@@ -513,7 +523,12 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
                 editions[edition_id].pop("foil_ids")
             )
 
+        editions[edition_id].pop("last_update", None)
+        editions[edition_id].pop("release_date", None)
+
         editions[edition_id]["date_created"] = date_created
+        editions[edition_id]["date_release"] = date_release
+        editions[edition_id]["date_update"] = date_update
         editions[edition_id]["flavor"] = flavor
         editions[edition_id]["illustrator"] = illustrator
         editions[edition_id]["rarity"] = rarity

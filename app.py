@@ -1190,6 +1190,13 @@ async def api_admin_pricing_product_ids(request: Request):
             "product_id": edition_ids.get("product_id"),
             "sales_days_since": _days_since(edition_ids.get("last_sales")),
             "listings_days_since": _days_since(edition_ids.get("last_listings")),
+            # The edition's own release/last-synced dates (from the Grand
+            # Archive API, cached in JSON_INFO — see the sync logic in
+            # api_ga.py) — shown in the Cards section's Info sub-view instead
+            # of the pricing-scrape timestamps above (see
+            # renderAdminPricingImageCol in admin.js).
+            "release_date": edition_info.get("date_release"),
+            "last_updated": edition_info.get("date_update"),
             "curio": curio,
             "curio_only": curio_only,
         })
@@ -1558,6 +1565,30 @@ async def inventory_page():
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
+    return serve_index()
+
+
+# Deep links into the Admin page's own section/sub-view (see the routes
+# table in app.js and initAdmin() in admin.js, which reads the pathname back
+# out to land on the right one) — same shell as /admin above, the client
+# router picks the actual state up from the URL once index.html loads.
+@app.get("/admin/cards", response_class=HTMLResponse)
+async def admin_cards_page():
+    return serve_index()
+
+
+@app.get("/admin/cards/info", response_class=HTMLResponse)
+async def admin_cards_info_page():
+    return serve_index()
+
+
+@app.get("/admin/cards/pricing", response_class=HTMLResponse)
+async def admin_cards_pricing_page():
+    return serve_index()
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page():
     return serve_index()
 
 

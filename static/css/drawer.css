@@ -288,6 +288,14 @@
     line-height: 1.6;
 }
 
+.drawer-flavor {
+    font-size: 0.8rem;
+    font-weight: 300;
+    font-style: italic;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
 .effect-tag {
     font-family: 'DM Mono', monospace;
     font-size: 0.75rem;

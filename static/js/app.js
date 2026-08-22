@@ -20,6 +20,13 @@ const routes = {
     '/inventory': '/fragments/inventory',
     '/decks_ga': '/fragments/decks_ga',
     '/admin': '/fragments/admin',
+    // Deep links into the Admin page's own sub-tabs — all the same fragment
+    // as /admin, just parsed by initAdmin() (admin.js) to land on the right
+    // section/sub-view instead of always defaulting to Cards → Pricing.
+    '/admin/cards': '/fragments/admin',
+    '/admin/cards/info': '/fragments/admin',
+    '/admin/cards/pricing': '/fragments/admin',
+    '/admin/users': '/fragments/admin',
 };
 
 async function navigate(path, pushState = true) {
@@ -48,7 +55,13 @@ async function navigate(path, pushState = true) {
         pathname = path.split('?')[0];
 
         document.querySelectorAll('.navbar a').forEach(a => {
-            a.classList.toggle('active', a.getAttribute('href') === pathname);
+            const href = a.getAttribute('href');
+            // Prefix match (not just exact) so a deep link into a sub-page —
+            // e.g. /admin/cards/info — still marks its top-level nav link
+            // (/admin) active, the same as being on /admin itself. href==='/'
+            // is exact-only, otherwise EVERY page would match root's prefix.
+            const active = href === '/' ? pathname === '/' : (pathname === href || pathname.startsWith(href + '/'));
+            a.classList.toggle('active', active);
         });
 
         const fragment = routes[pathname] || routes['/'];
@@ -117,7 +130,7 @@ async function navigate(path, pushState = true) {
         setTimeout(setupDgaFooterScroll, 100);
     }
 
-    if (pathname === '/admin') {
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
         if (typeof window.initAdmin === 'function') {
             window.initAdmin();
         }

@@ -60,6 +60,20 @@ function adminPidIsScrapable(productId) {
 // alongside the rest of this page's animation helpers (animateBoxResize,
 // fadeSwap) for any future page that wants the same sliding-pill look.
 
+// Keeps the address bar in sync with whichever Admin section/sub-view is
+// currently showing (see the routes table in app.js, and initAdmin which
+// reads this same shape back out on load) — replaceState rather than
+// pushState since switching tabs happens casually and often repeatedly, and
+// pushState per click would flood browser history with one entry per tab
+// glanced at (same reasoning showPriceGraph in prices.js uses for its own
+// URL sync).
+function syncAdminUrl() {
+    const path = adminActiveSection === 'users' ? '/admin/users' : `/admin/cards/${adminCardsView}`;
+    if (window.location.pathname !== path) {
+        window.history.replaceState({}, '', path);
+    }
+}
+
 async function switchAdminSection(section) {
     const page = document.getElementById('admin-page');
     if (!page || adminActiveSection === section) return;
@@ -69,6 +83,7 @@ async function switchAdminSection(section) {
     await sleep(150);
 
     adminActiveSection = section;
+    syncAdminUrl();
 
     page.querySelectorAll('.admin-subnav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.section === section);
@@ -158,6 +173,7 @@ async function switchAdminCardsView(view) {
         // both read this, and need the NEW mode's value from the moment
         // they're called, not just once the grid animation's mutate runs.
         adminCardsView = view;
+        syncAdminUrl();
 
         header.innerHTML = '';
         table.innerHTML = '';
@@ -1717,18 +1733,62 @@ function renderAdminPricingImageCol() {
         return;
     }
 
-    // The Curio Foil's own product page is scraped/refreshed independently
-    // from the edition's regular one (see pricing_ga.py's merge-based scrape
-    // orchestration), so it has its own separate last-scraped clocks too —
-    // show those instead of the edition's when toggled to Curio Foil view.
-    const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
-    const historyLoaded = !!adminPidDetailHistory;
-    const lastSales = historyLoaded
-        ? ((curioView ? adminPidDetailHistory.curio_last_sales : adminPidDetailHistory.last_sales) || 'Never')
-        : '…';
-    const lastListings = historyLoaded
-        ? ((curioView ? adminPidDetailHistory.curio_last_listings : adminPidDetailHistory.last_listings) || 'Never')
-        : '…';
+    const infoMode = adminCardsView === 'info';
+
+    let statsHtml, pidRowHtml;
+    if (infoMode) {
+        // Info mode isn't about pricing — Released/Last Updated (the
+        // edition's own Grand Archive sync dates, see release_date/
+        // last_updated on the /api/admin/pricing/product-ids response) swap
+        // in for the Last Sales/Last Listings scrape clocks below, and the
+        // Product ID field is dropped entirely rather than shown blank.
+        statsHtml = `
+            <div class="drawer-stats admin-pid-scrape-stats">
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">Released</span>
+                    <span class="drawer-stat-value">${escapeHtml(record.release_date || 'Unknown')}</span>
+                </div>
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">Last Updated</span>
+                    <span class="drawer-stat-value">${escapeHtml(record.last_updated || 'Unknown')}</span>
+                </div>
+            </div>
+        `;
+        pidRowHtml = '';
+    } else {
+        // The Curio Foil's own product page is scraped/refreshed
+        // independently from the edition's regular one (see pricing_ga.py's
+        // merge-based scrape orchestration), so it has its own separate
+        // last-scraped clocks too — show those instead of the edition's when
+        // toggled to Curio Foil view.
+        const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
+        const historyLoaded = !!adminPidDetailHistory;
+        const lastSales = historyLoaded
+            ? ((curioView ? adminPidDetailHistory.curio_last_sales : adminPidDetailHistory.last_sales) || 'Never')
+            : '…';
+        const lastListings = historyLoaded
+            ? ((curioView ? adminPidDetailHistory.curio_last_listings : adminPidDetailHistory.last_listings) || 'Never')
+            : '…';
+
+        statsHtml = `
+            <div class="drawer-stats admin-pid-scrape-stats">
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">Last Sales</span>
+                    <span class="drawer-stat-value">${escapeHtml(lastSales)}</span>
+                </div>
+                <div class="drawer-stat">
+                    <span class="drawer-stat-label">Last Listings</span>
+                    <span class="drawer-stat-value">${escapeHtml(lastListings)}</span>
+                </div>
+            </div>
+        `;
+        pidRowHtml = `
+            <div class="admin-pid-detail-pid-row">
+                <label class="admin-pid-detail-label">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
+                ${adminPidProductIdFieldHtml(record)}
+            </div>
+        `;
+    }
 
     col.innerHTML = `
         <div class="admin-pid-detail-header">
@@ -1738,20 +1798,8 @@ function renderAdminPricingImageCol() {
         <div class="admin-pid-detail-image-wrap">
             <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}">
         </div>
-        <div class="drawer-stats admin-pid-scrape-stats">
-            <div class="drawer-stat">
-                <span class="drawer-stat-label">Last Sales</span>
-                <span class="drawer-stat-value">${escapeHtml(lastSales)}</span>
-            </div>
-            <div class="drawer-stat">
-                <span class="drawer-stat-label">Last Listings</span>
-                <span class="drawer-stat-value">${escapeHtml(lastListings)}</span>
-            </div>
-        </div>
-        <div class="admin-pid-detail-pid-row">
-            <label class="admin-pid-detail-label">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
-            ${adminPidProductIdFieldHtml(record)}
-        </div>
+        ${statsHtml}
+        ${pidRowHtml}
     `;
 
     const img = col.querySelector('.admin-pid-detail-image');
@@ -1764,16 +1812,6 @@ function renderAdminPricingDetail() {
     const panel = document.getElementById('admin-pricing-detail');
     if (!panel) return;
 
-    // Sales/Listings (and their Refresh/Add Entry actions) are pricing-only
-    // — the panel's own grid track also collapses to 0 width in this mode
-    // (see .admin-cards-mode-info .admin-pricing-layout in admin.css), but
-    // leaving its content rendering here too would mean it's just sitting
-    // there built and clipped behind overflow:hidden for nothing.
-    if (adminCardsView === 'info') {
-        panel.innerHTML = '';
-        return;
-    }
-
     if (!adminPidDetailSelected) {
         panel.innerHTML = '';
         return;
@@ -1782,6 +1820,15 @@ function renderAdminPricingDetail() {
     const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
     if (!record) {
         panel.innerHTML = '';
+        return;
+    }
+
+    // Sales/Listings (and their Refresh/Add Entry actions) are pricing-only
+    // — this panel shows the card's raw identifiers instead in Info mode
+    // (see renderAdminInfoIdsPanel), a genuinely different "third menu" next
+    // to the card info window rather than nothing.
+    if (adminCardsView === 'info') {
+        renderAdminInfoIdsPanel(panel, record);
         return;
     }
 
@@ -1844,6 +1891,59 @@ function renderAdminPricingDetail() {
     panel.closest('.admin-pricing-layout')?.classList.toggle('admin-pid-popover-open', anyPopoverOpen);
     document.getElementById('admin-pid-section-sales')?.classList.toggle('admin-pid-popover-open', salesPopoverOpen);
     document.getElementById('admin-pid-section-listings')?.classList.toggle('admin-pid-popover-open', listingsPopoverOpen);
+}
+
+// Info mode's third panel (renderAdminPricingDetail's own track, next to the
+// card info window) — the card's raw identifiers rather than anything
+// pricing-related, as a tree: Card → Edition → each Nonfoil/Foil/Curio Foil
+// variant, matching how they actually nest in the data rather than a flat
+// list. card_id/edition_id are both already on `record`, no extra fetch;
+// adminPidDetailFoils is already being fetched regardless of mode (see
+// selectAdminPricingDetail), so this only needs to handle it not having
+// arrived yet.
+function renderAdminInfoIdsPanel(panel, record) {
+    let foilsHtml;
+    if (!adminPidDetailFoils) {
+        foilsHtml = '<li class="admin-pid-id-tree-node"><span class="admin-pid-id-tree-row"><span class="admin-pid-detail-loading">Loading…</span></span></li>';
+    } else if (adminPidDetailFoils.length === 0) {
+        foilsHtml = '<li class="admin-pid-id-tree-node"><span class="admin-pid-id-tree-row"><span class="admin-pid-detail-empty-small">No foils found.</span></span></li>';
+    } else {
+        foilsHtml = adminPidDetailFoils.map(f => `
+            <li class="admin-pid-id-tree-node">
+                <span class="admin-pid-id-tree-row">
+                    <span class="admin-pid-detail-label">${escapeHtml(f.kind)}</span>
+                    <span class="admin-pid-detail-id-value">${escapeHtml(f.foil_id)}</span>
+                </span>
+            </li>
+        `).join('');
+    }
+
+    panel.innerHTML = `
+        <div class="admin-pid-detail-section">
+            <div class="admin-pid-detail-section-header">
+                <span class="admin-pid-detail-section-title">Identifiers</span>
+            </div>
+            <ul class="admin-pid-id-tree-list">
+                <li class="admin-pid-id-tree-node admin-pid-id-tree-node-root">
+                    <span class="admin-pid-id-tree-row">
+                        <span class="admin-pid-detail-label">Card</span>
+                        <span class="admin-pid-detail-id-value">${escapeHtml(record.card_id)}</span>
+                    </span>
+                    <ul class="admin-pid-id-tree-list">
+                        <li class="admin-pid-id-tree-node">
+                            <span class="admin-pid-id-tree-row">
+                                <span class="admin-pid-detail-label">Edition</span>
+                                <span class="admin-pid-detail-id-value">${escapeHtml(record.edition_id)}</span>
+                            </span>
+                            <ul class="admin-pid-id-tree-list">
+                                ${foilsHtml}
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    `;
 }
 
 // Regular/Discord pill — swaps the whole detail panel's content (both Sales
@@ -2354,17 +2454,32 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
     }
 }
 
+// Deep-linkable section/sub-view URLs (see the routes table in app.js and
+// switchAdminSection/switchAdminCardsView, which keep the address bar synced
+// to whichever one is showing via history.replaceState):
+//   /admin, /admin/cards, /admin/cards/pricing  → Cards section, Pricing
+//   /admin/cards/info                           → Cards section, Info
+//   /admin/users                                → Users section
 function initAdmin() {
-    adminActiveSection = 'pricing';
-    // The Cards section's own Info/Pricing sub-view — the fresh DOM this
-    // fragment load just injected always starts on Pricing (see
-    // admin.html), but adminCardsView itself is a plain JS variable that
-    // survives navigating away and back (this module isn't reloaded, only
-    // the page's HTML is) — without resetting it here too, leaving on Info
-    // and coming back would render Info's reduced list columns (see
+    const path = window.location.pathname;
+    adminActiveSection = path.startsWith('/admin/users') ? 'users' : 'pricing';
+    // The Cards section's own Info/Pricing sub-view — reset (from the URL,
+    // defaulting to Pricing) rather than left at whatever it was, since
+    // adminCardsView is a plain JS variable that survives navigating away
+    // and back (this module isn't reloaded, only the page's HTML is) —
+    // without resetting it here too, leaving on Info and coming back to a
+    // Pricing URL would render Info's reduced list columns (see
     // renderAdminPidHeader/renderAdminPidRows) inside the fresh, unmorphed
     // Pricing-width layout, rather than actually starting on Pricing.
-    adminCardsView = 'pricing';
+    adminCardsView = path === '/admin/cards/info' ? 'info' : 'pricing';
+
+    // Normalizes the address bar to whichever specific sub-view that just
+    // resolved to — e.g. clicking the top-level Admin nav link lands on the
+    // bare /admin, which defaults here to Cards → Pricing, but should then
+    // read as /admin/cards/pricing rather than staying on the generic /admin
+    // while that's what's actually on screen.
+    syncAdminUrl();
+
     adminUsersLoaded = false;
     adminUsersData = [];
     adminUserDetailSelected = null;
@@ -2390,12 +2505,37 @@ function initAdmin() {
     adminPidAddEntryPending = false;
     adminPidBulkPasteOpen = false;
     adminPidBulkPastePending = false;
+
+    // Renders the deep-linked section/sub-view directly — no fade/resize
+    // animation here, since this is the page settling into its starting
+    // state rather than a user click (switchAdminSection/
+    // switchAdminCardsView are for that, and would also no-op here anyway:
+    // their own guards compare against the values just set above).
+    const page = document.getElementById('admin-page');
+    page?.querySelectorAll('.admin-subnav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.section === adminActiveSection);
+    });
+    page?.querySelectorAll('.admin-section').forEach(panel => {
+        panel.classList.toggle('hidden', panel.id !== `admin-section-${adminActiveSection}`);
+    });
+
+    const cardsSection = document.getElementById('admin-section-pricing');
+    cardsSection?.querySelectorAll('.admin-cards-subnav-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === adminCardsView);
+    });
+    cardsSection?.classList.toggle('admin-cards-mode-info', adminCardsView === 'info');
+
     document.querySelector('.footer')?.classList.add('footer-hidden');
     updateAdminPidTcgButton();
     updateAdminUserRoleButtons();
     positionPillIndicator(document.querySelector('.admin-cards-subnav'));
     positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
-    loadAdminPricingIds();
+
+    if (adminActiveSection === 'users') {
+        loadAdminUsers();
+    } else {
+        loadAdminPricingIds();
+    }
 }
 
 document.addEventListener('click', e => {

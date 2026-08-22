@@ -180,17 +180,19 @@
    admin.js) rather than the list item directly is what makes the card info
    window next to it (.admin-pricing-image-col, in the fixed 320px track)
    visibly slide along as a normal side effect of the grid recalculating each
-   frame, instead of needing its own separate position animation. The list's
-   Sales/Listings-adjacent Check/Product ID/Sales/Listings columns still
-   swap to Info's reduced set instantly rather than animating live (see
-   .admin-pid-row-info below) — doing THAT live, on every row at once, would
-   force a full grid layout recalculation on every visible row on every
-   frame with thousands potentially loaded, which is what made an earlier
-   version of this transition glitchy; the outer track above only affects
-   its 3 direct children (list/image/detail), so animating it doesn't have
-   that same cost. */
+   frame, instead of needing its own separate position animation. The third
+   track (.admin-pricing-detail) keeps real width too, same as Pricing's —
+   Info mode uses it for the card's raw identifiers instead of Sales/Listings
+   (see renderAdminInfoIdsPanel), not nothing. The list's Check/Product
+   ID/Sales/Listings columns still swap to Info's reduced set instantly
+   rather than animating live (see .admin-pid-row-info below) — doing THAT
+   live, on every row at once, would force a full grid layout recalculation
+   on every visible row on every frame with thousands potentially loaded,
+   which is what made an earlier version of this transition glitchy; the
+   outer track above only affects its 3 direct children (list/image/detail),
+   so animating it doesn't have that same cost. */
 .admin-cards-mode-info .admin-pricing-layout {
-    grid-template-columns: var(--admin-pid-info-list-width) 320px 0px;
+    grid-template-columns: var(--admin-pid-info-list-width) 320px minmax(0, 1fr);
 }
 
 /* Info mode's reduced row markup (see renderAdminPidHeader/renderAdminPidRows
@@ -1246,6 +1248,87 @@
     letter-spacing: 0.06em;
     color: var(--text-muted);
     white-space: nowrap;
+}
+
+/* Info mode's third panel (renderAdminInfoIdsPanel) — Card ID/Edition
+   ID/Foil IDs as a tree (Card → Edition → each Foil), reflecting how they
+   actually nest in the data, rather than a flat label/value list. */
+.admin-pid-id-tree-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.admin-pid-id-tree-list .admin-pid-id-tree-list {
+    flex: none;
+    overflow: visible;
+    margin-left: 8px;
+}
+
+/* Each node's own connector lines are drawn via ::before (the vertical line
+   down to the NEXT sibling, so a node with siblings below it stays
+   connected) and ::after (the horizontal branch into this node's own row) —
+   both positioned off the node's own box, not the row inside it, so they
+   stay put regardless of how tall the row's content wraps to. */
+.admin-pid-id-tree-node {
+    position: relative;
+    padding: 6px 0 6px 20px;
+}
+
+.admin-pid-id-tree-node::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    border-left: 1px solid var(--border);
+}
+
+/* The last child has nothing below it to connect to — its vertical line
+   stops at its own branch instead of trailing past it. */
+.admin-pid-id-tree-node:last-child::before {
+    bottom: 50%;
+}
+
+.admin-pid-id-tree-node::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 12px;
+    border-top: 1px solid var(--border);
+}
+
+/* The root (Card) has no parent of its own to branch off of. */
+.admin-pid-id-tree-node-root {
+    padding-left: 0;
+}
+
+.admin-pid-id-tree-node-root::before,
+.admin-pid-id-tree-node-root::after {
+    content: none;
+}
+
+.admin-pid-id-tree-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* Shared by every tree row's own ID — user-select:all so a single click
+   selects the whole UUID, since it's not editable here (see .admin-pid-input
+   elsewhere for the one ID field that is: Product ID, in Pricing mode's own
+   version of this panel). */
+.admin-pid-detail-id-value {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text);
+    word-break: break-all;
+    user-select: all;
 }
 
 .admin-pid-detail-section {
