@@ -1,8 +1,9 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _group_slug, _sort_collector_number, \
     _update_slug, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, JSON_THEMA, \
     set_search, sync_featured_sets, UPDATE_THRESHOLD
-from api_tcgplayer import NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, \
-    get_foil_overrides, get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
+from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
+    NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
+    get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
@@ -1325,6 +1326,43 @@ async def api_admin_set_product_id(request: Request):
         set_product_id(edition_id, product_id)
 
     return JSONResponse({"edition_id": edition_id, "foil_id": foil_id, "product_id": product_id})
+
+
+@app.post("/api/admin/pricing/clear-last-updated")
+async def api_admin_clear_last_updated(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    edition_id = body.get("edition_id", "").strip()
+    foil_id = body.get("foil_id", "").strip() or None
+    field = body.get("field", "")
+
+    if not edition_id:
+        raise HTTPException(status_code=400, detail="edition_id is required")
+
+    if field not in ("sales", "listings"):
+        raise HTTPException(status_code=400, detail="field must be 'sales' or 'listings'")
+
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    # foil_id present clears a Curio Foil's own separate clock instead of the
+    # edition's main one — mirrors the product-id endpoint above.
+    if foil_id:
+        if field == "sales":
+            clear_foil_last_sales(edition_id, foil_id)
+        else:
+            clear_foil_last_listings(edition_id, foil_id)
+    else:
+        if field == "sales":
+            clear_last_sales(edition_id)
+        else:
+            clear_last_listings(edition_id)
+
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/admin/pricing/{edition_id}/history")

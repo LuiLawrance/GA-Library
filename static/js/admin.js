@@ -685,6 +685,14 @@ function renderAdminInfoSetsPanel() {
     const panel = document.getElementById('admin-pricing-sets');
     if (!panel) return;
 
+    // panel.innerHTML below rebuilds .admin-pricing-sets-list from scratch —
+    // a brand new element always starts scrolled to the top, so without
+    // saving/restoring this, every re-render (e.g. refreshAdminPidData()
+    // after a set search finishes) would silently reset however far down the
+    // admin had scrolled, even for a set search triggered from near the
+    // bottom of a long list.
+    const scrollTop = panel.querySelector('.admin-pricing-sets-list')?.scrollTop || 0;
+
     const counts = new Map(); // set_prefix -> {name, count}
     for (const e of adminPidData) {
         const prefix = e.set_prefix || 'Unknown';
@@ -750,6 +758,9 @@ function renderAdminInfoSetsPanel() {
             ${rowsHtml || '<div class="admin-pid-detail-empty-small">No cards loaded.</div>'}
         </div>
     `;
+
+    const list = panel.querySelector('.admin-pricing-sets-list');
+    if (list) list.scrollTop = scrollTop;
 }
 
 // "Check Featured" button in the Sets panel — fetches api.gatcg.com's current
@@ -1629,6 +1640,49 @@ async function saveAdminProductId(input) {
     }
 }
 
+// Resets the open card's Last Sales/Last Listings clock back to never-scraped
+// — mainly useful for forcing past the 7-day listings-refresh gate
+// (_listings_gate_result) without waiting it out, or just correcting a badge
+// that shouldn't have been marked updated. Clears whichever clock the detail
+// panel is actually showing right now — the Curio Foil's own separate one if
+// toggled on, the edition's main one otherwise (same product the Last
+// Sales/Listings badge and the field below it already reflect).
+async function clearAdminPidLastUpdated(field) {
+    const editionId = adminPidDetailSelected;
+    if (!editionId) return;
+
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record) return;
+
+    const curioView = record.curio && adminPidCurioViewSelected.has(editionId);
+    const foilId = curioView ? record.curio.foil_id : undefined;
+
+    try {
+        const res = await fetch('/api/admin/pricing/clear-last-updated', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({edition_id: editionId, field, foil_id: foilId}),
+        });
+        if (!res.ok) return;
+
+        const daysSinceKey = field === 'sales' ? 'sales_days_since' : 'listings_days_since';
+        (curioView ? record.curio : record)[daysSinceKey] = null;
+
+        const row = document.querySelector(`#admin-pid-table .admin-pid-row[data-edition-id="${CSS.escape(editionId)}"]`);
+        const cell = row?.querySelector(field === 'sales' ? '.admin-pid-col-sales' : '.admin-pid-col-listings');
+        if (cell) cell.innerHTML = adminPidLastUpdatedFieldMarkup(record, field);
+
+        // Re-fetches last_sales/last_listings (and curio_last_sales/listings)
+        // fresh from the backend rather than hand-patching adminPidDetailHistory
+        // locally — already re-renders the image column + detail panel on
+        // completion, so the badge and its now-disabled clear button update too.
+        await loadAdminPricingDetailHistory();
+    } catch (err) {
+        // No local state changed yet if the request itself failed — safe to
+        // just leave the badge as-is; the admin can retry the click.
+    }
+}
+
 // Starts a product-ID lookup job and polls it to completion, invoking
 // onResult(editionId, {ok, product_id, error}) as each edition finishes.
 async function runProductIdJob(editionIds, onResult) {
@@ -2035,10 +2089,16 @@ function renderAdminPricingImageCol() {
         statsHtml = `
             <div class="drawer-stats admin-pid-scrape-stats">
                 <div class="drawer-stat">
+                    <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Sales date"
+                            ${lastSales === 'Never' ? 'disabled' : ''}
+                            onclick="clearAdminPidLastUpdated('sales')">❌</button>
                     <span class="drawer-stat-label">Last Sales</span>
                     <span class="drawer-stat-value">${escapeHtml(lastSales)}</span>
                 </div>
                 <div class="drawer-stat">
+                    <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Listings date"
+                            ${lastListings === 'Never' ? 'disabled' : ''}
+                            onclick="clearAdminPidLastUpdated('listings')">❌</button>
                     <span class="drawer-stat-label">Last Listings</span>
                     <span class="drawer-stat-value">${escapeHtml(lastListings)}</span>
                 </div>

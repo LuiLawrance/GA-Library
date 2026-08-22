@@ -87,6 +87,20 @@ def set_last_listings(edition_id: str, debug: bool = False) -> None:
     _set_ids_field(edition_id, "last_listings", date.today().isoformat(), debug)
 
 
+def clear_last_sales(edition_id: str, debug: bool = False) -> None:
+    """Resets last_sales back to never-scraped — lets an admin force past the
+    "recently updated" state (e.g. to immediately re-run Refresh Sales)
+    without waiting it out, from the admin console's Last Sales badge."""
+    _set_ids_field(edition_id, "last_sales", None, debug)
+
+
+def clear_last_listings(edition_id: str, debug: bool = False) -> None:
+    """Listings counterpart to clear_last_sales() — also lifts the 7-day
+    listings-refresh gate (_listings_gate_result), since that's keyed off
+    this same field."""
+    _set_ids_field(edition_id, "last_listings", None, debug)
+
+
 def get_product_id(edition_id: str) -> str | None:
     return _get_ids_field(edition_id, "product_id")
 
@@ -159,6 +173,16 @@ def get_foil_last_listings(edition_id: str, foil_id: str) -> str | None:
 
 def set_foil_last_listings(edition_id: str, foil_id: str, debug: bool = False) -> None:
     _set_foil_ids_field(edition_id, foil_id, "last_listings", date.today().isoformat(), debug)
+
+
+def clear_foil_last_sales(edition_id: str, foil_id: str, debug: bool = False) -> None:
+    """Foil-scoped counterpart to clear_last_sales() — e.g. resets a Curio
+    Foil's own separate clock without touching the edition's main one."""
+    _set_foil_ids_field(edition_id, foil_id, "last_sales", None, debug)
+
+
+def clear_foil_last_listings(edition_id: str, foil_id: str, debug: bool = False) -> None:
+    _set_foil_ids_field(edition_id, foil_id, "last_listings", None, debug)
 
 
 def get_foil_product_id(edition_id: str, foil_id: str) -> str | None:
