@@ -116,6 +116,20 @@ async function navigate(path, pushState = true) {
         } else if (typeof loadFeaturedSets === 'function') {
             await loadFeaturedSets();
         }
+
+        // Restore an opened card drawer from the URL (?card_id=&edition_id=)
+        // — e.g. a shared/bookmarked link, or the page being refreshed while
+        // a card was open. Runs after the search restore above on purpose (the
+        // drawer opens on top of restored results) — but that means updateUrl
+        // must stay true here despite already matching the URL: searchCards()
+        // just above does its own pushState carrying only q/set, which wipes
+        // card_id/edition_id from the URL before this ever runs, so they need
+        // to be written back rather than trusted to already be there.
+        const cardId = urlParams.get('card_id');
+        const editionId = urlParams.get('edition_id');
+        if (cardId && editionId && typeof openCardDrawer === 'function') {
+            await openCardDrawer(cardId, editionId, null, true);
+        }
     }
 
     if (pathname === '/inventory') {

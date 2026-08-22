@@ -1121,8 +1121,42 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     }, 150);
 }
 
+// 'card-drawer' (see DRAWER_CONFIG above) is shared across Cards, Prices,
+// Decks, and Admin — but only the Cards page's own bookmarked/shared links
+// should carry an opened card, so every URL sync below is gated on cards.html's
+// own root ("cards-page") actually being present, not just on which drawer id
+// is involved.
+function _onCardsPage() {
+    return !!document.getElementById('cards-page');
+}
+
+// Reflects (or clears) the drawer's open card/edition into the URL as
+// ?card_id=&edition_id=, preserving whatever search params (q/set/etc.) are
+// already there. replaceState rather than pushState: opening a card or
+// switching editions happens casually and often in quick succession, so a
+// new history entry per click would flood the back button — mirrors the same
+// reasoning showPriceGraph's URL sync uses on the Prices page.
+function _syncCardsDrawerUrl(cardId, editionId) {
+    if (!_onCardsPage()) return;
+
+    const params = new URLSearchParams(window.location.search);
+
+    if (cardId && editionId) {
+        params.set('card_id', cardId);
+        params.set('edition_id', editionId);
+    } else {
+        params.delete('card_id');
+        params.delete('edition_id');
+    }
+
+    const query = params.toString();
+    window.history.replaceState({}, '', query ? `/cards?${query}` : '/cards');
+}
+
 // Shared implementation behind openCardDrawer/openInvDrawer — see DRAWER_CONFIG above.
-async function openDrawer(drawerId, cardId, editionId, cardName) {
+// updateUrl is false only when restoring from a URL that already carries this
+// exact selection (see app.js's /cards restore) — no point replacing it with itself.
+async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = true) {
     const cfg = DRAWER_CONFIG[drawerId];
     const drawer = document.getElementById(drawerId);
     if (!drawer) return;
@@ -1144,6 +1178,15 @@ async function openDrawer(drawerId, cardId, editionId, cardName) {
         const res = await fetch(`/api/cards/${cardId}`);
         const data = await res.json();
         const card = data.card;
+
+        // Falls back to the name the API itself already resolves for a
+        // card_id-only lookup (see api_card_detail's comment in app.py) —
+        // lets a caller that only has card_id/edition_id, e.g. restoring a
+        // bookmarked ?card_id= URL, open the drawer without a separate name
+        // lookup of its own.
+        cardName = cardName || card.name;
+
+        if (updateUrl) _syncCardsDrawerUrl(cardId, editionId);
 
         const editions = Object.entries(card.editions).sort((a, b) => {
             const parseNum = str => {
@@ -1374,6 +1417,8 @@ function closeDrawer(drawerId) {
     const drawer = document.getElementById(drawerId);
     if (!drawer) return;
 
+    _syncCardsDrawerUrl(null, null);
+
     drawer.classList.remove('open');
     cfg.setIsOpen(false);
     cfg.setActiveTab('info');
@@ -1396,8 +1441,8 @@ function closeDrawer(drawerId) {
     }, 300);
 }
 
-function openCardDrawer(cardId, editionId, cardName) {
-    return openDrawer('card-drawer', cardId, editionId, cardName);
+function openCardDrawer(cardId, editionId, cardName, updateUrl = true) {
+    return openDrawer('card-drawer', cardId, editionId, cardName, updateUrl);
 }
 
 function closeCardDrawer() {
@@ -1415,6 +1460,8 @@ async function selectDrawerEditionFor(drawerId, editionId) {
     if (currentTile && currentTile.id === `${cfg.tilePrefix}${editionId}`) {
         return;
     }
+
+    _syncCardsDrawerUrl(cfg.getSelectedCardId(), editionId);
 
     const editions = JSON.parse(drawer.dataset.editions || '{}');
     const edition = editions[editionId];
