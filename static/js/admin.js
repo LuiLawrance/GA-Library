@@ -2223,6 +2223,16 @@ function renderAdminPricingDetail() {
 // adminPidDetailFoils is already being fetched regardless of mode (see
 // selectAdminPricingDetail), so this only needs to handle it not having
 // arrived yet.
+// Small "LABEL value" chip used both for the Edition node's own metadata
+// (rarity/dates/illustrator) and each foil leaf's population — falls back to
+// an em dash for a missing value rather than omitting the chip entirely, so
+// the set of fields shown stays consistent from row to row.
+function adminInfoTreeMetaChip(label, value) {
+    return `<span class="admin-pid-id-tree-meta-item">
+        <span class="admin-pid-id-tree-meta-label">${escapeHtml(label)}</span> ${escapeHtml(value || '—')}
+    </span>`;
+}
+
 function renderAdminInfoIdsPanel(panel, record) {
     let foilsHtml;
     if (!adminPidDetailFoils) {
@@ -2230,15 +2240,33 @@ function renderAdminInfoIdsPanel(panel, record) {
     } else if (adminPidDetailFoils.length === 0) {
         foilsHtml = '<li class="admin-pid-id-tree-node"><span class="admin-pid-id-tree-row"><span class="admin-pid-detail-empty-small">No foils found.</span></span></li>';
     } else {
+        // Printing (Nonfoil/Foil/Curio Foil, etc.) is f.kind, already shown as
+        // this leaf's own label — Population is the one additional per-foil
+        // stat (see /api/admin/pricing/{edition_id}/foils in app.py).
         foilsHtml = adminPidDetailFoils.map(f => `
             <li class="admin-pid-id-tree-node">
                 <span class="admin-pid-id-tree-row">
                     <span class="admin-pid-detail-label">${escapeHtml(f.kind)}</span>
                     <span class="admin-pid-detail-id-value">${escapeHtml(f.foil_id)}</span>
+                    ${adminInfoTreeMetaChip('Pop', f.population != null ? String(f.population) : null)}
                 </span>
             </li>
         `).join('');
     }
+
+    // Rarity/dates/illustrator describe the EDITION node itself, not a child
+    // of it — rendered as a sibling block between its own row and its foils
+    // list, indented by that node's own padding (no separate margin needed)
+    // rather than as another branch in the tree.
+    const editionMetaHtml = `
+        <div class="admin-pid-id-tree-meta">
+            ${adminInfoTreeMetaChip('Rarity', record.rarity)}
+            ${adminInfoTreeMetaChip('Released', record.release_date)}
+            ${adminInfoTreeMetaChip('Created', record.created_date)}
+            ${adminInfoTreeMetaChip('Updated', record.last_updated)}
+            ${adminInfoTreeMetaChip('Illustrator', record.illustrator)}
+        </div>
+    `;
 
     panel.innerHTML = `
         <div class="admin-pid-detail-section">
@@ -2257,6 +2285,7 @@ function renderAdminInfoIdsPanel(panel, record) {
                                 <span class="admin-pid-detail-label">Edition</span>
                                 <span class="admin-pid-detail-id-value">${escapeHtml(record.edition_id)}</span>
                             </span>
+                            ${editionMetaHtml}
                             <ul class="admin-pid-id-tree-list">
                                 ${foilsHtml}
                             </ul>
@@ -2264,8 +2293,50 @@ function renderAdminInfoIdsPanel(panel, record) {
                     </ul>
                 </li>
             </ul>
+            <div class="admin-pid-id-tree-footer">
+                <div class="drawer-stat admin-pid-id-tree-synced-stat">
+                    <span class="drawer-stat-label">Last Synced</span>
+                    <span class="drawer-stat-value">${escapeHtml(record.system_updated || 'Never')}</span>
+                </div>
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pid-id-tree-refresh-btn"
+                        onclick="refreshAdminCard('${escapeHtml(record.edition_id)}', this)">Refresh Card</button>
+            </div>
         </div>
     `;
+}
+
+// Bottom-left "Refresh Card" button in the Identifiers panel — forces a full
+// re-fetch of the selected card (POST /api/admin/pricing/{edition_id}/refresh-card,
+// see api_admin_refresh_card in app.py, which calls card_reset in api_ga.py)
+// rather than waiting for UPDATE_THRESHOLD's normal staleness window. On
+// success, refreshes adminPidData (so the Last Synced stat next to this
+// button, the Sets panel counts, etc. all reflect whatever just changed) and
+// re-renders this same card's detail — the edition_id passed in is fixed at
+// the time the button was rendered, so if the admin has since selected a
+// DIFFERENT card, this intentionally does nothing to the (now stale) button
+// click rather than refreshing the wrong card's view.
+async function refreshAdminCard(editionId, btnEl) {
+    if (btnEl.disabled) return;
+
+    const originalText = btnEl.textContent;
+    btnEl.disabled = true;
+    btnEl.textContent = 'Refreshing…';
+
+    try {
+        const res = await fetch(`/api/admin/pricing/${editionId}/refresh-card`, {method: 'POST'});
+        if (!res.ok) throw new Error('Refresh failed');
+
+        await refreshAdminPidData();
+        if (adminPidDetailSelected === editionId) {
+            renderAdminPricingDetailAll();
+        }
+    } catch (err) {
+        btnEl.textContent = 'Refresh failed';
+        btnEl.disabled = false;
+        setTimeout(() => {
+            btnEl.textContent = originalText;
+        }, 2000);
+    }
 }
 
 // Regular/Discord pill — swaps the whole detail panel's content (both Sales

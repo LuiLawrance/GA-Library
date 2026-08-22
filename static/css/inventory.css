@@ -1324,6 +1324,21 @@
     color: var(--text-muted);
 }
 
+.inv-foil-temp-badge {
+    display: inline-block;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.58rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    background: transparent;
+    vertical-align: middle;
+}
+
 .inv-foil-check {
     width: 14px;
     height: 14px;

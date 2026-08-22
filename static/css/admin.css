@@ -194,6 +194,11 @@
    cost. */
 .admin-cards-mode-info .admin-pricing-layout {
     grid-template-columns: var(--admin-pid-info-list-width) 320px minmax(0, 1fr) 420px;
+    /* Neutralizes the base rule's margin-right:-24px (see there) — that
+       compensates for the 4th track's always-reserved gap while it's 0px
+       (Pricing mode); here the track is real (420px) content and that gap
+       is wanted, not a phantom to cancel out. */
+    margin-right: 0;
 }
 
 /* Info mode's reduced row markup (see renderAdminPidHeader/renderAdminPidRows
@@ -227,7 +232,7 @@
 }
 
 /* Mirrors .admin-pricing-layout's exact column widths (1.4fr / fixed 320px /
-   1fr, same 24px gap) so the TCG button (in the list cell) and refresh
+   1fr / 0px, same 24px gap) so the TCG button (in the list cell) and refresh
    buttons (in the detail cell) land flush with the list/detail columns
    below, even though this is a separate row above them. */
 .admin-pid-controls-grid {
@@ -235,10 +240,33 @@
     /* minmax(0, …) instead of a bare fr: without it, each fr track's implicit
        minimum is its cell's min-content width, which differs between this row's
        (mostly empty) cells and .admin-pricing-layout's (list/detail content)
-       cells — silently breaking the column-matching this grid exists for. */
-    grid-template-columns: minmax(0, 1.4fr) 320px minmax(0, 1fr);
+       cells — silently breaking the column-matching this grid exists for.
+       The trailing 0px track has to be here too, even though nothing ever
+       sits in it — .admin-pricing-layout gained a 4th (Info-mode Sets panel)
+       track without this one following, and the resulting mismatched gap
+       count (3 gaps reserved here vs. 4 there) was enough on its own to
+       shift every track after the first one out of alignment. */
+    grid-template-columns: minmax(0, 1.4fr) 320px minmax(0, 1fr) 0px;
     gap: 24px;
     align-items: center;
+    /* The 0px 4th track still costs one real `gap` of space (CSS reserves a
+       gap between every pair of tracks regardless of their size — there's no
+       way to skip just this one boundary), which otherwise shows up as
+       ~24px of unclaimed space past the third track's right edge that has
+       no counterpart on the left. Pulling the whole grid 24px further right
+       via a negative margin — rather than shrinking the fr tracks to fit —
+       cancels that out so the visible content (not just the grid's own box)
+       lines up flush on both sides again. Only correct while the 4th track
+       is actually 0px, i.e. outside Info mode — see the override below. */
+    margin-right: -24px;
+}
+
+.admin-cards-mode-info .admin-pid-controls-grid {
+    /* Moot in practice (.admin-pid-controls fades out entirely in Info
+       mode), but keeps this grid's own box honest if that ever changes —
+       the 4th track is real content width there, not 0px, so the negative
+       margin above no longer corresponds to a phantom gap to cancel out. */
+    margin-right: 0;
 }
 
 .admin-pid-controls-cell-list {
@@ -538,6 +566,12 @@
     gap: 24px;
     min-height: 0;
     overflow: hidden;
+    /* Cancels out the 4th track's always-reserved leading gap while it's
+       0px wide (Pricing mode) — see the matching comment on
+       .admin-pid-controls-grid, which this mirrors exactly. Neutralized by
+       .admin-cards-mode-info .admin-pricing-layout above, where that same
+       track is real (420px) content and the gap in front of it is wanted. */
+    margin-right: -24px;
 }
 
 .admin-pricing-list {
@@ -1497,6 +1531,16 @@
 .admin-pid-id-tree-node {
     position: relative;
     padding: 6px 0 6px 20px;
+    /* Where THIS node's own branch meets its row, measured from the node's
+       own top edge — fixed rather than a 50% split of the node's full height
+       so every node's branch lands at the same consistent spot (roughly its
+       own row's vertical center) regardless of how much is nested below it.
+       A parent node (Edition, with its meta block and a whole foils list
+       under it) is far taller than a leaf (a bare foil row) — 50% would put
+       the parent's branch deep into its children instead of at its own
+       label, which is what made Card → Edition → Foils read as inconsistent
+       branching depending on which level you were looking at. */
+    --admin-pid-id-tree-branch-y: 16px;
 }
 
 .admin-pid-id-tree-node::before {
@@ -1511,14 +1555,14 @@
 /* The last child has nothing below it to connect to — its vertical line
    stops at its own branch instead of trailing past it. */
 .admin-pid-id-tree-node:last-child::before {
-    bottom: 50%;
+    bottom: calc(100% - var(--admin-pid-id-tree-branch-y));
 }
 
 .admin-pid-id-tree-node::after {
     content: '';
     position: absolute;
     left: 0;
-    top: 50%;
+    top: var(--admin-pid-id-tree-branch-y);
     width: 12px;
     border-top: 1px solid var(--border);
 }
@@ -1538,6 +1582,66 @@
     align-items: baseline;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+/* Rarity/dates/illustrator on the Edition node (adminInfoTreeMetaChip in
+   admin.js) — a sibling block under that node's own row, not a tree branch,
+   so no connector lines of its own; relies on .admin-pid-id-tree-node's own
+   padding-left for indentation instead of a separate margin. Population uses
+   the same chip inline within each foil leaf's own row instead. */
+.admin-pid-id-tree-meta {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 2px;
+    column-gap: 12px;
+    margin-top: 2px;
+}
+
+.admin-pid-id-tree-meta-item {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.admin-pid-id-tree-meta-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.75;
+}
+
+/* Sits below .admin-pid-id-tree-list, pinned to the bottom of the
+   Identifiers panel — .admin-pid-detail-section is a flex column and the
+   tree list above this is the only sibling with flex:1 eating leftover
+   space, so this footer naturally lands at the panel's bottom edge without
+   an explicit margin-top:auto. Last Synced stat on the left, styled like the
+   card info window's own Released/Last Updated stats (see .drawer-stat in
+   drawer.css — reused directly here rather than a separate admin-only style)
+   so the two panels read consistently; Refresh Card on the right. */
+.admin-pid-id-tree-footer {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+/* .drawer-stat is normally one of several boxes in a .drawer-stats grid
+   (see admin-pid-scrape-stats) — used standalone here, so it just sizes to
+   its own content as a plain flex child of the footer instead. */
+.admin-pid-id-tree-synced-stat {
+    flex-shrink: 0;
+}
+
+.admin-pid-id-tree-refresh-btn {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    font-size: 0.72rem;
 }
 
 /* Shared by every tree row's own ID — user-select:all so a single click

@@ -1661,10 +1661,13 @@ async function goToFoilStep(cardId, editionId, cardName) {
                 // _curio_foil_id_for_edition / api_admin_pricing_foils in
                 // app.py.
                 const variantPopulation = Object.values(variants).reduce((sum, v) => sum + (v.population || 0), 0);
-                const remainingPopulation = (finfo.population || 0) - variantPopulation;
+                // A null population means the API hasn't reported circulation data yet
+                // (a TEMP_FOIL_ID placeholder edition) — still offer it so the foil stays
+                // selectable, same as _sync_info in pricing_ga.py treats it.
+                const remainingPopulation = finfo.population == null ? null : finfo.population - variantPopulation;
 
-                if (remainingPopulation > 0) {
-                    const opt = buildFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false);
+                if (remainingPopulation === null || remainingPopulation > 0) {
+                    const opt = buildFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false, finfo.population == null);
                     if (!firstOpt) firstOpt = {opt, eid, fid};
                     foilList.appendChild(opt);
                 }
@@ -1683,7 +1686,7 @@ async function goToFoilStep(cardId, editionId, cardName) {
     }
 }
 
-function buildFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant) {
+function buildFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant, isTemp = false) {
     const label = kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
     const opt = document.createElement('div');
     opt.className = 'inv-foil-option';
@@ -1691,7 +1694,7 @@ function buildFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNu
     opt.dataset.foilId = foilId;
     opt.innerHTML = `
         <div class="inv-foil-left">
-            <div class="inv-foil-name">${label}${isVariant ? ' <span style="opacity:0.5;font-size:0.85em">(variant)</span>' : ''}</div>
+            <div class="inv-foil-name">${label}${isVariant ? ' <span style="opacity:0.5;font-size:0.85em">(variant)</span>' : ''}${isTemp ? ' <span class="inv-foil-temp-badge" title="No circulation data reported yet — this printing is a placeholder until the official foil ID is assigned">TEMP</span>' : ''}</div>
             <div class="inv-foil-meta">${setPrefix} · ${rarity} · #${collectorNum || '?'}</div>
         </div>
         <div class="inv-foil-check"></div>`;

@@ -139,10 +139,14 @@ def _build_foil_options(info_data: dict, card_id: str) -> list[tuple[str, str, s
         set_prefix, rarity, collector_number = _edition_display(edition_id, edition_info)
 
         for foil_id, foil_info in edition_info["foils"].items():
+            population = foil_info["population"]
             variant_population = sum(v["population"] for v in foil_info["variants"].values())
-            remaining_population = foil_info["population"] - variant_population
+            remaining_population = None if population is None else population - variant_population
 
-            if remaining_population > 0:
+            # A None population means the API hasn't reported circulation data yet
+            # (a TEMP_FOIL_ID placeholder edition) — still offer it, matching
+            # _sync_info elsewhere in this module.
+            if remaining_population is None or remaining_population > 0:
                 options.append((edition_id, foil_id, set_prefix, rarity, foil_info["kind"].title(), collector_number))
 
             for variant_id, variant_info in foil_info["variants"].items():
@@ -499,10 +503,14 @@ def _sync_info(card_data: dict, debug: bool = False) -> None:
                 added_editions += 1
 
         for foil_id, foil_info in edition_info.get("foils", {}).items():
+            population = foil_info.get("population")
             variant_population = sum(v["population"] for v in foil_info.get("variants", {}).values())
-            remaining_population = foil_info["population"] - variant_population
+            remaining_population = None if population is None else population - variant_population
 
-            if remaining_population > 0:
+            # A None population means the API hasn't reported circulation data yet
+            # (a TEMP_FOIL_ID placeholder edition) — still create the entry so the
+            # foil stays selectable everywhere a real foil_id normally would be.
+            if remaining_population is None or remaining_population > 0:
                 for data in (listings_data, sales_data):
                     if foil_id not in data[card_id][edition_id]:
                         data[card_id][edition_id][foil_id] = []

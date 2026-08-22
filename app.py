@@ -1,6 +1,6 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _group_slug, _sort_collector_number, \
-    _update_slug, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, JSON_THEMA, \
-    set_search, sync_featured_sets, UPDATE_THRESHOLD
+    _update_slug, card_reset, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, \
+    JSON_THEMA, JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
     NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
@@ -1188,6 +1188,13 @@ async def api_admin_pricing_product_ids(request: Request):
     with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
         slugs_data = json.load(f)
 
+    # card_id -> ISO date this app last pulled fresh data for that card from
+    # the Grand Archive API (see _update_update/_check_local in api_ga.py) —
+    # distinct from an edition's own date_update below (that's the API's
+    # metadata about the EDITION itself, not when WE last synced it).
+    with new_json(JSON_UPDATE).open(encoding="utf-8") as f:
+        system_update_data = json.load(f)
+
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
     collector_map = _build_collector_map()
     ids_data = get_all_ids()
@@ -1245,6 +1252,9 @@ async def api_admin_pricing_product_ids(request: Request):
             # renderAdminPricingImageCol in admin.js).
             "release_date": edition_info.get("date_release"),
             "last_updated": edition_info.get("date_update"),
+            "created_date": edition_info.get("date_created"),
+            "illustrator": edition_info.get("illustrator"),
+            "system_updated": system_update_data.get(card_id),
             "curio": curio,
             "curio_only": curio_only,
         })
@@ -1421,6 +1431,42 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
     })
 
 
+# Forces a full re-fetch of the card an edition belongs to (see card_reset in
+# api_ga.py) — bypasses UPDATE_THRESHOLD's normal "don't re-check for 30
+# days" staleness window entirely, deletes its cached images first so stale
+# ones can't linger if the API's own art changed, and re-syncs everything
+# (rarity/dates/illustrator/rules/thema/etc.), not just pricing. Routed by
+# edition_id (matching this file's other per-edition admin endpoints) rather
+# than trusting a client-supplied card name, since card_reset needs one to
+# look up the card by slug.
+@app.post("/api/admin/pricing/{edition_id}/refresh-card")
+async def api_admin_refresh_card(edition_id: str, request: Request):
+    require_admin(request)
+
+    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    card_id = editions_data[edition_id]["card_id"]
+
+    with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
+        slugs_data = json.load(f)
+
+    card_name = next((entry["name"] for entry in slugs_data.values() if entry["card_id"] == card_id), None)
+
+    if not card_name:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    result = card_reset(card_name)
+
+    if not result:
+        raise HTTPException(status_code=502, detail="Card not found on the Grand Archive API.")
+
+    return JSONResponse({"ok": True, "name": result.get("name", card_name)})
+
+
 @app.get("/api/admin/pricing/{edition_id}/foils")
 async def api_admin_pricing_foils(edition_id: str, request: Request):
     require_admin(request)
@@ -1441,11 +1487,21 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
     options = []
 
     for foil_id, foil_info in foils.items():
+        population = foil_info.get("population")
         variant_population = sum(v.get("population", 0) for v in foil_info.get("variants", {}).values())
-        remaining_population = foil_info.get("population", 0) - variant_population
+        remaining_population = None if population is None else population - variant_population
 
-        if remaining_population > 0:
-            options.append({"foil_id": foil_id, "kind": foil_info.get("kind", "").title(), "is_variant": False, "product_id": None})
+        # A None population means the API hasn't reported circulation data yet
+        # (a TEMP_FOIL_ID placeholder edition) — still offer it, matching
+        # _sync_info in pricing_ga.py and the inventory foil picker.
+        if remaining_population is None or remaining_population > 0:
+            options.append({
+                "foil_id": foil_id,
+                "kind": foil_info.get("kind", "").title(),
+                "is_variant": False,
+                "product_id": None,
+                "population": remaining_population,
+            })
 
         for variant_id, variant_info in foil_info.get("variants", {}).items():
             options.append({
@@ -1459,6 +1515,7 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
                 # the real data rather than assuming), not something the
                 # variant has its own independent Nonfoil/Foil split for.
                 "parent_kind": foil_info.get("kind", "").title(),
+                "population": variant_info.get("population", 0),
             })
 
     return JSONResponse({"foils": options})
