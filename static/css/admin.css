@@ -611,15 +611,61 @@
     padding: 14px;
 }
 
-.admin-pricing-sets-title {
+.admin-pricing-sets-header {
     flex-shrink: 0;
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.admin-pricing-sets-title {
     font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--accent);
-    margin-bottom: 10px;
+}
+
+/* Smaller than .admin-pid-refresh-btn's usual padding — this panel is
+   narrower than where that class is normally used, and "Check Featured"
+   sits right next to the section title rather than on its own control row. */
+.admin-pricing-sets-featured-btn {
+    padding: 4px 10px;
+    font-size: 0.72rem;
+}
+
+.admin-pricing-sets-status {
+    flex-shrink: 0;
+    min-height: 1.2em;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.admin-pricing-sets-status-error {
+    color: var(--error);
+}
+
+/* Splits .admin-pricing-sets-list into Featured/Other (see
+   renderAdminInfoSetsPanel) — plain section headers within the same
+   scrolling list rather than two separate boxes. */
+.admin-pricing-sets-group-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 10px 0 4px;
+}
+
+.admin-pricing-sets-group-label:first-child {
+    padding-top: 0;
+}
+
+.admin-pricing-sets-group-label-featured {
+    color: var(--accent);
 }
 
 .admin-pricing-sets-list {

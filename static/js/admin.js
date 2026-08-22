@@ -610,19 +610,58 @@ async function loadAdminPricingIds() {
         adminPidData = data.editions || [];
         adminPidLoaded = true;
         renderAdminPricingIds();
-        renderAdminInfoSetsPanel();
+        loadAdminFeaturedSets();
     } catch (err) {
         summary.textContent = 'Failed to load product IDs.';
     }
 }
 
+// release name -> {sets: [{prefix, slug}, ...]} for whichever releases were
+// last recorded as Featured (see sync_featured_sets in api_ga.py) — empty
+// until loadAdminFeaturedSets resolves, which is fine: renderAdminInfoSetsPanel
+// treats "nothing recorded yet" as "nothing is featured" rather than a
+// loading state, so the Sets panel just shows a plain list until then.
+let adminFeaturedSets = {};
+
+// Flattens adminFeaturedSets (grouped by release) down to just the set of
+// slugs that are featured, regardless of which release each came from —
+// renderAdminInfoSetsPanel only needs membership, not which release.
+function adminFeaturedSlugs() {
+    const slugs = new Set();
+    for (const group of Object.values(adminFeaturedSets)) {
+        for (const s of group.sets || []) {
+            if (s.slug) slugs.add(s.slug);
+        }
+    }
+    return slugs;
+}
+
+// Plain read of whatever was last recorded — not a live check against
+// api.gatcg.com (see checkFeaturedSets for that). Called once when the list
+// loads so the Sets panel can group by Featured/Other from the start.
+async function loadAdminFeaturedSets() {
+    try {
+        const res = await fetch('/api/admin/featured-sets');
+        if (!res.ok) throw new Error('Failed to load featured sets');
+        const data = await res.json();
+        adminFeaturedSets = data.featured || {};
+    } catch (err) {
+        adminFeaturedSets = {};
+    }
+    renderAdminInfoSetsPanel();
+}
+
 // Info mode's fourth panel — how many editions are loaded locally for each
 // set, grouped by set_prefix (matching the same grouping the Set filter
-// dropdown uses — see adminPidSetFilterHtml). Static regardless of
-// selection/search/filters, so this renders once here from the full
-// adminPidData when it loads rather than on every filtered row re-render
-// (renderAdminPidRows runs far more often, e.g. every search keystroke, and
-// would recompute the exact same counts each time for no reason).
+// dropdown uses — see adminPidSetFilterHtml), and split into Featured/Other
+// groups once adminFeaturedSets has anything recorded (see
+// loadAdminFeaturedSets/checkFeaturedSets) — before that, or if nothing's
+// ever been recorded, it's just one plain list with no group labels. Static
+// regardless of selection/search/filters, so the counts render once here
+// from the full adminPidData when it loads rather than on every filtered row
+// re-render (renderAdminPidRows runs far more often, e.g. every search
+// keystroke, and would recompute the exact same counts each time for no
+// reason).
 function renderAdminInfoSetsPanel() {
     const panel = document.getElementById('admin-pricing-sets');
     if (!panel) return;
@@ -640,21 +679,85 @@ function renderAdminInfoSetsPanel() {
 
     const rows = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
 
-    const rowsHtml = rows.map(([prefix, {name, count}]) => `
+    const rowHtml = ([prefix, {name, count}]) => `
         <div class="admin-pricing-sets-row">
             <span class="admin-pricing-sets-name" title="${escapeHtml(name)}">
                 ${escapeHtml(name)} <span class="admin-pricing-sets-prefix">${escapeHtml(prefix)}</span>
             </span>
             <span class="admin-pricing-sets-count">${count}</span>
         </div>
-    `).join('');
+    `;
+
+    const groupHtml = (label, groupRows, featured) => !groupRows.length ? '' : `
+        <div class="admin-pricing-sets-group-label ${featured ? 'admin-pricing-sets-group-label-featured' : ''}">${escapeHtml(label)}</div>
+        ${groupRows.map(rowHtml).join('')}
+    `;
+
+    // Featured slugs use the same scheme _set_slug() (api_ga.py) derives each
+    // set's own DATA_GA/SETS_GA/*.json filename from — lowercased, spaces to
+    // underscores — not the raw prefix these rows are keyed by.
+    const setSlug = prefix => prefix.toLowerCase().replace(/ /g, '_');
+    const featuredSlugs = adminFeaturedSlugs();
+    const featuredRows = rows.filter(([prefix]) => featuredSlugs.has(setSlug(prefix)));
+    const otherRows = rows.filter(([prefix]) => !featuredSlugs.has(setSlug(prefix)));
+
+    // Only actually split into labeled groups once there's a real Featured
+    // set to contrast against — otherwise every row would fall into "Other"
+    // with a group label sitting over what's really just the whole list.
+    const rowsHtml = featuredRows.length
+        ? groupHtml('Featured', featuredRows, true) + groupHtml('Other', otherRows, false)
+        : rows.map(rowHtml).join('');
 
     panel.innerHTML = `
-        <span class="admin-pricing-sets-title">Sets</span>
+        <div class="admin-pricing-sets-header">
+            <span class="admin-pricing-sets-title">Sets</span>
+            <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pricing-sets-featured-btn"
+                    onclick="checkFeaturedSets(this)">Check Featured</button>
+        </div>
+        <div class="admin-pricing-sets-status" id="admin-pricing-sets-status"></div>
         <div class="admin-pricing-sets-list">
             ${rowsHtml || '<div class="admin-pid-detail-empty-small">No cards loaded.</div>'}
         </div>
     `;
+}
+
+// "Check Featured" button in the Sets panel — fetches api.gatcg.com's current
+// Featured Sets list via the backend (sync_featured_sets in api_ga.py) and
+// records which local set prefixes belong to one, then re-renders the panel
+// so the Featured/Other split reflects the fresh check immediately. Manually
+// triggered rather than automatic since Featured Sets change infrequently
+// (new set releases).
+async function checkFeaturedSets(btnEl) {
+    const status = document.getElementById('admin-pricing-sets-status');
+    if (!status) return;
+
+    btnEl.disabled = true;
+    status.classList.remove('admin-pricing-sets-status-error');
+    status.textContent = 'Checking…';
+
+    try {
+        const res = await fetch('/api/admin/featured-sets/refresh', {method: 'POST'});
+        if (!res.ok) throw new Error('Request failed');
+        const data = await res.json();
+
+        adminFeaturedSets = data.featured || {};
+        const releaseCount = Object.keys(adminFeaturedSets).length;
+        const setCount = adminFeaturedSlugs().size;
+
+        // Rebuilds the whole panel (button included, freshly enabled) to
+        // reflect the new grouping — the `status`/`btnEl` references above
+        // are stale after this, so re-select rather than reuse them.
+        renderAdminInfoSetsPanel();
+        const newStatus = document.getElementById('admin-pricing-sets-status');
+        if (newStatus) {
+            newStatus.textContent = `Recorded ${setCount} featured set${setCount === 1 ? '' : 's'} `
+                + `across ${releaseCount} release${releaseCount === 1 ? '' : 's'}.`;
+        }
+    } catch (err) {
+        status.classList.add('admin-pricing-sets-status-error');
+        status.textContent = 'Failed to check featured sets.';
+        btnEl.disabled = false;
+    }
 }
 
 // Rebuilds just the header row (including the Set filter dropdown), without

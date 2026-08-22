@@ -226,6 +226,67 @@ function buildCardTile(card, index, total = 1) {
     return tile;
 }
 
+// ── Featured sets — shown in #card-results before any search is made ──
+let featuredSetsCache = null;
+
+function buildFeaturedSetTile(group, index, total) {
+    const tile = document.createElement('div');
+    tile.className = 'featured-set-tile tile-hoverable';
+
+    const maxDelay = 600;
+    const delay = total <= 1 ? 0 : Math.min(index * 60, Math.round((index / (total - 1)) * maxDelay));
+    tile.style.animationDelay = `${delay}ms`;
+
+    const prefixes = group.prefixes || [];
+
+    tile.innerHTML = `
+        <div class="featured-set-media tile-zoom">
+            ${group.image ? `<img src="${group.image}" alt="${group.group_name}" onerror="this.remove()">` : ''}
+            <div class="featured-set-label">
+                <div class="featured-set-name">${group.group_name}</div>
+                ${prefixes.length ? `<div class="featured-set-prefixes">${prefixes.join(' • ')}</div>` : ''}
+            </div>
+        </div>
+    `;
+    tile.onclick = () => {
+        // Applies every prefix in the release as Sets-dropdown filters and
+        // runs a normal (local-data-only) search, rather than the "$prefix"
+        // full-set fetch — a tile click should just browse what's already
+        // local, not trigger a fresh sync of every card in the set each
+        // time. Matches index.gatcg.com's own featured tiles, which search
+        // every prefix in the release together rather than just one.
+        document.getElementById('card-search').value = '';
+        selectedSets = new Set(prefixes.map(p => p.toUpperCase()));
+        updateSetDropdownLabel();
+        renderSetOptions();
+        searchCards();
+    };
+    tile.addEventListener('animationend', () => tile.classList.add('animated'));
+
+    return tile;
+}
+
+async function loadFeaturedSets() {
+    const results = document.getElementById('card-results');
+    if (!results) return;
+
+    try {
+        if (!featuredSetsCache) {
+            const res = await fetch('/api/sets/featured');
+            const data = await res.json();
+            featuredSetsCache = data.groups || [];
+        }
+
+        results.classList.add('card-grid--featured');
+        results.innerHTML = '';
+        featuredSetsCache.forEach((group, i) => {
+            results.appendChild(buildFeaturedSetTile(group, i, featuredSetsCache.length));
+        });
+    } catch {
+        results.innerHTML = '';
+    }
+}
+
 function cardsSetSearchProgressInnerHTML(done, total, setPrefix, currentCard) {
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     const label = currentCard
@@ -309,7 +370,12 @@ async function _searchCardsImpl() {
     const query = document.getElementById('card-search').value.trim();
     const results = document.getElementById('card-results');
 
-    if (!query && selectedSets.size === 0) return;
+    results.classList.remove('card-grid--featured');
+
+    if (!query && selectedSets.size === 0) {
+        await loadFeaturedSets();
+        return;
+    }
 
     _startCardGridQtyObserver();
 

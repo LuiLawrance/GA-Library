@@ -9,14 +9,18 @@ import re
 import requests
 
 API_CARD = "https://api.gatcg.com/cards/"
+API_FEATURED_SETS = "https://api.gatcg.com/featured-sets"
+API_HOST = "https://api.gatcg.com"
 API_IMAGE = "https://api.gatcg.com/cards/images/"
 API_SET = "https://api.gatcg.com/cards/search"
 
 DIR_SETS = "DATA_GA/SETS_GA"
 DIR_IMAGES = "DATA_GA/IMAGES_GA"
+DIR_SET_IMAGES = "DATA_GA/IMAGES_SETS_GA"
 
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"
 JSON_ERRORS = "DATA_GA/CARDS_GA/ERRORS.json"
+JSON_FEATURED_SETS = "DATA_GA/CARDS_GA/FEATURED_SETS.json"
 JSON_INFO = "DATA_GA/CARDS_GA/INFO.json"
 JSON_RULES = "DATA_GA/CARDS_GA/RULES.json"
 JSON_SLUGS = "DATA_GA/CARDS_GA/SLUGS.json"
@@ -647,6 +651,22 @@ def _update_rule(card_data: dict, debug: bool = False) -> None:
         )
 
 
+# Filename slug for a set prefix's own JSON file under DIR_SETS (e.g. "DOA 1st"
+# -> "doa_1st.json") — shared with sync_featured_sets so its recorded keys line
+# up with these same files without a caller having to re-derive the slug.
+def _set_slug(set_prefix: str) -> str:
+    return set_prefix.lower().replace(" ", "_")
+
+
+# Filename slug for a featured-set release's own banner image (e.g.
+# ".asphodel/paradise" -> "asphodel_paradise") — shared between
+# _set_image_download (which saves DIR_SET_IMAGES/{slug}.png) and
+# GET /api/sets/featured (app.py, which serves it from there), so neither
+# JSON_FEATURED_SETS nor this app has to store the image's path at all.
+def _group_slug(group_name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", group_name.lower()).strip("_")
+
+
 def _update_sets(card_data: dict, debug: bool = False) -> None:
     set_count = 0
 
@@ -655,7 +675,7 @@ def _update_sets(card_data: dict, debug: bool = False) -> None:
         edition_id = edition["uuid"]
         set_prefix = edition["set"]["prefix"]
 
-        set_file_name = set_prefix.lower().replace(" ", "_")
+        set_file_name = _set_slug(set_prefix)
 
         set_file = new_json(
             f"{DIR_SETS}/{set_file_name}.json"
@@ -974,3 +994,111 @@ def set_search(set_prefix: str, debug: bool = False, progress_callback=None) -> 
         )
 
     return results
+
+
+def _set_image_download(group_name: str, image_path: str | None, debug: bool = False) -> None:
+    """Caches one featured-set release's banner locally, mirroring
+    _image_download's cache-and-skip-if-present behavior for card art. Saved
+    as DIR_SET_IMAGES/{_group_slug(group_name)}.png — under the group's own
+    name rather than the API's own filename (e.g. "RDO.png") — since that
+    naming doesn't reliably correspond to any of the group's own prefixes
+    (Dawn of Ashes' banner is "DOA.png" even though no set in that group is
+    prefixed "DOA"). Keying off the group name itself is what lets GET
+    /api/sets/featured (app.py) find the right file without JSON_FEATURED_SETS
+    needing to store the image's path at all — same tradeoff _image_download
+    makes keying card art off edition_id instead of the API's own filename.
+    image_path is relative to API_HOST (e.g. "/featured-sets/images/RDO.png"),
+    exactly as the Featured Sets API returns it — only used to fetch the
+    bytes. Called once per group in sync_featured_sets rather than once per
+    prefix, since every prefix in a group shares the same banner."""
+    if not image_path:
+        return
+
+    image_dir = new_dir(DIR_SET_IMAGES)
+    image_file = image_dir / f"{_group_slug(group_name)}.png"
+
+    if image_file.exists() and image_file.stat().st_size > 0:
+        if debug:
+            print(f"Set image exists: {image_file.name}")
+
+        return
+
+    try:
+        response = requests.get(f"{API_HOST}{image_path}", timeout=10)
+        response.raise_for_status()
+
+        with image_file.open("wb") as f:
+            f.write(response.content)
+
+        if debug:
+            print(f"Downloaded set image: {image_file.name} ({group_name})")
+
+    except requests.exceptions.RequestException as e:
+        _log_error(f"featured-set:{group_name}", e, debug)
+
+        print(
+            f"Set Image Request Error | "
+            f"group={group_name} | "
+            f"{e}"
+        )
+
+
+def sync_featured_sets(debug: bool = False) -> dict:
+    """
+    Fetches the Grand Archive API's Featured Sets list and records which local
+    sets belong to one in JSON_FEATURED_SETS, keyed by release name (e.g.
+    "Radiant Origins") rather than per-prefix — each entry lists every set in
+    that release under "sets", as {"prefix": ..., "slug": ...} pairs. slug is
+    _set_slug(prefix) — the same slug DIR_SETS/_update_sets uses for that
+    set's own JSON filename (e.g. "DOA 1st" -> "doa_1st") — so a caller can go
+    straight from one to DATA_GA/SETS_GA/{slug}.json without re-deriving it.
+
+    Also caches the release's own banner image to DIR_SET_IMAGES via
+    _set_image_download, saved as {_group_slug(group_name)}.png — deliberately
+    NOT recorded in JSON_FEATURED_SETS itself, since GET /api/sets/featured
+    (app.py) can re-derive that same filename from group_name alone, and the
+    API's own image path doesn't reliably correspond to any of the group's own
+    prefixes anyway (see _set_image_download's docstring).
+
+    Used by the Admin Cards Info panel (Featured/Other grouping) and by
+    GET /api/sets/featured (app.py), which now reads this grouped shape
+    directly rather than having to regroup a flat prefix-keyed one itself.
+    """
+    response = requests.get(API_FEATURED_SETS, timeout=10)
+    response.raise_for_status()
+
+    groups = response.json()
+
+    featured = {}
+    for group in groups:
+        group_name = group.get("name")
+
+        if not group_name:
+            continue
+
+        _set_image_download(group_name, group.get("image"), debug)
+
+        sets = []
+        for set_entry in group.get("sets", []):
+            prefix = set_entry.get("prefix")
+
+            if not prefix:
+                continue
+
+            sets.append({"prefix": prefix, "slug": _set_slug(prefix)})
+
+        featured[group_name] = {"sets": sets}
+
+    featured_file = new_json(JSON_FEATURED_SETS)
+
+    with featured_file.open("w", encoding="utf-8") as f:
+        json.dump(featured, f, indent=4)
+
+    if debug:
+        print(
+            f"Synced featured sets: "
+            f"{len(featured)} releases | "
+            f"{sum(len(v['sets']) for v in featured.values())} sets"
+        )
+
+    return featured

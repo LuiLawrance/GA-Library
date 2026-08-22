@@ -1,5 +1,6 @@
-from api_ga import _api_search, _build_collector_map, _format_search, _sort_collector_number, _update_slug, \
-    JSON_EDITIONS, JSON_INFO, JSON_SLUGS, JSON_THEMA, set_search, UPDATE_THRESHOLD
+from api_ga import _api_search, _build_collector_map, _format_search, _group_slug, _sort_collector_number, \
+    _update_slug, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SLUGS, JSON_THEMA, set_search, \
+    sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, \
     get_foil_overrides, get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
@@ -20,6 +21,7 @@ import json
 import os
 import random
 import re
+import requests
 import threading
 import uuid
 
@@ -620,6 +622,39 @@ async def api_sets():
     return JSONResponse({"sets": sets})
 
 
+# Public counterpart to /api/admin/featured-sets — feeds the Cards page's
+# featured-set tiles shown before a search is made (see loadFeaturedSets in
+# cards.js). JSON_FEATURED_SETS is keyed by release name with each one's
+# member sets listed underneath (see sync_featured_sets in api_ga.py), so this
+# just reshapes it into a list — carrying every prefix in the release (not
+# just one), matching index.gatcg.com's own featured tiles, which list and
+# search every prefix in a release together (e.g. "RDO • RDO 1st • RDOA •
+# RDOP • RDOPD") rather than picking one to stand in for the rest.
+#
+# The image URL isn't stored anywhere — it's re-derived from group_name via
+# _group_slug, the same slug _set_image_download (api_ga.py) saves the cached
+# banner under, so JSON_FEATURED_SETS never needs to carry an image path at
+# all. Always points at DATA_GA/IMAGES_SETS_GA (served via /set-images/{name}
+# below), never hotlinked to api.gatcg.com; if a sync hasn't cached that
+# release's banner yet, the route 404s and cards.js's onerror just drops the
+# <img>, same as a missing card image degrades on the tiles below it.
+@app.get("/api/sets/featured")
+async def api_sets_featured():
+    with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
+        featured = json.load(f)
+
+    groups = [
+        {
+            "group_name": group_name,
+            "prefixes": [s["prefix"] for s in group_data.get("sets", []) if s.get("prefix")],
+            "image": f"/set-images/{_group_slug(group_name)}.png",
+        }
+        for group_name, group_data in featured.items()
+    ]
+
+    return JSONResponse({"groups": groups})
+
+
 def _run_set_search_job(job_id: str, set_prefix: str) -> None:
     def on_progress(done, total, card_name):
         with _set_search_jobs_lock:
@@ -1206,6 +1241,36 @@ async def api_admin_pricing_product_ids(request: Request):
     return JSONResponse({"editions": results})
 
 
+# Plain read of whatever was last recorded (see the /refresh endpoint below)
+# — no live call to api.gatcg.com. Used to group the Cards section's Info
+# sub-view's Sets panel by Featured/Other on load, without re-checking the
+# external API every time an admin just opens the page.
+@app.get("/api/admin/featured-sets")
+async def api_admin_featured_sets(request: Request):
+    require_admin(request)
+
+    with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
+        featured = json.load(f)
+
+    return JSONResponse({"featured": featured})
+
+
+# Fetches api.gatcg.com's current Featured Sets list and records which local
+# set prefixes belong to one (see sync_featured_sets in api_ga.py) — a manual
+# admin-triggered check rather than something run automatically, since
+# Featured Sets change infrequently (new set releases).
+@app.post("/api/admin/featured-sets/refresh")
+async def api_admin_featured_sets_refresh(request: Request):
+    require_admin(request)
+
+    try:
+        featured = sync_featured_sets()
+    except requests.exceptions.RequestException:
+        raise HTTPException(status_code=502, detail="Failed to reach the Grand Archive API.")
+
+    return JSONResponse({"featured": featured})
+
+
 @app.post("/api/admin/pricing/product-id")
 async def api_admin_set_product_id(request: Request):
     require_admin(request)
@@ -1546,6 +1611,19 @@ async def api_register(username: str = Form(...), password: str = Form(...)):
 @app.get("/images/{edition_id}.jpg")
 async def get_image(edition_id: str):
     path = f"DATA_GA/IMAGES_GA/{edition_id}.jpg"
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    return FileResponse(path)
+
+
+# Serves a featured-set release banner cached locally by _set_image_download
+# (api_ga.py) — filename is whatever the Featured Sets API itself names it
+# (e.g. "RDO.png"), same as get_image above keys off the edition_id filename.
+@app.get("/set-images/{filename}")
+async def get_set_image(filename: str):
+    path = f"DATA_GA/IMAGES_SETS_GA/{filename}"
 
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")

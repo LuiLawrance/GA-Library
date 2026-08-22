@@ -113,6 +113,8 @@ async function navigate(path, pushState = true) {
             updateSetDropdownLabel();
             renderSetOptions();
             await searchCards();
+        } else if (typeof loadFeaturedSets === 'function') {
+            await loadFeaturedSets();
         }
     }
 
