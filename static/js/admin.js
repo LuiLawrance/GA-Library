@@ -611,6 +611,7 @@ async function loadAdminPricingIds() {
         adminPidLoaded = true;
         renderAdminPricingIds();
         loadAdminFeaturedSets();
+        loadAdminSetSearches();
     } catch (err) {
         summary.textContent = 'Failed to load product IDs.';
     }
@@ -651,6 +652,24 @@ async function loadAdminFeaturedSets() {
     renderAdminInfoSetsPanel();
 }
 
+// set_filter (same slug scheme as _set_slug in api_ga.py) -> ISO date last
+// set-searched (see _set_search_cache in app.py) — which sets have already
+// had "Search Set" (searchAdminSet below) run on them, whether from here or
+// from the Cards page's own "$prefix" search (they share the same job/cache).
+let adminSetSearches = {};
+
+async function loadAdminSetSearches() {
+    try {
+        const res = await fetch('/api/admin/set-searches');
+        if (!res.ok) throw new Error('Failed to load set searches');
+        const data = await res.json();
+        adminSetSearches = data.searches || {};
+    } catch (err) {
+        adminSetSearches = {};
+    }
+    renderAdminInfoSetsPanel();
+}
+
 // Info mode's fourth panel — how many editions are loaded locally for each
 // set, grouped by set_prefix (matching the same grouping the Set filter
 // dropdown uses — see adminPidSetFilterHtml), and split into Featured/Other
@@ -679,24 +698,36 @@ function renderAdminInfoSetsPanel() {
 
     const rows = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
 
-    const rowHtml = ([prefix, {name, count}]) => `
-        <div class="admin-pricing-sets-row">
-            <span class="admin-pricing-sets-name" title="${escapeHtml(name)}">
-                ${escapeHtml(name)} <span class="admin-pricing-sets-prefix">${escapeHtml(prefix)}</span>
-            </span>
-            <span class="admin-pricing-sets-count">${count}</span>
-        </div>
-    `;
+    // Same scheme _set_slug() (api_ga.py) derives each set's own
+    // DATA_GA/SETS_GA/*.json filename from — lowercased, spaces to
+    // underscores — not the raw prefix these rows are keyed by. Shared by
+    // the Featured lookup below and each row's own "already searched" one.
+    const setSlug = prefix => prefix.toLowerCase().replace(/ /g, '_');
+
+    const rowHtml = ([prefix, {name, count}]) => {
+        const slug = setSlug(prefix);
+        const searchedOn = adminSetSearches[slug];
+
+        return `
+            <div class="admin-pricing-sets-row" id="admin-pricing-sets-row-${escapeHtml(slug)}">
+                <span class="admin-pricing-sets-name" title="${escapeHtml(name)}">
+                    ${escapeHtml(name)} <span class="admin-pricing-sets-prefix">${escapeHtml(prefix)}</span>
+                </span>
+                <span class="admin-pricing-sets-row-actions">
+                    <span class="admin-pricing-sets-count">${count}</span>
+                    <button type="button" class="admin-pricing-sets-search-btn ${searchedOn ? 'admin-pricing-sets-search-btn-done' : ''}"
+                            title="${searchedOn ? `Set-searched ${escapeHtml(searchedOn)} — click to search again` : 'Set-search this set (downloads every card in it)'}"
+                            onclick="searchAdminSet('${escapeHtml(prefix)}', this)">${searchedOn ? '✓' : '⤓'}</button>
+                </span>
+            </div>
+        `;
+    };
 
     const groupHtml = (label, groupRows, featured) => !groupRows.length ? '' : `
         <div class="admin-pricing-sets-group-label ${featured ? 'admin-pricing-sets-group-label-featured' : ''}">${escapeHtml(label)}</div>
         ${groupRows.map(rowHtml).join('')}
     `;
 
-    // Featured slugs use the same scheme _set_slug() (api_ga.py) derives each
-    // set's own DATA_GA/SETS_GA/*.json filename from — lowercased, spaces to
-    // underscores — not the raw prefix these rows are keyed by.
-    const setSlug = prefix => prefix.toLowerCase().replace(/ /g, '_');
     const featuredSlugs = adminFeaturedSlugs();
     const featuredRows = rows.filter(([prefix]) => featuredSlugs.has(setSlug(prefix)));
     const otherRows = rows.filter(([prefix]) => !featuredSlugs.has(setSlug(prefix)));
@@ -757,6 +788,92 @@ async function checkFeaturedSets(btnEl) {
         status.classList.add('admin-pricing-sets-status-error');
         status.textContent = 'Failed to check featured sets.';
         btnEl.disabled = false;
+    }
+}
+
+// Per-row "Search Set" button in the Sets panel — starts the SAME background
+// job the Cards page's own "$prefix" search bar starts (POST
+// /api/sets/search/start, see api_sets_search_start in app.py), which runs
+// set_search() (api_ga.py) to download every card in the set. Reuses that
+// endpoint rather than a separate admin-only one, so a set searched from
+// either place counts for both. Polls the button's own text with live
+// progress instead of a separate progress bar, matching this panel's compact
+// per-row scale; the "already searched" state (adminSetSearches, backed by
+// JSON_SET_SEARCHES — see app.py) persists across page loads, unlike a
+// plain in-memory flag would.
+async function searchAdminSet(prefix, btnEl) {
+    if (btnEl.disabled) return;
+
+    btnEl.disabled = true;
+    btnEl.classList.remove('admin-pricing-sets-search-btn-done');
+    btnEl.textContent = '…';
+
+    try {
+        const startRes = await fetch(`/api/sets/search/start?prefix=${encodeURIComponent(prefix)}`, {method: 'POST'});
+        if (!startRes.ok) throw new Error('Failed to start set search');
+        const startData = await startRes.json();
+
+        if (startData.job_id) {
+            await pollAdminSetSearchJob(startData.job_id, btnEl);
+        }
+        // No job_id means api_sets_search_start's own "cached" fast-path —
+        // this set was already searched recently enough (UPDATE_THRESHOLD)
+        // not to need it again, so it's just as "searched" as if a job had
+        // actually run here.
+
+        const slug = prefix.trim().toLowerCase().replace(/ /g, '_');
+        adminSetSearches[slug] = new Date().toISOString().split('T')[0];
+
+        // set_search() may have just downloaded new cards into this set —
+        // refreshAdminPidData() re-fetches adminPidData and re-renders the
+        // Sets panel (and list) so the count next to it updates immediately
+        // instead of only reflecting the change on the next page load. That
+        // re-render rebuilds this row (and btnEl along with it) already
+        // showing the done state, since adminSetSearches was just updated
+        // above — no need to touch btnEl directly here.
+        await refreshAdminPidData();
+    } catch (err) {
+        btnEl.textContent = '⤓';
+        btnEl.title = 'Set search failed — click to retry';
+        btnEl.disabled = false;
+    }
+}
+
+// Silent background refresh of adminPidData (e.g. after searchAdminSet just
+// downloaded new cards) — re-fetches the same data loadAdminPricingIds()
+// does and re-renders the list/Sets panel, but without that function's
+// "Loading…"/table-clearing side effects, since this isn't the page's own
+// initial load. Leaves the previous data in place if the refresh itself
+// fails, rather than clearing what was already showing.
+async function refreshAdminPidData() {
+    try {
+        const res = await fetch('/api/admin/pricing/product-ids');
+        if (!res.ok) throw new Error('Failed to refresh product IDs');
+        const data = await res.json();
+        adminPidData = data.editions || [];
+    } catch (err) {
+        return;
+    }
+    renderAdminPricingIds();
+    renderAdminInfoSetsPanel();
+}
+
+// Polls GET /api/sets/search/status/{job_id} (same endpoint pollSetSearchJob
+// in cards.js polls) until the job finishes, updating btnEl's own text with
+// live done/total progress meanwhile. Throws on an error status so
+// searchAdminSet's catch block handles the button's error state in one place.
+async function pollAdminSetSearchJob(jobId, btnEl) {
+    while (true) {
+        const res = await fetch(`/api/sets/search/status/${encodeURIComponent(jobId)}`);
+        if (!res.ok) return; // job expired/not found — treat as done
+
+        const data = await res.json();
+
+        if (data.status === 'done') return;
+        if (data.status === 'error') throw new Error(data.error || 'Set search failed');
+
+        btnEl.textContent = data.total ? `${data.done}/${data.total}` : '…';
+        await sleep(500);
     }
 }
 

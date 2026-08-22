@@ -1,6 +1,6 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _group_slug, _sort_collector_number, \
-    _update_slug, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SLUGS, JSON_THEMA, set_search, \
-    sync_featured_sets, UPDATE_THRESHOLD
+    _update_slug, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, JSON_THEMA, \
+    set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, \
     get_foil_overrides, get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
@@ -36,7 +36,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/elements", StaticFiles(directory="assets/GA_ELEMENTS"), name="elements")
 app.mount("/marketplaces", StaticFiles(directory="assets/MARKETPLACES"), name="marketplaces")
 
-_set_search_cache = {}
+# Which sets have already been set-searched (see set_search in api_ga.py) and
+# when, keyed by the same slug _set_slug() there derives a set's own
+# DATA_GA/SETS_GA/*.json filename from — set_filter below computes the same
+# transformation inline rather than importing that private helper. Loaded
+# from JSON_SET_SEARCHES once at startup so this survives a server restart
+# (a bare in-memory dict here previously didn't); api_sets_search_start
+# re-persists it on every write, and GET /api/admin/set-searches (further
+# down) exposes it read-only for the Admin Cards Info panel's per-set
+# "already searched" indicator.
+with new_json(JSON_SET_SEARCHES).open(encoding="utf-8") as f:
+    _set_search_cache = json.load(f)
 
 # ── Set search background jobs ──
 # job_id → {status: "running"|"done"|"error", done, total, current_card, error, set_prefix}
@@ -693,6 +703,8 @@ async def api_sets_search_start(prefix: str):
         return JSONResponse({"job_id": None, "cached": True})
 
     _set_search_cache[set_filter] = date.today().isoformat()
+    with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
+        json.dump(_set_search_cache, f, indent=4)
 
     job_id = uuid.uuid4().hex
     with _set_search_jobs_lock:
@@ -1253,6 +1265,18 @@ async def api_admin_featured_sets(request: Request):
         featured = json.load(f)
 
     return JSONResponse({"featured": featured})
+
+
+# Read-only view of _set_search_cache (kept in sync with JSON_SET_SEARCHES —
+# see its own comment near _set_search_cache's definition) — feeds the Admin
+# Cards Info panel's per-set "already searched" indicator. The actual search
+# itself reuses /api/sets/search/start (the same job the Cards page's own
+# "$prefix" search already starts), not a separate admin-only endpoint.
+@app.get("/api/admin/set-searches")
+async def api_admin_set_searches(request: Request):
+    require_admin(request)
+
+    return JSONResponse({"searches": _set_search_cache})
 
 
 # Fetches api.gatcg.com's current Featured Sets list and records which local
