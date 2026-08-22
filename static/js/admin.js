@@ -610,9 +610,51 @@ async function loadAdminPricingIds() {
         adminPidData = data.editions || [];
         adminPidLoaded = true;
         renderAdminPricingIds();
+        renderAdminInfoSetsPanel();
     } catch (err) {
         summary.textContent = 'Failed to load product IDs.';
     }
+}
+
+// Info mode's fourth panel — how many editions are loaded locally for each
+// set, grouped by set_prefix (matching the same grouping the Set filter
+// dropdown uses — see adminPidSetFilterHtml). Static regardless of
+// selection/search/filters, so this renders once here from the full
+// adminPidData when it loads rather than on every filtered row re-render
+// (renderAdminPidRows runs far more often, e.g. every search keystroke, and
+// would recompute the exact same counts each time for no reason).
+function renderAdminInfoSetsPanel() {
+    const panel = document.getElementById('admin-pricing-sets');
+    if (!panel) return;
+
+    const counts = new Map(); // set_prefix -> {name, count}
+    for (const e of adminPidData) {
+        const prefix = e.set_prefix || 'Unknown';
+        const entry = counts.get(prefix);
+        if (entry) {
+            entry.count++;
+        } else {
+            counts.set(prefix, {name: e.set_name || prefix, count: 1});
+        }
+    }
+
+    const rows = [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+    const rowsHtml = rows.map(([prefix, {name, count}]) => `
+        <div class="admin-pricing-sets-row">
+            <span class="admin-pricing-sets-name" title="${escapeHtml(name)}">
+                ${escapeHtml(name)} <span class="admin-pricing-sets-prefix">${escapeHtml(prefix)}</span>
+            </span>
+            <span class="admin-pricing-sets-count">${count}</span>
+        </div>
+    `).join('');
+
+    panel.innerHTML = `
+        <span class="admin-pricing-sets-title">Sets</span>
+        <div class="admin-pricing-sets-list">
+            ${rowsHtml || '<div class="admin-pid-detail-empty-small">No cards loaded.</div>'}
+        </div>
+    `;
 }
 
 // Rebuilds just the header row (including the Set filter dropdown), without

@@ -116,9 +116,8 @@ function buildCollectorHTML(foils) {
 
     function printingBadge(printing) {
         if (printing == null) return '';
-        return printing
-            ? `<span class="collector-badge collector-badge--printing">Printing</span>`
-            : `<span class="collector-badge collector-badge--oop">Out of Print</span>`;
+        const cls = printing ? 'collector-badge--printing' : 'collector-badge--oop';
+        return `<span class="collector-badge ${cls}">Printing</span>`;
     }
 
     function soleFoilBadge() {
@@ -253,9 +252,7 @@ function buildTabThemaPanel(edition) {
 
     const editionStats = [];
     if (edition?.date_created) editionStats.push({label: 'Released', value: formatCollectorDate(edition.date_created)});
-    if (edition?.date_release) editionStats.push({label: 'Set Release', value: formatCollectorDate(edition.date_release)});
     if (illustrator) editionStats.push({label: 'Illustrator', value: illustrator});
-    if (edition?.date_update) editionStats.push({label: 'Last Updated', value: formatCollectorDate(edition.date_update)});
 
     const editionStatsHTML = editionStats.length
         ? `<div class="collector-thema-divider"></div>
@@ -269,16 +266,24 @@ function buildTabThemaPanel(edition) {
            </div>`
         : '';
 
-    const flavorHTML = edition?.flavor
-        ? `<div class="collector-thema-divider"></div><div class="drawer-flavor">${edition.flavor}</div>`
-        : '';
-
     return buildCollectorHTML(foils)
         + `<div class="collector-thema-divider"></div>`
         + `<div class="collector-section-label">Thema</div>`
         + buildThemaHTML(thema)
-        + editionStatsHTML
-        + flavorHTML;
+        + editionStatsHTML;
+}
+
+// Edition-specific (flavor text differs per printing), so unlike the rest of
+// the Info tab this has to be re-rendered on edition switch — see the
+// .drawer-info-flavor lookup in selectDrawerEditionFor. Always renders the
+// wrapper (toggling .hidden) rather than omitting it, so that lookup always
+// has something to find.
+function drawerInfoFlavorHTML(edition) {
+    const hasFlavor = !!edition?.flavor;
+    return `
+        <div class="drawer-info-flavor${hasFlavor ? '' : ' hidden'}">
+            <div class="drawer-flavor">${edition?.flavor || ''}</div>
+        </div>`;
 }
 
 const PRICING_CHART_W = 400;
@@ -1176,6 +1181,8 @@ async function openDrawer(drawerId, cardId, editionId, cardName) {
                             <div class="drawer-section-label">Legality</div>
                             <div class="drawer-legality">${legalityHTML}</div>
                         </div>` : ''}
+
+                        ${drawerInfoFlavorHTML(selectedEdition)}
                     </div>
 
                     <div class="drawer-tab-thema hidden"></div>
@@ -1364,6 +1371,11 @@ async function selectDrawerEditionFor(drawerId, editionId) {
             const setEl = drawer.querySelector('.drawer-set');
             if (setEl) {
                 setEl.innerHTML = drawerSetLineHTML(edition);
+            }
+
+            const flavorEl = cardInfo?.querySelector('.drawer-info-flavor');
+            if (flavorEl) {
+                flavorEl.outerHTML = drawerInfoFlavorHTML(edition);
             }
         }
 

@@ -181,18 +181,19 @@
    window next to it (.admin-pricing-image-col, in the fixed 320px track)
    visibly slide along as a normal side effect of the grid recalculating each
    frame, instead of needing its own separate position animation. The third
-   track (.admin-pricing-detail) keeps real width too, same as Pricing's —
-   Info mode uses it for the card's raw identifiers instead of Sales/Listings
-   (see renderAdminInfoIdsPanel), not nothing. The list's Check/Product
-   ID/Sales/Listings columns still swap to Info's reduced set instantly
-   rather than animating live (see .admin-pid-row-info below) — doing THAT
-   live, on every row at once, would force a full grid layout recalculation
-   on every visible row on every frame with thousands potentially loaded,
-   which is what made an earlier version of this transition glitchy; the
-   outer track above only affects its 3 direct children (list/image/detail),
-   so animating it doesn't have that same cost. */
+   and fourth tracks keep real width too, same as Pricing's third — Info mode
+   uses them for the card's raw identifiers (renderAdminInfoIdsPanel) and a
+   per-set card count breakdown (renderAdminInfoSetsPanel) instead of
+   Sales/Listings, not nothing. The list's Check/Product ID/Sales/Listings
+   columns still swap to Info's reduced set instantly rather than animating
+   live (see .admin-pid-row-info below) — doing THAT live, on every row at
+   once, would force a full grid layout recalculation on every visible row
+   on every frame with thousands potentially loaded, which is what made an
+   earlier version of this transition glitchy; the outer track above only
+   affects its 4 direct children, so animating it doesn't have that same
+   cost. */
 .admin-cards-mode-info .admin-pricing-layout {
-    grid-template-columns: var(--admin-pid-info-list-width) 320px minmax(0, 1fr);
+    grid-template-columns: var(--admin-pid-info-list-width) 320px minmax(0, 1fr) 420px;
 }
 
 /* Info mode's reduced row markup (see renderAdminPidHeader/renderAdminPidRows
@@ -525,10 +526,15 @@
    kept as two separate grid declarations rather than one shared element
    (there's a controls block between them), but identical track definitions
    guarantee their column edges land on the same pixels in every case. */
+/* Fourth track (.admin-pricing-sets) is 0px here — it's Info-only (see
+   .admin-cards-mode-info below), same idea as the third track being 0px in
+   Info mode: kept as a real track (not just display:none-d) so
+   animateGridColumns has a consistent 4-track shape to interpolate between
+   in both directions, rather than the track count itself changing. */
 .admin-pricing-layout {
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) 320px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.4fr) 320px minmax(0, 1fr) 0px;
     gap: 24px;
     min-height: 0;
     overflow: hidden;
@@ -585,6 +591,91 @@
     gap: 16px;
     overflow: hidden;
     padding-left: 4px;
+}
+
+/* Info mode's fourth panel (see renderAdminInfoSetsPanel) — a per-set card
+   count, always the same content regardless of which card (if any) is
+   selected, so unlike .admin-pricing-detail it's rendered once when
+   adminPidData loads rather than per-selection. Its track is 0px outside
+   Info mode (see .admin-cards-mode-info .admin-pricing-layout above) so it
+   just needs to sit here ready to be revealed as that track grows — no fade
+   of its own to worry about. */
+.admin-pricing-sets {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+}
+
+.admin-pricing-sets-title {
+    flex-shrink: 0;
+    display: block;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+}
+
+.admin-pricing-sets-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    /* Reserves the scrollbar's own width as a gutter (same technique
+       prices.css uses) rather than letting it overlay the row content —
+       without this the count column, flush against this list's right edge
+       via .admin-pricing-sets-row's justify-content:space-between, sat
+       directly under the scrollbar thumb whenever one appeared. */
+    scrollbar-gutter: stable;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.admin-pricing-sets-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.admin-pricing-sets-row:last-child {
+    border-bottom: none;
+}
+
+.admin-pricing-sets-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8rem;
+    color: var(--text);
+}
+
+.admin-pricing-sets-prefix {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.admin-pricing-sets-count {
+    flex-shrink: 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text);
+    /* Nudges the count off the list's right edge — separate from (and on
+       top of) scrollbar-gutter's own reserved space on .admin-pricing-sets-list
+       above, which only keeps the scrollbar itself from overlapping this;
+       this is just breathing room so it doesn't sit flush against the
+       boundary either way. */
+    margin-right: 6px;
 }
 
 .admin-pricing-image-col.fade-out,
@@ -649,21 +740,24 @@
 .admin-pid-table-scroll::-webkit-scrollbar,
 .admin-pid-detail-table-scroll::-webkit-scrollbar,
 .admin-user-table-scroll::-webkit-scrollbar,
-.admin-user-tile-grid::-webkit-scrollbar {
+.admin-user-tile-grid::-webkit-scrollbar,
+.admin-pricing-sets-list::-webkit-scrollbar {
     width: 8px;
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar-track,
 .admin-pid-detail-table-scroll::-webkit-scrollbar-track,
 .admin-user-table-scroll::-webkit-scrollbar-track,
-.admin-user-tile-grid::-webkit-scrollbar-track {
+.admin-user-tile-grid::-webkit-scrollbar-track,
+.admin-pricing-sets-list::-webkit-scrollbar-track {
     background: var(--bg);
 }
 
 .admin-pid-table-scroll::-webkit-scrollbar-thumb,
 .admin-pid-detail-table-scroll::-webkit-scrollbar-thumb,
 .admin-user-table-scroll::-webkit-scrollbar-thumb,
-.admin-user-tile-grid::-webkit-scrollbar-thumb {
+.admin-user-tile-grid::-webkit-scrollbar-thumb,
+.admin-pricing-sets-list::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 8px;
 }
@@ -671,7 +765,8 @@
 .admin-pid-table-scroll::-webkit-scrollbar-thumb:hover,
 .admin-pid-detail-table-scroll::-webkit-scrollbar-thumb:hover,
 .admin-user-table-scroll::-webkit-scrollbar-thumb:hover,
-.admin-user-tile-grid::-webkit-scrollbar-thumb:hover {
+.admin-user-tile-grid::-webkit-scrollbar-thumb:hover,
+.admin-pricing-sets-list::-webkit-scrollbar-thumb:hover {
     background: var(--border-focus);
 }
 
