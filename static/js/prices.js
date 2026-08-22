@@ -307,6 +307,13 @@ async function showPriceGraph(cardId, editionId, foilId, cardName, updateUrl = t
             const {width, height} = measureRestingGraphSize(canvasEl);
             body.innerHTML = buildPricingComboChart(sales, listings, Infinity, width, height);
         }
+
+        // A card with enough history renders wider than the panel and scrolls
+        // (see PRICING_CHART_MIN_POINT_SPACING in drawer.js) — default that
+        // scroll to its right edge so the most recent data, not the oldest,
+        // is what's in view without the user having to scroll first.
+        const scrollEl = body.querySelector('.pricing-chart-scroll');
+        if (scrollEl) scrollEl.scrollLeft = scrollEl.scrollWidth;
     } catch {
         body.innerHTML = `<div class="prices-graph-empty"><span class="inv-empty-icon">⚠️</span><p>Failed to load price history.</p></div>`;
     }

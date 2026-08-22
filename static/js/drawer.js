@@ -302,6 +302,33 @@ const PRICING_CHART_X_INSET = 16;
 // history stays available from the Prices page's watchlist.
 const PRICING_CHART_MAX_POINTS = 5;
 
+// A card with only a handful of data points never gets cramped no matter how
+// wide a date range they're spread across — a sparse trickle of sales over two
+// years still reads fine plotted across one fixed-width panel. Below this many
+// distinct dates, the Prices page's full-history chart (the useLegendMenu
+// chart, which unlike the drawer's never truncates via maxPoints) always
+// renders at the panel's own width. At or above it, buildPricingComboChart
+// switches to the windowed/scrolling layout governed by
+// PRICING_CHART_MAX_VISIBLE_DAYS below.
+const PRICING_CHART_SCROLL_POINT_THRESHOLD = 15;
+
+// Once a chart has enough points to use the windowed layout (see
+// PRICING_CHART_SCROLL_POINT_THRESHOLD), it shows at most this many days of
+// history at the panel's resting width before widening and scrolling — a card
+// with, say, a year of dense price history would otherwise cram 4x this many
+// days into one fixed-width panel, squeezing every point together instead of
+// leaving them readable. Below this span, points still just fill the panel
+// at its normal width — the window only kicks in once there's actually more
+// than this much history to show.
+const PRICING_CHART_MAX_VISIBLE_DAYS = 91; // ~3 months
+
+// Vertical space reserved at the bottom of the chart when it's in scrolling
+// mode, matching .pricing-chart-scroll's styled scrollbar height (8px) plus a
+// couple px of breathing room — see the `h` calculation in
+// buildPricingComboChart for why this has to come off the chart's own height
+// rather than just being extra panel space.
+const PRICING_CHART_SCROLLBAR_GUTTER = 15;
+
 // Best-to-worst condition order, matching CONDITION_MAP in api_tcgplayer.py —
 // used both to sort each chart's legend/lines and to rank how much a line's
 // color is lightened (Near Mint stays full-strength, worse grades fade out).
@@ -604,21 +631,53 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
             : legendHTML + `<div class="pricing-empty">No pricing data available.</div>`;
     }
 
+    const times = all.map(e => new Date(e.date).getTime());
+    const minTime = Math.min(...times);
+    const maxTime = Math.max(...times);
+    const timeSpan = (maxTime - minTime) || 1;
+
+    // Only the Prices page's full-history chart (useLegendMenu, maxPoints=
+    // Infinity) can ever have enough history to trip this — the drawer's own
+    // chart caps each series to PRICING_CHART_MAX_POINTS and always comfortably
+    // fits its fixed 400px width. Both gates have to clear: a card sparse
+    // enough to stay under the point threshold is left at full width even if
+    // its handful of sales span years, and a card with plenty of points but
+    // packed into a short window is left at full width too since it isn't
+    // actually short on room. Only once a card has both enough points *and*
+    // enough history to need it does the chart widen — just enough to keep
+    // the same "N days per panel-width" density for the extra time beyond
+    // PRICING_CHART_MAX_VISIBLE_DAYS it's covering — and let the panel (see
+    // the useLegendMenu return below) scroll horizontally over that width.
+    // Determined ahead of h/pad below since reserving the scrollbar gutter
+    // (see PRICING_CHART_SCROLLBAR_GUTTER) depends on already knowing this.
+    const uniqueDateCount = new Set(all.map(e => e.date)).size;
+    const spanDays = timeSpan / 86400000;
+    const needsScroll = useLegendMenu
+        && uniqueDateCount >= PRICING_CHART_SCROLL_POINT_THRESHOLD
+        && spanDays > PRICING_CHART_MAX_VISIBLE_DAYS;
+
     // When the caller supplies its own measured pixel size (the Prices page's
     // graph panel), the viewBox matches it exactly — 1 viewBox unit = 1
     // rendered pixel — so the chart fills the panel without preserveAspectRatio
     // non-uniformly stretching a fixed box and distorting dots/text. The
     // drawer's own charts don't pass these and keep the fixed 400×140 sizing.
-    const w = Number.isFinite(widthPx) ? widthPx : PRICING_CHART_W;
-    const h = Number.isFinite(heightPx) ? heightPx : PRICING_CHART_H;
+    const viewportW = Number.isFinite(widthPx) ? widthPx : PRICING_CHART_W;
+    const viewportH = Number.isFinite(heightPx) ? heightPx : PRICING_CHART_H;
+    // The horizontal scrollbar (see .pricing-chart-scroll in prices.css) sits
+    // along the bottom edge of the panel regardless of the chart's own height,
+    // so without this the chart's bottom-most content — the date/month axis
+    // labels — would render right underneath it. Shrinking the chart itself
+    // leaves that strip blank instead, with nothing there for the scrollbar to
+    // cover.
+    const h = needsScroll ? viewportH - PRICING_CHART_SCROLLBAR_GUTTER : viewportH;
     const pad = PRICING_CHART_PAD;
-    const plotW = w - pad.left - pad.right;
+    const viewportPlotW = viewportW - pad.left - pad.right;
     const plotH = h - pad.top - pad.bottom;
 
-    const times = all.map(e => new Date(e.date).getTime());
-    const minTime = Math.min(...times);
-    const maxTime = Math.max(...times);
-    const timeSpan = (maxTime - minTime) || 1;
+    const plotW = needsScroll
+        ? viewportPlotW * (spanDays / PRICING_CHART_MAX_VISIBLE_DAYS)
+        : viewportPlotW;
+    const w = needsScroll ? plotW + pad.left + pad.right : viewportW;
 
     const prices = all.map(e => e.price);
     const rawMin = Math.min(...prices);
@@ -785,8 +844,12 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
 
     // Explicit pixel width/height (not the default width:100%/height:auto CSS)
     // so the rendered box matches the viewBox exactly instead of deriving
-    // height from width via the fixed aspect ratio.
-    const svgStyle = (Number.isFinite(widthPx) || Number.isFinite(heightPx)) ? ` style="width:${w}px;height:${h}px"` : '';
+    // height from width via the fixed aspect ratio. Also needed in scroll mode
+    // even on a first, unmeasured pass (see needsScroll above) — w is wider
+    // than the panel there too, and without an explicit style CSS would just
+    // shrink the svg back down to its container instead of letting it overflow
+    // into the scrollable wrapper.
+    const svgStyle = (Number.isFinite(widthPx) || Number.isFinite(heightPx) || needsScroll) ? ` style="width:${w}px;height:${h}px"` : '';
 
     const svgHTML = `
         <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${svgStyle}>
@@ -799,9 +862,15 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
         </svg>`;
 
     if (useLegendMenu) {
+        // Wrapping in a scrollable div only when actually needed (rather than
+        // always) keeps the plain case identical to before — no extra element,
+        // no risk of an unwanted scrollbar from a rounding edge case.
+        const canvasInner = needsScroll
+            ? `<div class="pricing-chart-scroll">${svgHTML}</div>`
+            : svgHTML;
         return `
             <div class="pricing-chart-row">
-                <div class="pricing-chart-canvas">${svgHTML}</div>
+                <div class="pricing-chart-canvas">${canvasInner}</div>
                 ${legendMenuHTML}
             </div>`;
     }

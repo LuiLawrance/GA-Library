@@ -309,6 +309,36 @@
     min-height: 0;
 }
 
+/* Only present when buildPricingComboChart (drawer.js) widens the chart past
+   the panel's own width to keep points from crowding together — the SVG
+   inside is sized explicitly wider than this wrapper, which clips it down to
+   the panel and lets the excess be reached by scrolling. showPriceGraph
+   (prices.js) scrolls this to its right edge right after render, so the most
+   recent data is what's in view by default. */
+.pricing-chart-scroll {
+    width: 100%;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.pricing-chart-scroll::-webkit-scrollbar {
+    height: 8px;
+}
+
+.pricing-chart-scroll::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+.pricing-chart-scroll::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+
+.pricing-chart-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
 /* Static — never scrolls, even if there are more toggles than fit. Avoids
    a scrollbar ever needing to appear/disappear as the graph panel resizes
    (see .prices-content's grid-template-rows) while the search panel is in
