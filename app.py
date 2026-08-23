@@ -11,8 +11,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id, add_manual_entry, delete_entry, \
-    find_product_ids_by_editions, import_pasted_sales_tcg_by_edition, scrape_batch_tcg_by_editions, \
-    scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
+    find_product_ids_by_editions, import_listings, import_pasted_sales_tcg_by_edition, import_sales, \
+    scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, \
+    scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from user import JSON_USERS, RANK_ORDER, user_create, user_delete, user_login
 from util_file import new_json
@@ -1386,6 +1387,36 @@ async def api_admin_pricing_import_ids(request: Request):
         raise HTTPException(status_code=400, detail="data must be a JSON object shaped like ID_TCGPLAYER.json")
 
     result = import_ids(import_data)
+
+    return JSONResponse(result)
+
+
+@app.post("/api/admin/pricing/import-sales")
+async def api_admin_pricing_import_sales_json(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    import_data = body.get("data")
+
+    if not isinstance(import_data, dict):
+        raise HTTPException(status_code=400, detail="data must be a JSON object shaped like SALES.json")
+
+    result = import_sales(import_data)
+
+    return JSONResponse(result)
+
+
+@app.post("/api/admin/pricing/import-listings")
+async def api_admin_pricing_import_listings_json(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    import_data = body.get("data")
+
+    if not isinstance(import_data, dict):
+        raise HTTPException(status_code=400, detail="data must be a JSON object shaped like LISTINGS.json")
+
+    result = import_listings(import_data)
 
     return JSONResponse(result)
 

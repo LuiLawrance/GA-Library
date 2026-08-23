@@ -86,6 +86,86 @@ def _append_entry(file_path: str, edition_id: str, foil_id: str, entry: dict) ->
     return card_id
 
 
+def _entry_key(entry: dict) -> tuple:
+    return (entry.get("date"), entry.get("marketplace"), entry.get("price"), entry.get("quantity"), entry.get("condition"))
+
+
+def _import_price_records(file_path: str, import_data: dict) -> dict:
+    """Backfills SALES.json/LISTINGS.json from a JSON blob shaped exactly
+    like the file itself (card_id -> edition_id -> foil_id -> [entries]) —
+    the admin console's Import Sales/Import Listings buttons, for
+    re-merging a prior export (e.g. after a local hard reset) back in.
+
+    An entry is added only if no EXACT match (same date, marketplace,
+    price, quantity, condition) already exists for that card/edition/foil —
+    so re-running the same import twice never creates duplicates, while two
+    genuinely distinct sales/listings that happen to share a date (a normal,
+    valid occurrence — see any card with more than one sale in a day) both
+    come through untouched. Deliberately not scoped to known
+    cards/editions/foils, matching import_ids()'s own reasoning: this only
+    needs to guarantee no duplicates, not that every key already exists
+    elsewhere, so a foil_id (or edition/card) missing from the current data
+    entirely still gets its own fresh entry here rather than being skipped.
+
+    Unlike the scrape/paste path's _store_sales_tcg/_store_listings_tcg,
+    this doesn't gate on "already have a sale from today" or do any
+    foil_kind lookup — import_data is already in stored form, one row per
+    real entry, keyed directly by foil_id, not raw scraped rows that still
+    need attributing to one."""
+    target_file = new_json(file_path)
+
+    with target_file.open("r", encoding="utf-8") as f:
+        current = json.load(f)
+
+    added = 0
+
+    for card_id, editions in import_data.items():
+        if not isinstance(editions, dict):
+            continue
+
+        for edition_id, foils in editions.items():
+            if not isinstance(foils, dict):
+                continue
+
+            for foil_id, entries in foils.items():
+                if not isinstance(entries, list):
+                    continue
+
+                existing = current.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, [])
+                existing_keys = {_entry_key(e) for e in existing if isinstance(e, dict)}
+
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+
+                    key = _entry_key(entry)
+                    if key in existing_keys:
+                        continue
+
+                    existing.append({
+                        "date": entry.get("date"),
+                        "marketplace": entry.get("marketplace"),
+                        "price": entry.get("price"),
+                        "quantity": entry.get("quantity"),
+                        "condition": entry.get("condition"),
+                    })
+                    existing_keys.add(key)
+                    added += 1
+
+    with target_file.open("w", encoding="utf-8") as f:
+        json.dump(current, f, indent=4, ensure_ascii=False)
+
+    return {"added": added}
+
+
+def import_sales(import_data: dict) -> dict:
+    return _import_price_records(JSON_SALES, import_data)
+
+
+def import_listings(import_data: dict) -> dict:
+    return _import_price_records(JSON_LISTINGS, import_data)
+
+
 def delete_entry(edition_id: str, foil_id: str, entry_type: str, index: int) -> dict:
     """Removes a single sale/listing record by its position within its own
     foil's list — the position an admin sees it at in the flattened, sorted

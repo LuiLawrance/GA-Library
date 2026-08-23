@@ -1037,7 +1037,7 @@
 
 .admin-pid-row {
     display: grid;
-    grid-template-columns: 28px 2fr 0.6fr 0.8fr 130px 70px 70px;
+    grid-template-columns: 28px 2fr 0.6fr 0.8fr 130px 100px 100px;
     align-items: center;
     gap: 16px;
     padding: 10px 16px;
@@ -1100,16 +1100,22 @@
    overflow:hidden truncation below would otherwise clip the dropdown menus. */
 .admin-pid-row-header .admin-pid-col-rarity,
 .admin-pid-row-header .admin-pid-col-set,
-.admin-pid-row-header .admin-pid-col-status {
+.admin-pid-row-header .admin-pid-col-status,
+.admin-pid-row-header .admin-pid-col-sales,
+.admin-pid-row-header .admin-pid-col-listings {
     overflow: visible;
 }
 
-/* Lays out the curio select-all checkbox (see its own comment further up —
-   it's actually positioned outside this cell, to its left), the "Product
-   ID" label, and the Import Product IDs button side by side, with the
-   import button pushed to this cell's right edge — landing directly above
-   where each row's own 🔍 auto-detect button sits below it. */
-.admin-pid-row-header .admin-pid-col-status {
+/* Lays out each header label (Product ID / Sales / Listings — plus, for
+   Product ID, the curio select-all checkbox, actually positioned outside
+   this cell to its left, see its own comment further up) alongside that
+   column's own Import-from-JSON button, pushed to the cell's right edge —
+   landing directly above whatever each row shows in that same column below
+   (the 🔍 auto-detect button for Product ID, the day-count badges for
+   Sales/Listings). */
+.admin-pid-row-header .admin-pid-col-status,
+.admin-pid-row-header .admin-pid-col-sales,
+.admin-pid-row-header .admin-pid-col-listings {
     display: flex;
     align-items: center;
     justify-content: space-between;

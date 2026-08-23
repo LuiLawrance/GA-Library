@@ -888,6 +888,31 @@ async function pollAdminSetSearchJob(jobId, btnEl) {
     }
 }
 
+// Renders one Import-from-JSON button + popover for the row list header
+// (see renderAdminPidHeader) — idPrefix must be unique per instance and is
+// what ties the button/menu/textarea/status/submit-button together (see
+// toggleAdminPidImportPopover/submitAdminPidImport, which read/write these
+// same ids). submitFnName is the (unquoted) name of the onclick handler to
+// call on Import, e.g. 'submitAdminPidImportIds'.
+function adminPidImportPopoverHtml(idPrefix, title, hint, placeholder, submitFnName) {
+    return `
+        <div class="admin-pid-import-wrap">
+            <button type="button" class="admin-pid-import-btn" id="${idPrefix}-btn"
+                    onclick="event.stopPropagation(); toggleAdminPidImportPopover('${idPrefix}')" title="${escapeHtml(title)}">📥</button>
+            <div class="admin-pid-add-entry-menu admin-pid-import-menu hidden" id="${idPrefix}-menu" onclick="event.stopPropagation()">
+                <span class="admin-pid-import-hint">${escapeHtml(hint)}</span>
+                <textarea class="admin-pid-import-textarea" id="${idPrefix}-textarea"
+                          placeholder='${placeholder}'></textarea>
+                <div class="admin-pid-import-actions">
+                    <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                            id="${idPrefix}-submit-btn" onclick="${submitFnName}()">Import</button>
+                    <span class="admin-pid-import-status" id="${idPrefix}-status"></span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 // Rebuilds just the header row (including the Set filter dropdown), without
 // touching the data rows below it — opening/closing the dropdown doesn't
 // change which rows are visible, so re-rendering all of them on every click
@@ -923,17 +948,22 @@ function renderAdminPidHeader() {
     const selectAllChecked = prevSelectAll ? prevSelectAll.checked : false;
     const selectAllIndeterminate = prevSelectAll ? prevSelectAll.indeterminate : false;
 
-    // Same idea for the Import Product IDs popover — an admin mid-paste
-    // shouldn't lose that text (or have the popover silently snap shut) just
-    // because something else (e.g. a background refresh job finishing)
-    // happened to trigger a header rebuild.
-    const prevImportMenu = document.getElementById('admin-pid-import-menu');
-    const importMenuOpen = prevImportMenu ? !prevImportMenu.classList.contains('hidden') : false;
-    const prevImportTextarea = document.getElementById('admin-pid-import-textarea');
-    const importTextareaValue = prevImportTextarea ? prevImportTextarea.value : '';
-    const prevImportStatus = document.getElementById('admin-pid-import-status');
-    const importStatusHtml = prevImportStatus ? prevImportStatus.innerHTML : '';
-    const importStatusClass = prevImportStatus ? prevImportStatus.className : '';
+    // Same idea for the three Import popovers (Product IDs, Sales,
+    // Listings) — an admin mid-paste shouldn't lose that text (or have the
+    // popover silently snap shut) just because something else (e.g. a
+    // background refresh job finishing) happened to trigger a header
+    // rebuild.
+    const importPopoverState = ['admin-pid-import-ids', 'admin-pid-import-sales', 'admin-pid-import-listings'].map(prefix => {
+        const menu = document.getElementById(`${prefix}-menu`);
+        const status = document.getElementById(`${prefix}-status`);
+        return {
+            prefix,
+            open: menu ? !menu.classList.contains('hidden') : false,
+            textareaValue: document.getElementById(`${prefix}-textarea`)?.value || '',
+            statusHtml: status ? status.innerHTML : '',
+            statusClass: status ? status.className : '',
+        };
+    });
 
     header.innerHTML = infoMode ? `
         <div class="admin-pid-row admin-pid-row-header admin-pid-row-info">
@@ -953,25 +983,24 @@ function renderAdminPidHeader() {
                 <input type="checkbox" class="admin-pid-curio-select-all" id="admin-pid-curio-select-all"
                        title="Toggle Curio Foil view for every visible card" onchange="toggleAllAdminPidCurioView(this)">
                 Product ID
-                <div class="admin-pid-import-wrap">
-                    <button type="button" class="admin-pid-import-btn" id="admin-pid-import-btn"
-                            onclick="event.stopPropagation(); toggleAdminPidImportIds()" title="Import Product IDs from JSON">📥</button>
-                    <div class="admin-pid-add-entry-menu admin-pid-import-menu hidden" id="admin-pid-import-menu" onclick="event.stopPropagation()">
-                        <span class="admin-pid-import-hint">
-                            Paste ID_TCGPLAYER.json-formatted JSON — only fills in missing product IDs, never overwrites existing ones.
-                        </span>
-                        <textarea class="admin-pid-import-textarea" id="admin-pid-import-textarea"
-                                  placeholder='{"edition_id": {"product_id": "123456"}}'></textarea>
-                        <div class="admin-pid-import-actions">
-                            <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
-                                    id="admin-pid-import-submit-btn" onclick="submitAdminPidImportIds()">Import</button>
-                            <span class="admin-pid-import-status" id="admin-pid-import-status"></span>
-                        </div>
-                    </div>
-                </div>
+                ${adminPidImportPopoverHtml('admin-pid-import-ids', 'Import Product IDs from JSON',
+                    'Paste ID_TCGPLAYER.json-formatted JSON — only fills in missing product IDs, never overwrites existing ones.',
+                    '{"edition_id": {"product_id": "123456"}}', 'submitAdminPidImportIds')}
             </span>
-            <span class="admin-pid-col-sales">Sales</span>
-            <span class="admin-pid-col-listings">Listings</span>
+            <span class="admin-pid-col-sales">
+                Sales
+                ${adminPidImportPopoverHtml('admin-pid-import-sales', 'Import Sales from JSON',
+                    'Paste SALES.json-formatted JSON — only adds entries not already stored, so re-importing never creates duplicates.',
+                    '{"card_id": {"edition_id": {"foil_id": [{"date": "...", "marketplace": "...", "price": 0, "quantity": 1, "condition": "..."}]}}}',
+                    'submitAdminPidImportSales')}
+            </span>
+            <span class="admin-pid-col-listings">
+                Listings
+                ${adminPidImportPopoverHtml('admin-pid-import-listings', 'Import Listings from JSON',
+                    'Paste LISTINGS.json-formatted JSON — only adds entries not already stored, so re-importing never creates duplicates.',
+                    '{"card_id": {"edition_id": {"foil_id": [{"date": "...", "marketplace": "...", "price": 0, "quantity": 1, "condition": "..."}]}}}',
+                    'submitAdminPidImportListings')}
+            </span>
         </div>
     `;
 
@@ -987,18 +1016,20 @@ function renderAdminPidHeader() {
         newSelectAll.indeterminate = selectAllIndeterminate;
     }
 
-    const newImportMenu = document.getElementById('admin-pid-import-menu');
-    if (newImportMenu) {
-        newImportMenu.classList.toggle('hidden', !importMenuOpen);
-        document.getElementById('admin-pid-import-btn')?.classList.toggle('open', importMenuOpen);
-    }
-    const newImportTextarea = document.getElementById('admin-pid-import-textarea');
-    if (newImportTextarea) newImportTextarea.value = importTextareaValue;
-    const newImportStatus = document.getElementById('admin-pid-import-status');
-    if (newImportStatus) {
-        newImportStatus.innerHTML = importStatusHtml;
-        newImportStatus.className = importStatusClass;
-    }
+    importPopoverState.forEach(({prefix, open, textareaValue, statusHtml, statusClass}) => {
+        const menu = document.getElementById(`${prefix}-menu`);
+        if (menu) {
+            menu.classList.toggle('hidden', !open);
+            document.getElementById(`${prefix}-btn`)?.classList.toggle('open', open);
+        }
+        const textarea = document.getElementById(`${prefix}-textarea`);
+        if (textarea) textarea.value = textareaValue;
+        const status = document.getElementById(`${prefix}-status`);
+        if (status) {
+            status.innerHTML = statusHtml;
+            status.className = statusClass;
+        }
+    });
 
     updateAdminPidCurioSelectAllState();
 }
@@ -1603,17 +1634,15 @@ function updateAdminPidTcgButton() {
     if (btn) btn.disabled = !adminPidDetailSelected;
 }
 
-// Import Product IDs button — lives in the row list's own header, right
-// above where each row's own 🔍 auto-detect button sits in the Product ID
-// column, since that's the same column this bulk-fills. Backfills
-// ID_TCGPLAYER.json from a pasted JSON blob (see import_ids() in
-// api_tcgplayer.py for the actual merge rules: only fills in missing
-// product IDs, never overwrites an existing one, never imports
-// last_sales/last_listings). Meant for reloading product IDs after a local
-// hard reset wipes this file.
-function toggleAdminPidImportIds() {
-    const btn = document.getElementById('admin-pid-import-btn');
-    const menu = document.getElementById('admin-pid-import-menu');
+// Import [Product IDs/Sales/Listings] buttons — each lives in the row
+// list's own header, right above the column it bulk-fills (Product ID,
+// Sales, Listings respectively — see renderAdminPidHeader and
+// adminPidImportPopoverHtml). idPrefix identifies which one, matching the
+// `${idPrefix}-btn`/`-menu`/`-textarea`/`-status`/`-submit-btn` ids
+// adminPidImportPopoverHtml() renders.
+function toggleAdminPidImportPopover(idPrefix) {
+    const btn = document.getElementById(`${idPrefix}-btn`);
+    const menu = document.getElementById(`${idPrefix}-menu`);
     if (!btn || !menu) return;
 
     const opening = menu.classList.contains('hidden');
@@ -1621,19 +1650,31 @@ function toggleAdminPidImportIds() {
     btn.classList.toggle('open', opening);
 }
 
-function closeAdminPidImportIds() {
-    const btn = document.getElementById('admin-pid-import-btn');
-    const menu = document.getElementById('admin-pid-import-menu');
-    if (!menu || menu.classList.contains('hidden')) return;
+// Closes every OTHER open import popover than the one e.target is inside —
+// called from the page's global outside-click handler. Structural
+// (.admin-pid-import-wrap/-menu/-btn) rather than a fixed list of id
+// prefixes, so a future 4th import button doesn't need this touched too.
+function closeAdminPidImportPopoversOutside(target) {
+    document.querySelectorAll('.admin-pid-import-wrap').forEach(wrap => {
+        if (wrap.contains(target)) return;
 
-    menu.classList.add('hidden');
-    btn?.classList.remove('open');
+        const menu = wrap.querySelector('.admin-pid-import-menu');
+        const btn = wrap.querySelector('.admin-pid-import-btn');
+        if (menu && !menu.classList.contains('hidden')) {
+            menu.classList.add('hidden');
+            btn?.classList.remove('open');
+        }
+    });
 }
 
-async function submitAdminPidImportIds() {
-    const textarea = document.getElementById('admin-pid-import-textarea');
-    const status = document.getElementById('admin-pid-import-status');
-    const btn = document.getElementById('admin-pid-import-submit-btn');
+// Shared submit handler for all three import popovers — differ only in
+// which textarea/status/button to read and update, which endpoint to post
+// the parsed JSON to, how to phrase a success message from that endpoint's
+// response, and (optionally) what to refresh afterward.
+async function submitAdminPidImport(idPrefix, endpoint, buildMessage, afterSuccess) {
+    const textarea = document.getElementById(`${idPrefix}-textarea`);
+    const status = document.getElementById(`${idPrefix}-status`);
+    const btn = document.getElementById(`${idPrefix}-submit-btn`);
     const text = textarea.value.trim();
 
     if (!text) {
@@ -1657,7 +1698,7 @@ async function submitAdminPidImportIds() {
     status.className = 'admin-pid-import-status';
 
     try {
-        const res = await fetch('/api/admin/pricing/import-ids', {
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({data: parsed}),
@@ -1673,21 +1714,48 @@ async function submitAdminPidImportIds() {
             return;
         }
 
-        const parts = [`Added ${data.added_main} product ID(s)`];
-        if (data.added_foil) parts.push(`${data.added_foil} Curio Foil override(s)`);
-        status.textContent = parts.join(', ') + '.';
+        status.textContent = buildMessage(data);
         textarea.value = '';
 
-        // Reloads the whole product-ID list so newly-imported IDs (and their
-        // effect on the summary line, day-count badges, etc.) show up
-        // immediately rather than only after a manual page refresh.
-        await loadAdminPricingIds();
+        if (afterSuccess) await afterSuccess();
     } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Import';
         status.textContent = 'Import failed — check your connection and try again.';
         status.className = 'admin-pid-import-status admin-pid-refresh-error';
     }
+}
+
+// Backfills ID_TCGPLAYER.json (see import_ids() in api_tcgplayer.py for the
+// merge rules: only fills in missing product IDs, never overwrites an
+// existing one, never imports last_sales/last_listings). Reloads the whole
+// product-ID list afterward so newly-imported IDs (and their effect on the
+// summary line, day-count badges, etc.) show up immediately.
+function submitAdminPidImportIds() {
+    return submitAdminPidImport('admin-pid-import-ids', '/api/admin/pricing/import-ids', data => {
+        const parts = [`Added ${data.added_main} product ID(s)`];
+        if (data.added_foil) parts.push(`${data.added_foil} Curio Foil override(s)`);
+        return parts.join(', ') + '.';
+    }, loadAdminPricingIds);
+}
+
+// Backfills SALES.json/LISTINGS.json (see import_sales()/import_listings()
+// in pricing_ga.py: an entry is added only if no exact match — same date,
+// marketplace, price, quantity, condition — already exists for that
+// card/edition/foil, so re-importing the same export twice is a no-op but
+// two genuinely distinct sales/listings sharing a date both come through).
+// Refreshes the open card's own Sales/Listings tables afterward, if one's
+// open — nothing else on this list changes from a sales/listings import.
+function submitAdminPidImportSales() {
+    return submitAdminPidImport('admin-pid-import-sales', '/api/admin/pricing/import-sales',
+        data => `Added ${data.added} sale(s).`,
+        () => adminPidDetailSelected ? loadAdminPricingDetailHistory() : null);
+}
+
+function submitAdminPidImportListings() {
+    return submitAdminPidImport('admin-pid-import-listings', '/api/admin/pricing/import-listings',
+        data => `Added ${data.added} listing(s).`,
+        () => adminPidDetailSelected ? loadAdminPricingDetailHistory() : null);
 }
 
 function openAdminPidTcgPlayer() {
@@ -3062,7 +3130,7 @@ function initAdmin() {
 document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-add-entry-wrap')) closeAdminPidAddEntry();
     if (!e.target.closest('.admin-pid-bulk-paste-wrap')) closeAdminPidBulkPaste();
-    if (!e.target.closest('.admin-pid-import-wrap')) closeAdminPidImportIds();
+    closeAdminPidImportPopoversOutside(e.target);
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
     if (!e.target.closest('#admin-pid-marketplace-dropdown-wrap')) closeAdminPidMarketplaceDropdown();
