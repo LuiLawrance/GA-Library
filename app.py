@@ -2,7 +2,7 @@ from api_ga import _api_search, _build_collector_map, _format_search, _group_slu
     _update_slug, card_reset, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, \
     JSON_THEMA, JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
-    NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
+    import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -1373,6 +1373,21 @@ async def api_admin_clear_last_updated(request: Request):
             clear_last_listings(edition_id)
 
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/admin/pricing/import-ids")
+async def api_admin_pricing_import_ids(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    import_data = body.get("data")
+
+    if not isinstance(import_data, dict):
+        raise HTTPException(status_code=400, detail="data must be a JSON object shaped like ID_TCGPLAYER.json")
+
+    result = import_ids(import_data)
+
+    return JSONResponse(result)
 
 
 @app.get("/api/admin/pricing/{edition_id}/history")

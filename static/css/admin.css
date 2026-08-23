@@ -485,6 +485,106 @@
     flex-shrink: 0;
 }
 
+/* Sits in the row list's own header, in the Product ID column (see
+   renderAdminPidHeader) — right above where each row's own 🔍 auto-detect
+   button lands below it, so scaled to fit that same ~130px-wide column
+   alongside the "Product ID" label, rather than the 32px controls-row icon
+   buttons like .admin-pid-tcg-btn. */
+.admin-pid-import-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.admin-pid-import-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    /* Matches .admin-pid-find-btn's own size (see there) — its right edge
+       already lines up with the column below via justify-content:
+       space-between on the header cell, but a smaller button's left edge
+       (and so its visual center) didn't, which read as not-quite-aligned
+       even though the one edge technically matched. */
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.admin-pid-import-btn:hover,
+.admin-pid-import-btn.open {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* Same base as .admin-pid-bulk-paste-menu (see there — position/card/shadow/
+   animation all come from the shared .admin-pid-add-entry-menu class both
+   apply alongside this one), just its own width — right-aligned rather than
+   bulk-paste's left, since this button sits at the right edge of a narrow
+   column with more room to its left than its right. Compound selector (not
+   just .admin-pid-import-menu alone) so this reliably outranks
+   .admin-pid-add-entry-menu's own width regardless of which rule happens to
+   sit later in the file — equal single-class specificity would otherwise
+   leave that to source order, the way .admin-pid-bulk-paste-menu only wins
+   because it happens to be declared after it. */
+.admin-pid-add-entry-menu.admin-pid-import-menu {
+    width: 360px;
+    z-index: 1000;
+}
+
+.admin-pid-import-hint {
+    font-family: 'Sora', sans-serif;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+/* Matches .admin-pid-bulk-paste-textarea exactly (see there) — same sizing,
+   fonts, and the hidden-scrollbar treatment (scrolls, but the scrollbar
+   itself never shows) rather than a visible native one. */
+.admin-pid-import-textarea {
+    width: 100%;
+    height: 280px;
+    resize: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.admin-pid-import-textarea::-webkit-scrollbar {
+    display: none;
+}
+
+.admin-pid-import-textarea:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+.admin-pid-import-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.admin-pid-import-status {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
 .admin-pid-refresh-btn {
     font-family: 'Sora', sans-serif;
     font-size: 0.82rem;
@@ -999,8 +1099,21 @@
 /* The Rarity and Set header cells host filter dropdowns; the data rows'
    overflow:hidden truncation below would otherwise clip the dropdown menus. */
 .admin-pid-row-header .admin-pid-col-rarity,
-.admin-pid-row-header .admin-pid-col-set {
+.admin-pid-row-header .admin-pid-col-set,
+.admin-pid-row-header .admin-pid-col-status {
     overflow: visible;
+}
+
+/* Lays out the curio select-all checkbox (see its own comment further up —
+   it's actually positioned outside this cell, to its left), the "Product
+   ID" label, and the Import Product IDs button side by side, with the
+   import button pushed to this cell's right edge — landing directly above
+   where each row's own 🔍 auto-detect button sits below it. */
+.admin-pid-row-header .admin-pid-col-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
 }
 
 .admin-pid-row:not(.admin-pid-row-header):hover {

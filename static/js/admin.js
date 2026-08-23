@@ -923,6 +923,18 @@ function renderAdminPidHeader() {
     const selectAllChecked = prevSelectAll ? prevSelectAll.checked : false;
     const selectAllIndeterminate = prevSelectAll ? prevSelectAll.indeterminate : false;
 
+    // Same idea for the Import Product IDs popover — an admin mid-paste
+    // shouldn't lose that text (or have the popover silently snap shut) just
+    // because something else (e.g. a background refresh job finishing)
+    // happened to trigger a header rebuild.
+    const prevImportMenu = document.getElementById('admin-pid-import-menu');
+    const importMenuOpen = prevImportMenu ? !prevImportMenu.classList.contains('hidden') : false;
+    const prevImportTextarea = document.getElementById('admin-pid-import-textarea');
+    const importTextareaValue = prevImportTextarea ? prevImportTextarea.value : '';
+    const prevImportStatus = document.getElementById('admin-pid-import-status');
+    const importStatusHtml = prevImportStatus ? prevImportStatus.innerHTML : '';
+    const importStatusClass = prevImportStatus ? prevImportStatus.className : '';
+
     header.innerHTML = infoMode ? `
         <div class="admin-pid-row admin-pid-row-header admin-pid-row-info">
             <span class="admin-pid-col-name">CARD</span>
@@ -941,6 +953,22 @@ function renderAdminPidHeader() {
                 <input type="checkbox" class="admin-pid-curio-select-all" id="admin-pid-curio-select-all"
                        title="Toggle Curio Foil view for every visible card" onchange="toggleAllAdminPidCurioView(this)">
                 Product ID
+                <div class="admin-pid-import-wrap">
+                    <button type="button" class="admin-pid-import-btn" id="admin-pid-import-btn"
+                            onclick="event.stopPropagation(); toggleAdminPidImportIds()" title="Import Product IDs from JSON">📥</button>
+                    <div class="admin-pid-add-entry-menu admin-pid-import-menu hidden" id="admin-pid-import-menu" onclick="event.stopPropagation()">
+                        <span class="admin-pid-import-hint">
+                            Paste ID_TCGPLAYER.json-formatted JSON — only fills in missing product IDs, never overwrites existing ones.
+                        </span>
+                        <textarea class="admin-pid-import-textarea" id="admin-pid-import-textarea"
+                                  placeholder='{"edition_id": {"product_id": "123456"}}'></textarea>
+                        <div class="admin-pid-import-actions">
+                            <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                    id="admin-pid-import-submit-btn" onclick="submitAdminPidImportIds()">Import</button>
+                            <span class="admin-pid-import-status" id="admin-pid-import-status"></span>
+                        </div>
+                    </div>
+                </div>
             </span>
             <span class="admin-pid-col-sales">Sales</span>
             <span class="admin-pid-col-listings">Listings</span>
@@ -957,6 +985,19 @@ function renderAdminPidHeader() {
     if (newSelectAll) {
         newSelectAll.checked = selectAllChecked;
         newSelectAll.indeterminate = selectAllIndeterminate;
+    }
+
+    const newImportMenu = document.getElementById('admin-pid-import-menu');
+    if (newImportMenu) {
+        newImportMenu.classList.toggle('hidden', !importMenuOpen);
+        document.getElementById('admin-pid-import-btn')?.classList.toggle('open', importMenuOpen);
+    }
+    const newImportTextarea = document.getElementById('admin-pid-import-textarea');
+    if (newImportTextarea) newImportTextarea.value = importTextareaValue;
+    const newImportStatus = document.getElementById('admin-pid-import-status');
+    if (newImportStatus) {
+        newImportStatus.innerHTML = importStatusHtml;
+        newImportStatus.className = importStatusClass;
     }
 
     updateAdminPidCurioSelectAllState();
@@ -1560,6 +1601,93 @@ function updateAdminPidRefreshButton() {
 function updateAdminPidTcgButton() {
     const btn = document.getElementById('admin-pid-tcg-btn');
     if (btn) btn.disabled = !adminPidDetailSelected;
+}
+
+// Import Product IDs button — lives in the row list's own header, right
+// above where each row's own 🔍 auto-detect button sits in the Product ID
+// column, since that's the same column this bulk-fills. Backfills
+// ID_TCGPLAYER.json from a pasted JSON blob (see import_ids() in
+// api_tcgplayer.py for the actual merge rules: only fills in missing
+// product IDs, never overwrites an existing one, never imports
+// last_sales/last_listings). Meant for reloading product IDs after a local
+// hard reset wipes this file.
+function toggleAdminPidImportIds() {
+    const btn = document.getElementById('admin-pid-import-btn');
+    const menu = document.getElementById('admin-pid-import-menu');
+    if (!btn || !menu) return;
+
+    const opening = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !opening);
+    btn.classList.toggle('open', opening);
+}
+
+function closeAdminPidImportIds() {
+    const btn = document.getElementById('admin-pid-import-btn');
+    const menu = document.getElementById('admin-pid-import-menu');
+    if (!menu || menu.classList.contains('hidden')) return;
+
+    menu.classList.add('hidden');
+    btn?.classList.remove('open');
+}
+
+async function submitAdminPidImportIds() {
+    const textarea = document.getElementById('admin-pid-import-textarea');
+    const status = document.getElementById('admin-pid-import-status');
+    const btn = document.getElementById('admin-pid-import-submit-btn');
+    const text = textarea.value.trim();
+
+    if (!text) {
+        status.textContent = 'Paste some JSON first.';
+        status.className = 'admin-pid-import-status admin-pid-refresh-error';
+        return;
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    } catch (err) {
+        status.textContent = 'Invalid JSON — check for a trailing comma or unclosed brace.';
+        status.className = 'admin-pid-import-status admin-pid-refresh-error';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    status.textContent = '';
+    status.className = 'admin-pid-import-status';
+
+    try {
+        const res = await fetch('/api/admin/pricing/import-ids', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({data: parsed}),
+        });
+        const data = await res.json();
+
+        btn.disabled = false;
+        btn.textContent = 'Import';
+
+        if (!res.ok) {
+            status.textContent = data.detail || 'Import failed.';
+            status.className = 'admin-pid-import-status admin-pid-refresh-error';
+            return;
+        }
+
+        const parts = [`Added ${data.added_main} product ID(s)`];
+        if (data.added_foil) parts.push(`${data.added_foil} Curio Foil override(s)`);
+        status.textContent = parts.join(', ') + '.';
+        textarea.value = '';
+
+        // Reloads the whole product-ID list so newly-imported IDs (and their
+        // effect on the summary line, day-count badges, etc.) show up
+        // immediately rather than only after a manual page refresh.
+        await loadAdminPricingIds();
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Import';
+        status.textContent = 'Import failed — check your connection and try again.';
+        status.className = 'admin-pid-import-status admin-pid-refresh-error';
+    }
 }
 
 function openAdminPidTcgPlayer() {
@@ -2934,6 +3062,7 @@ function initAdmin() {
 document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-add-entry-wrap')) closeAdminPidAddEntry();
     if (!e.target.closest('.admin-pid-bulk-paste-wrap')) closeAdminPidBulkPaste();
+    if (!e.target.closest('.admin-pid-import-wrap')) closeAdminPidImportIds();
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
     if (!e.target.closest('#admin-pid-marketplace-dropdown-wrap')) closeAdminPidMarketplaceDropdown();

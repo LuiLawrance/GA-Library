@@ -52,6 +52,71 @@ def get_all_ids() -> dict:
         return json.load(f)
 
 
+def import_ids(import_data: dict) -> dict:
+    """Backfills ID_TCGPLAYER.json from a JSON blob shaped exactly like the
+    file itself — the admin console's Import Product IDs button, for
+    reloading product IDs after a local hard reset wipes this file (sales/
+    listings data and the rest of DATA_GA aren't part of it; this only ever
+    restores product_id mappings), or more generally for re-merging any
+    prior export back in.
+
+    Deliberately narrow, on request: only ADDS a product_id where the
+    edition (or foil override) doesn't already have one — an already-stored
+    ID is never overwritten, so re-running the same import twice (or
+    importing an old export over a newer store) can't clobber anything
+    entered since; that's the only duplicate-safety this needs, so an
+    edition_id doesn't have to already exist elsewhere (e.g. in
+    EDITIONS.json) to be imported here — creates a fresh entry for one that
+    isn't in the current store at all, same as backfilling one that already
+    has a partial entry. last_sales/last_listings are never read from
+    import_data at all, even if present in it — those clocks should start
+    fresh rather than carry over dates from before whatever prompted the
+    import, which would otherwise misrepresent data that may not exist
+    locally as already scraped.
+
+    Single bulk read + write regardless of how many editions are in
+    import_data, matching get_all_ids()'s reasoning above — not one file
+    round-trip per edition via _set_ids_field/_set_foil_ids_field."""
+    ids_file = new_json(JSON_IDS)
+
+    with ids_file.open("r", encoding="utf-8") as f:
+        current = json.load(f)
+
+    added_main = 0
+    added_foil = 0
+
+    for edition_id, entry in import_data.items():
+        if not isinstance(entry, dict):
+            continue
+
+        current_entry = current.setdefault(edition_id, {})
+
+        product_id = entry.get("product_id")
+        if product_id and not current_entry.get("product_id"):
+            current_entry["product_id"] = product_id
+            added_main += 1
+
+        for foil_id, foil_entry in (entry.get("foils") or {}).items():
+            if not isinstance(foil_entry, dict):
+                continue
+
+            foil_product_id = foil_entry.get("product_id")
+            if not foil_product_id:
+                continue
+
+            current_foils = current_entry.setdefault("foils", {})
+            current_foil_entry = current_foils.setdefault(foil_id, {})
+
+            if not current_foil_entry.get("product_id"):
+                current_foil_entry["product_id"] = foil_product_id
+                added_foil += 1
+
+    with ids_file.open("w", encoding="utf-8") as f:
+        json.dump(current, f, indent=4)
+
+    return {"added_main": added_main, "added_foil": added_foil}
+
+
 def _set_ids_field(edition_id: str, field: str, value: str, debug: bool = False) -> None:
     ids_file = new_json(JSON_IDS)
 
