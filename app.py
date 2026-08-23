@@ -589,6 +589,16 @@ async def api_card_detail(card_id: str):
             listings_data, card_id, edition_id, edition_info.get("foils", {})
         )
 
+        # Regular nonfoil/foil printings share the edition's own TCGPlayer
+        # product; a Curio Foil (or other variant) may have its own separate
+        # product page instead — see get_foil_overrides — used by the drawer's
+        # pricing tab to link each graph's "View on TCGPlayer" button.
+        edition_info["product_id"] = get_product_id(edition_id)
+        foil_overrides = get_foil_overrides(edition_id)
+        for foil_info in edition_info.get("foils", {}).values():
+            for variant_id, variant_info in foil_info.get("variants", {}).items():
+                variant_info["product_id"] = foil_overrides.get(variant_id, {}).get("product_id")
+
         edition_listings = card_listings.get(edition_id, {})
         edition_sales = card_sales.get(edition_id, {})
         foil_ids = list(edition_info.get("foils", {}).keys()) + [

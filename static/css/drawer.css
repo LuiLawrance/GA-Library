@@ -649,6 +649,43 @@
     margin-bottom: 0;
 }
 
+/* .collector-section-label inside here keeps its normal centered,
+   full-width layout (see .collector-section-label) — the button is
+   positioned out of flow below rather than sharing a flex row with it, so
+   it doesn't push the label off-center. */
+.pricing-section-header {
+    position: relative;
+}
+
+/* Modeled on .admin-pid-tcg-btn (see admin.css) at a smaller scale to fit
+   this section header alongside its label. */
+.pricing-tcg-btn {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    transition: border-color 0.15s;
+}
+
+.pricing-tcg-btn:hover {
+    border-color: var(--border-focus);
+}
+
+.pricing-tcg-icon {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
 .pricing-stats {
     grid-template-columns: 1fr 1fr;
     margin-bottom: 12px;

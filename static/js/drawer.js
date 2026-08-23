@@ -923,7 +923,25 @@ function buildPricingStats(sales, listings) {
         </div>`;
 }
 
-function buildPricingFoilSection(foilId, label, pricing, mergeFoilId = null) {
+// A saved product_id of "~" (NO_LISTINGS_SENTINEL in api_tcgplayer.py) means
+// "confirmed to have no TCGPlayer listings" — not a real product to link to —
+// so this falls back to a name search instead, same as the Admin Pricing
+// tab's own TCG Player button (see openAdminPidTcgPlayer in admin.js).
+function pricingTcgPlayerHref(productId, searchName) {
+    return (productId && productId !== '~')
+        ? `https://www.tcgplayer.com/product/${encodeURIComponent(productId)}`
+        : `https://www.tcgplayer.com/search/grand-archive/product?q=${encodeURIComponent(searchName)}&productLineName=grand-archive`;
+}
+
+function pricingTcgLinkHTML(productId, searchName) {
+    const href = pricingTcgPlayerHref(productId, searchName);
+    return `
+        <a class="pricing-tcg-btn" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="View on TCGPlayer">
+            <img src="/marketplaces/TCG%20Player.png" alt="TCG Player" class="pricing-tcg-icon">
+        </a>`;
+}
+
+function buildPricingFoilSection(foilId, label, pricing, linkHTML, mergeFoilId = null) {
     const primary = pricing?.[foilId] || {listings: [], sales: []};
     const secondary = mergeFoilId ? (pricing?.[mergeFoilId] || {listings: [], sales: []}) : {listings: [], sales: []};
     const sales = [...primary.sales, ...secondary.sales];
@@ -931,7 +949,10 @@ function buildPricingFoilSection(foilId, label, pricing, mergeFoilId = null) {
 
     return `
         <div class="pricing-section">
-            <div class="collector-section-label">${label}</div>
+            <div class="pricing-section-header">
+                <div class="collector-section-label">${label}</div>
+                ${linkHTML}
+            </div>
             ${buildPricingStats(sales, listings)}
             ${buildPricingComboChart(sales, listings)}
         </div>`;
@@ -953,9 +974,13 @@ function soleVariantOf([, foilObj]) {
     return basePop <= 0 ? [variantId, variantInfo] : null;
 }
 
-function buildTabPricingPanel(edition) {
+function buildTabPricingPanel(edition, cardName) {
     const foils = edition?.foils || {};
     const pricing = edition?.pricing || {};
+    // Regular nonfoil/foil printings (and top-level "special" foils, which
+    // don't get their own override) all share the edition's own TCGPlayer
+    // product page.
+    const editionProductId = edition?.product_id || null;
 
     if (Object.keys(foils).length === 0) {
         return `<div class="thema-empty">No pricing data available for this edition.</div>`;
@@ -972,13 +997,21 @@ function buildTabPricingPanel(edition) {
     // Curio-only foils (no distinct base printing) are labeled and graphed
     // under the variant's own kind rather than the generic Non-Foil/Foil/
     // special label, folding the parent foil_id's data in alongside the
-    // variant's own — see soleVariantOf above.
+    // variant's own — see soleVariantOf above. Its own override product_id
+    // is scraped against the parent foil_id's product page in this case (see
+    // app.py), so the edition's product_id is a meaningful fallback link
+    // here — unlike the standalone-variant case below, where it isn't.
     function sectionFor(entry, fallbackLabel) {
         const [foilId] = entry;
         const sole = soleVariantOf(entry);
-        return sole
-            ? buildPricingFoilSection(foilId, toFoilLabel(sole[1].kind), pricing, sole[0])
-            : buildPricingFoilSection(foilId, fallbackLabel, pricing);
+        if (sole) {
+            const [variantId, variantInfo] = sole;
+            const label = toFoilLabel(variantInfo.kind);
+            const link = pricingTcgLinkHTML(variantInfo.product_id || editionProductId, `${cardName} ${label}`);
+            return buildPricingFoilSection(foilId, label, pricing, link, variantId);
+        }
+        const link = pricingTcgLinkHTML(editionProductId, cardName);
+        return buildPricingFoilSection(foilId, fallbackLabel, pricing, link);
     }
 
     const sections = [];
@@ -989,12 +1022,17 @@ function buildTabPricingPanel(edition) {
 
     // Any variants not already folded into their parent's section above
     // (e.g. multi-stamp tournament promos, which have several variants
-    // rather than the lone one a Curio Foil has) still get their own section.
+    // rather than the lone one a Curio Foil has) still get their own
+    // section — linked only to its own override, same as the Admin Pricing
+    // tab's Curio Foil view (see openAdminPidTcgPlayer in admin.js), since
+    // the edition's main product page isn't about this variant.
     entries.forEach(entry => {
         const sole = soleVariantOf(entry);
         Object.entries(entry[1].variants || {}).forEach(([variantId, variantInfo]) => {
             if (sole && sole[0] === variantId) return;
-            sections.push(buildPricingFoilSection(variantId, toFoilLabel(variantInfo.kind), pricing));
+            const label = toFoilLabel(variantInfo.kind);
+            const link = pricingTcgLinkHTML(variantInfo.product_id, `${cardName} ${label}`);
+            sections.push(buildPricingFoilSection(variantId, label, pricing, link));
         });
     });
 
@@ -1082,7 +1120,7 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     if (tab === 'thema') {
         incoming.innerHTML = buildTabThemaPanel(edition);
     } else if (tab === 'pricing') {
-        incoming.innerHTML = buildTabPricingPanel(edition);
+        incoming.innerHTML = buildTabPricingPanel(edition, cardInfo.querySelector('.drawer-name')?.textContent || '');
     }
 
     // Fade out outgoing
@@ -1330,7 +1368,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
                 } else if (activeTab === 'pricing') {
                     const pricingPanel = cardInfo.querySelector('.drawer-tab-pricing');
                     pricingPanel.classList.remove('hidden');
-                    pricingPanel.innerHTML = buildTabPricingPanel(selectedEdition);
+                    pricingPanel.innerHTML = buildTabPricingPanel(selectedEdition, cardName);
                 }
             }
         };
@@ -1502,7 +1540,7 @@ async function selectDrawerEditionFor(drawerId, editionId) {
             if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
         } else if (activeTab === 'pricing') {
             const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
-            if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition);
+            if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition, cardInfo?.querySelector('.drawer-name')?.textContent || '');
         }
 
         playEditionsGridShift(flip);
