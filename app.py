@@ -1,6 +1,6 @@
 from api_ga import _api_search, _build_collector_map, _format_search, _group_slug, _sort_collector_number, \
-    _update_slug, card_reset, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, \
-    JSON_THEMA, JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
+    _update_slug, card_reset, DIR_SETS, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, \
+    JSON_SLUGS, JSON_THEMA, JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
     import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
@@ -10,8 +10,9 @@ from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id, add_manual_entry, delete_entry, \
-    find_product_ids_by_editions, import_listings, import_pasted_sales_tcg_by_edition, import_sales, \
+from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
+    clear_product_ids_for_set, delete_entry, find_product_ids_by_editions, import_listings, \
+    import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, import_sales, \
     scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, \
     scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
@@ -49,6 +50,15 @@ app.mount("/marketplaces", StaticFiles(directory="assets/MARKETPLACES"), name="m
 # "already searched" indicator.
 with new_json(JSON_SET_SEARCHES).open(encoding="utf-8") as f:
     _set_search_cache = json.load(f)
+
+# Back-compat: older SET_SEARCHES.json entries are bare ISO-date strings (just
+# the "last set-searched" date) — normalize to dicts so a set can also carry
+# tcgplayer_group_id (see api_admin_set_group_id) without needing a separate
+# file or a one-off migration script.
+_set_search_cache = {
+    slug: ({"last_searched": entry} if isinstance(entry, str) else entry)
+    for slug, entry in _set_search_cache.items()
+}
 
 # ── Set search background jobs ──
 # job_id → {status: "running"|"done"|"error", done, total, current_card, error, set_prefix}
@@ -705,16 +715,19 @@ def _run_set_search_job(job_id: str, set_prefix: str) -> None:
 async def api_sets_search_start(prefix: str):
     set_filter = prefix.strip().lower().replace(" ", "_")
 
-    needs_fetch = set_filter not in _set_search_cache
+    last_searched = _set_search_cache.get(set_filter, {}).get("last_searched")
+    needs_fetch = last_searched is None
     if not needs_fetch:
-        last_sync = date.fromisoformat(_set_search_cache[set_filter])
+        last_sync = date.fromisoformat(last_searched)
         needs_fetch = (date.today() - last_sync).days > UPDATE_THRESHOLD
 
     if not needs_fetch:
         # Local data is fresh enough — no job needed, frontend can fetch results immediately
         return JSONResponse({"job_id": None, "cached": True})
 
-    _set_search_cache[set_filter] = date.today().isoformat()
+    # setdefault rather than a plain assignment — preserves tcgplayer_group_id
+    # (see api_admin_set_group_id) if an admin already set one for this slug.
+    _set_search_cache.setdefault(set_filter, {})["last_searched"] = date.today().isoformat()
     with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
         json.dump(_set_search_cache, f, indent=4)
 
@@ -1299,6 +1312,84 @@ async def api_admin_set_searches(request: Request):
     require_admin(request)
 
     return JSONResponse({"searches": _set_search_cache})
+
+
+# Admin-entered tcgcsv.com Group ID for a set (see api_tcgplayer.py's
+# scraping — this is manual for now, no group-id-based lookup wired up yet).
+# Stored in the same SET_SEARCHES.json entry as last_searched rather than a
+# separate file, per-slug, so it's set even for a slug that hasn't been
+# set-searched yet.
+@app.patch("/api/admin/set-searches/{slug}")
+async def api_admin_set_group_id(slug: str, request: Request):
+    require_admin(request)
+
+    body = await request.json()
+    group_id = body.get("tcgplayer_group_id", "").strip()
+
+    if group_id and not group_id.isdigit():
+        raise HTTPException(status_code=400, detail="TCGplayer Group ID must be numeric")
+
+    slug = slug.strip().lower().replace(" ", "_")
+    entry = _set_search_cache.setdefault(slug, {})
+    if group_id:
+        entry["tcgplayer_group_id"] = group_id
+    else:
+        entry.pop("tcgplayer_group_id", None)
+
+    with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
+        json.dump(_set_search_cache, f, indent=4)
+
+    return JSONResponse({"slug": slug, "tcgplayer_group_id": group_id or None})
+
+
+# Backfills product IDs for every edition in one set from tcgcsv.com (see
+# import_product_ids_from_tcgcsv in pricing_ga.py), using its admin-entered
+# Group ID (see api_admin_set_group_id above). Runs synchronously rather than
+# as a background job like set-search/find-product-ids — it's a single JSON
+# fetch plus local file matching, no Playwright browser involved, so it's
+# fast enough not to need polling.
+@app.post("/api/admin/set-searches/{slug}/import-tcgcsv")
+async def api_admin_import_tcgcsv(slug: str, request: Request):
+    require_admin(request)
+
+    slug = slug.strip().lower().replace(" ", "_")
+    group_id = _set_search_cache.get(slug, {}).get("tcgplayer_group_id")
+
+    if not group_id:
+        raise HTTPException(status_code=400, detail="No TCGplayer Group ID set for this set")
+
+    if not os.path.exists(f"{DIR_SETS}/{slug}.json"):
+        raise HTTPException(status_code=400, detail="This set hasn't been set-searched locally yet")
+
+    try:
+        result = import_product_ids_from_tcgcsv(slug, group_id)
+    except requests.exceptions.RequestException:
+        raise HTTPException(status_code=502, detail="Failed to reach tcgcsv.com")
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return JSONResponse(result)
+
+
+# Wipes every saved TCGPlayer product ID (main and Curio Foil override alike)
+# for editions in one set (see clear_product_ids_for_set in pricing_ga.py) —
+# the "start over" counterpart to the Import button above, for when a batch
+# of IDs turns out wrong (a tcgcsv mismatch, a stale Playwright auto-detect,
+# a manual typo) and needs to be rechecked from scratch rather than fixed one
+# card at a time. Doesn't require a Group ID or even a set-searched local
+# copy — there's nothing here that depends on either, just whatever's
+# already in ID_TCGPLAYER.json for this set's editions.
+@app.post("/api/admin/set-searches/{slug}/clear-product-ids")
+async def api_admin_clear_set_product_ids(slug: str, request: Request):
+    require_admin(request)
+
+    slug = slug.strip().lower().replace(" ", "_")
+
+    if not os.path.exists(f"{DIR_SETS}/{slug}.json"):
+        raise HTTPException(status_code=400, detail="This set hasn't been set-searched locally yet")
+
+    result = clear_product_ids_for_set(slug)
+    return JSONResponse(result)
 
 
 # Fetches api.gatcg.com's current Featured Sets list and records which local

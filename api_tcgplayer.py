@@ -4,10 +4,25 @@ from util_file import new_json
 
 import json
 import re
+import requests
 import urllib.parse
 
 BASE_URL = "https://www.tcgplayer.com/product/"
 SEARCH_URL = "https://www.tcgplayer.com/search/grand-archive/product"
+
+# tcgcsv.com mirrors TCGPlayer's own official API — given a game's category ID
+# (74 is Grand Archive, same ID TCGPlayer itself uses) and a set's Group ID
+# (admin-entered per set, see api_admin_set_group_id in app.py), this lists
+# every product TCGPlayer has for that set in one JSON call: regular editions
+# and Curio Foil variants alike, each with the numeric productId our own
+# product IDs are keyed by. See fetch_tcgcsv_products below.
+TCGCSV_CATEGORY_ID = 74
+TCGCSV_PRODUCTS_URL = "https://tcgcsv.com/tcgplayer/{category_id}/{group_id}/products"
+
+# tcgcsv.com blocks requests with no identifying User-Agent (see
+# https://tcgcsv.com/docs#usage-guidelines) — requests' own default UA gets a
+# blanket 401 regardless of credentials, so this has to be set explicitly.
+TCGCSV_USER_AGENT = "GA-Library/1.0"
 
 JSON_IDS = "DATA_GA/PRICING_GA/ID_TCGPLAYER.json"
 
@@ -174,6 +189,16 @@ def set_product_id(edition_id: str, product_id: str, debug: bool = False) -> Non
     _set_ids_field(edition_id, "product_id", product_id, debug)
 
 
+def clear_product_id(edition_id: str, debug: bool = False) -> None:
+    """Resets edition_id's own product_id back to unset — e.g. an admin
+    wiping a bad match (mismatched tcgcsv sync, stale Playwright auto-detect,
+    manual typo) so it can be rechecked from scratch. Leaves
+    last_sales/last_listings untouched, same as clear_last_sales/
+    clear_last_listings leave product_id untouched — they're independent
+    clocks, not tied to each other."""
+    _set_ids_field(edition_id, "product_id", None, debug)
+
+
 # ── Foil-scoped overrides ──
 # A card's regular nonfoil + foil printings share the edition-level fields
 # above, but some cards also have a special foil variant (TCGPlayer's "Curio
@@ -256,6 +281,12 @@ def get_foil_product_id(edition_id: str, foil_id: str) -> str | None:
 
 def set_foil_product_id(edition_id: str, foil_id: str, product_id: str, debug: bool = False) -> None:
     _set_foil_ids_field(edition_id, foil_id, "product_id", product_id, debug)
+
+
+def clear_foil_product_id(edition_id: str, foil_id: str, debug: bool = False) -> None:
+    """Foil-scoped counterpart to clear_product_id() — e.g. resets a Curio
+    Foil's own separate product_id without touching the edition's main one."""
+    _set_foil_ids_field(edition_id, foil_id, "product_id", None, debug)
 
 
 def _open_sales_popup(page) -> None:
@@ -672,6 +703,33 @@ def find_product_id(card_name: str, collector_number: str, set_name: str = "", d
         return None
 
     return result
+
+
+def fetch_tcgcsv_products(group_id: str, debug: bool = False) -> list[dict]:
+    """Every product tcgcsv.com has recorded under a set's Group ID — one
+    entry per product, main editions and Curio Foil variants alike (a Curio
+    Foil's own `name` has "Curio Foil" in it somewhere — TCGPlayer doesn't
+    keep the exact phrasing consistent between sets, e.g. Asphodel Paradise's
+    are "(Interference Curio Foil)" rather than plain "(Curio Foil)"; there's
+    no separate flag for it either way).
+    Each entry's `extendedData` list carries a "Number" field matching our own
+    collector_number, and `productId` is the numeric TCGPlayer product ID —
+    together enough to match against local editions without the per-card
+    Playwright search find_product_id() falls back to."""
+    url = TCGCSV_PRODUCTS_URL.format(category_id=TCGCSV_CATEGORY_ID, group_id=group_id)
+    response = requests.get(url, headers={"User-Agent": TCGCSV_USER_AGENT}, timeout=15)
+    response.raise_for_status()
+
+    data = response.json()
+    if not data.get("success"):
+        raise ValueError(f"tcgcsv.com reported failure for group {group_id}: {data.get('errors')}")
+
+    results = data.get("results", [])
+
+    if debug:
+        print(f"tcgcsv fetch | group_id={group_id} | products={len(results)}")
+
+    return results
 
 
 def prompt_product_id(edition_id: str, debug: bool = False) -> str:

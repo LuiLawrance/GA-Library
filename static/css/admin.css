@@ -193,10 +193,10 @@
    affects its 4 direct children, so animating it doesn't have that same
    cost. */
 .admin-cards-mode-info .admin-pricing-layout {
-    grid-template-columns: var(--admin-pid-info-list-width) 320px minmax(0, 1fr) 420px;
+    grid-template-columns: var(--admin-pid-info-list-width) 320px minmax(0, 1fr) 560px;
     /* Neutralizes the base rule's margin-right:-24px (see there) — that
        compensates for the 4th track's always-reserved gap while it's 0px
-       (Pricing mode); here the track is real (420px) content and that gap
+       (Pricing mode); here the track is real (560px) content and that gap
        is wanted, not a phantom to cancel out. */
     margin-right: 0;
 }
@@ -670,7 +670,7 @@
        0px wide (Pricing mode) — see the matching comment on
        .admin-pid-controls-grid, which this mirrors exactly. Neutralized by
        .admin-cards-mode-info .admin-pricing-layout above, where that same
-       track is real (420px) content and the gap in front of it is wanted. */
+       track is real (560px) content and the gap in front of it is wanted. */
     margin-right: -24px;
 }
 
@@ -790,6 +790,13 @@
     margin-bottom: 10px;
 }
 
+.admin-pricing-sets-header-actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .admin-pricing-sets-title {
     font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
@@ -816,6 +823,39 @@
 
 .admin-pricing-sets-status-error {
     color: var(--error);
+}
+
+/* "Search Set" download progress — same visual language as the Cards page's
+   own set-search progress bar (.cards-set-progress-* in cards.css), just
+   scoped to this panel's own compact padding/font-size. */
+.admin-pricing-sets-progress-wrap {
+    flex-shrink: 0;
+    margin-bottom: 8px;
+}
+
+.admin-pricing-sets-progress-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-pricing-sets-progress-track {
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.admin-pricing-sets-progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
 }
 
 /* Splits .admin-pricing-sets-list into Featured/Other (see
@@ -853,20 +893,39 @@
     gap: 2px;
 }
 
+/* Clickable — selects this set (see selectAdminSet in admin.js), like a card
+   list row selecting a card. */
 .admin-pricing-sets-row {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
     padding: 5px 0;
     border-bottom: 1px solid var(--border);
+    cursor: pointer;
 }
 
 .admin-pricing-sets-row:last-child {
     border-bottom: none;
 }
 
+.admin-pricing-sets-row:hover {
+    background: var(--bg-hover);
+}
+
+.admin-pricing-sets-row-active {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.admin-pricing-sets-row-active:hover {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* flex:1 is what pushes .admin-pricing-sets-row-actions to the row's right
+   edge — plain space-between on the row would work just as well with these
+   two children, but flex:1 also lets this ellipsis correctly against the
+   row's actual available width rather than just its own content width. */
 .admin-pricing-sets-name {
+    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -881,13 +940,10 @@
     color: var(--text-muted);
 }
 
-/* Groups the count and "Search Set" button so .admin-pricing-sets-row's own
-   justify-content:space-between still reads as [name] ↔ [count + button] —
-   without this wrapper, adding the button as a third flex child would spread
-   all three apart evenly instead. margin-right nudges the whole group off the
-   list's right edge — separate from (and on top of) scrollbar-gutter's own
-   reserved space on .admin-pricing-sets-list above, which only keeps the
-   scrollbar itself from overlapping this. */
+/* margin-right nudges the whole group off the list's right edge — separate
+   from (and on top of) scrollbar-gutter's own reserved space on
+   .admin-pricing-sets-list above, which only keeps the scrollbar itself from
+   overlapping this. */
 .admin-pricing-sets-row-actions {
     flex-shrink: 0;
     display: flex;
@@ -896,46 +952,111 @@
     margin-right: 6px;
 }
 
+/* Admin-entered tcgcsv.com Group ID (see saveAdminSetGroupId in admin.js) —
+   sits ahead of the count/search button in the same actions group, small and
+   plain since this panel's rows are compact and one sits on every row. */
+.admin-pricing-sets-groupid {
+    width: 72px;
+    flex-shrink: 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 3px 6px;
+}
+
+.admin-pricing-sets-groupid:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+.admin-pricing-sets-groupid:disabled {
+    opacity: 0.6;
+}
+
+.admin-pricing-sets-groupid-error {
+    border-color: var(--error);
+}
+
+/* Small non-interactive "already searched" badge (see adminSetSearches in
+   admin.js) — replaced the old clickable per-row Search Set button now that
+   searching lives in the header's bulk actions instead; this just reports
+   status. */
+.admin-pricing-sets-searched {
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.admin-pricing-sets-searched-done {
+    color: var(--accent);
+}
+
 .admin-pricing-sets-count {
     flex-shrink: 0;
+    /* Fixed width (rather than sizing to its own digits) so the Group ID
+       input before it — same fixed width on every row — lands at the same
+       x-position down the whole list instead of drifting with how many
+       digits each row's count happens to have. */
+    min-width: 28px;
+    text-align: right;
     font-family: 'DM Mono', monospace;
     font-size: 0.8rem;
     color: var(--text);
 }
 
-.admin-pricing-sets-search-btn {
+/* Header action buttons (Search/Clear/Sync — see searchSelectedAdminSet/
+   clearSelectedAdminSetIds/syncSelectedAdminSetTcgcsv in admin.js), acting
+   on whichever one set is currently selected (see selectAdminSet) rather
+   than living on every row. Emoji glyphs sized up a bit since they read
+   smaller than text at that size. */
+/* Shared by both <button> action buttons and the tcgcsv.com <a> link below —
+   text-decoration/color reset since browsers underline and blue-tint anchor
+   text by default, which an emoji glyph would otherwise still pick up. */
+.admin-pricing-sets-action-btn {
     flex-shrink: 0;
-    min-width: 22px;
-    height: 22px;
-    padding: 0 4px;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 5px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.68rem;
-    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1;
     background: transparent;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    color: inherit;
+    text-decoration: none;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: background 0.15s, border-color 0.15s;
 }
 
-.admin-pricing-sets-search-btn:hover:not(:disabled) {
+.admin-pricing-sets-action-btn:hover:not(:disabled) {
     background: var(--bg-hover);
     border-color: var(--border-focus);
 }
 
-.admin-pricing-sets-search-btn:disabled {
+.admin-pricing-sets-action-btn:disabled {
     cursor: not-allowed;
-    opacity: 0.7;
+    opacity: 0.35;
 }
 
-/* Already set-searched (see adminSetSearches in admin.js) — still clickable
-   to search again, just visually distinct from the unsearched "⤓" state. */
-.admin-pricing-sets-search-btn-done {
-    color: var(--accent);
-    border-color: var(--accent);
+/* Clear button reads as destructive even while otherwise styled like its
+   Search/Sync siblings — a red-tinted border is enough at this size without
+   needing a filled/high-contrast treatment. */
+.admin-pricing-sets-action-btn-danger {
+    border-color: color-mix(in srgb, var(--error) 45%, var(--border));
+}
+
+.admin-pricing-sets-action-btn-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    border-color: var(--error);
 }
 
 .admin-pricing-image-col.fade-out,

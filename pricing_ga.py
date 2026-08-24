@@ -20,6 +20,30 @@ RARITY_MAP = {
     9: "CPR"
 }
 
+# tcgcsv.com's extendedData "Rarity" field spells out Grand Archive's full
+# rarity names (e.g. "Collector Super Rare") rather than our own RARITY_MAP
+# abbreviations — same numeric scheme, just the other direction, used to
+# cross-check a tcgcsv product's rarity against a local candidate edition's
+# own recorded one (see import_product_ids_from_tcgcsv). A Collector-rarity
+# card (CSR/CUR/CPR) keeps its base printing's collector number, so without
+# this check a same-numbered regular/Collector pair — which Grand Archive
+# sometimes models as two editions in two different local sets (e.g. "MRC"
+# and "MRC 1st") sharing one tcgcsv Group ID — silently cross-matches: a
+# product looked up by number alone would blindly accept whichever single
+# edition its own set/slug happens to have at that number, regular or
+# Collector, without ever checking they're the same rarity.
+TCGCSV_RARITY_CODE = {
+    "Common": 1,
+    "Uncommon": 2,
+    "Rare": 3,
+    "Super Rare": 4,
+    "Ultra Rare": 5,
+    "Prime Rare": 6,
+    "Collector Super Rare": 7,
+    "Collector Ultra Rare": 8,
+    "Collector Prime Rare": 9
+}
+
 
 def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, condition: str, debug: bool = False) -> None:
     entry = {
@@ -1340,6 +1364,205 @@ def find_product_ids_by_editions(edition_ids: list[str], debug: bool = False,
         browser.close()
 
     return results
+
+
+def _curio_variant_id(foils: dict) -> str | None:
+    """Mirrors app.py's _curio_foil_id: exactly one variant across all of an
+    edition's foils is TCGPlayer's separate "Curio Foil" product (its own
+    business rule — more or fewer than one variant means there's no single
+    slot to attribute a tcgcsv "(Curio Foil)" product to). Duplicated here
+    rather than imported since app.py imports FROM this module, not the other
+    way around."""
+    variant_ids = [vid for finfo in foils.values() for vid in finfo.get("variants", {})]
+    return variant_ids[0] if len(variant_ids) == 1 else None
+
+
+def _edition_rarity_code(edition_id: str, editions_data: dict, info_data: dict) -> int | None:
+    card_id = editions_data.get(edition_id, {}).get("card_id")
+    return info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("rarity")
+
+
+def import_product_ids_from_tcgcsv(set_slug: str, group_id: str, debug: bool = False) -> dict:
+    """Backfills product IDs for every edition in one local set from
+    tcgcsv.com (see api_tcgplayer.fetch_tcgcsv_products), matched by collector
+    number instead of the fuzzy name-based Playwright search
+    find_product_ids_by_editions() falls back to. A tcgcsv product whose name
+    contains "Curio Foil" is that edition's special foil variant (see
+    _curio_variant_id above); everything else is the edition's own regular
+    product. Matched as a substring rather than an exact "(Curio Foil)" suffix
+    since TCGPlayer doesn't keep the label consistent — Asphodel Paradise's
+    products are named "(Interference Curio Foil)" instead, and there's no
+    telling what future sets will call theirs; "Curio Foil" itself is the one
+    constant across all of them.
+
+    Number alone isn't always a safe key: Collector-rarity cards (CSR/CUR/
+    CPR) keep their base printing's collector number, and Grand Archive
+    sometimes models the Collector print as an edition in a DIFFERENT local
+    set/slug than the regular one (e.g. "MRC" vs "MRC 1st") that nonetheless
+    shares the same tcgcsv Group ID — so a number that's unambiguous within
+    THIS slug's own file can still collide with the wrong rarity's product.
+    Whenever tcgcsv's own Rarity field is one this app recognizes (see
+    TCGCSV_RARITY_CODE), a candidate whose own recorded rarity doesn't match
+    is filtered out before anything is written, rather than accepted on
+    number alone.
+
+    Only ever fills in a product_id that's currently missing, same
+    duplicate-safety as import_ids() — an admin-confirmed ID already on file
+    is never overwritten by this.
+
+    A collector number tcgcsv reports with no local match, whose only local
+    candidate(s) don't share its rarity, or that (even after the rarity
+    filter) still maps to more than one edition, is skipped and counted
+    rather than guessed at."""
+    from api_ga import DIR_SETS, JSON_EDITIONS, JSON_INFO
+
+    set_file = new_json(f"{DIR_SETS}/{set_slug}.json")
+    with set_file.open("r", encoding="utf-8") as f:
+        set_data = json.load(f)  # collector_number -> [edition_id, ...]
+
+    with new_json(JSON_EDITIONS).open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+
+    with new_json(JSON_INFO).open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+
+    ids_data = api_tcgplayer.get_all_ids()
+
+    products = api_tcgplayer.fetch_tcgcsv_products(group_id, debug)
+
+    matched_main = 0
+    matched_foil = 0
+    skipped_already_set = 0
+    skipped_no_match = 0
+    skipped_rarity_mismatch = 0
+    skipped_ambiguous = 0
+
+    for product in products:
+        ext = {e.get("name"): e.get("value") for e in product.get("extendedData", [])}
+        number = (ext.get("Number") or "").strip()
+        product_id = str(product.get("productId") or "").strip()
+        tcgcsv_rarity = (ext.get("Rarity") or "").strip()
+
+        if not number or not product_id:
+            continue
+
+        candidate_edition_ids = set_data.get(number, [])
+        if isinstance(candidate_edition_ids, str):
+            candidate_edition_ids = [candidate_edition_ids]
+
+        if not candidate_edition_ids:
+            skipped_no_match += 1
+            continue
+
+        # Only filter when tcgcsv's Rarity string is one this app recognizes
+        # — an unrecognized string means no contradicting evidence either
+        # way, so it falls back to trusting the number-only match rather than
+        # rejecting it over a rarity this app just doesn't have a code for.
+        expected_rarity_code = TCGCSV_RARITY_CODE.get(tcgcsv_rarity)
+
+        if expected_rarity_code is not None:
+            rarity_matched_ids = [
+                eid for eid in candidate_edition_ids
+                if _edition_rarity_code(eid, editions_data, info_data) == expected_rarity_code
+            ]
+
+            if not rarity_matched_ids:
+                skipped_rarity_mismatch += 1
+                continue
+
+            candidate_edition_ids = rarity_matched_ids
+
+        if len(candidate_edition_ids) > 1:
+            skipped_ambiguous += 1
+            continue
+
+        edition_id = candidate_edition_ids[0]
+        is_curio = "Curio Foil" in (product.get("name") or "")
+
+        if is_curio:
+            card_id = editions_data.get(edition_id, {}).get("card_id")
+            foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
+            foil_id = _curio_variant_id(foils)
+
+            if not foil_id:
+                skipped_no_match += 1
+                continue
+
+            if ids_data.get(edition_id, {}).get("foils", {}).get(foil_id, {}).get("product_id"):
+                skipped_already_set += 1
+                continue
+
+            api_tcgplayer.set_foil_product_id(edition_id, foil_id, product_id, debug)
+            ids_data.setdefault(edition_id, {}).setdefault("foils", {}).setdefault(foil_id, {})["product_id"] = product_id
+            matched_foil += 1
+        else:
+            if ids_data.get(edition_id, {}).get("product_id"):
+                skipped_already_set += 1
+                continue
+
+            api_tcgplayer.set_product_id(edition_id, product_id, debug)
+            ids_data.setdefault(edition_id, {})["product_id"] = product_id
+            matched_main += 1
+
+    result = {
+        "total_products": len(products),
+        "matched_main": matched_main,
+        "matched_foil": matched_foil,
+        "skipped_already_set": skipped_already_set,
+        "skipped_no_match": skipped_no_match,
+        "skipped_rarity_mismatch": skipped_rarity_mismatch,
+        "skipped_ambiguous": skipped_ambiguous
+    }
+
+    if debug:
+        print(f"tcgcsv import | set={set_slug} | group_id={group_id} | {result}")
+
+    return result
+
+
+def clear_product_ids_for_set(set_slug: str, debug: bool = False) -> dict:
+    """Clears every product_id (main and Curio Foil override alike) recorded
+    for editions in one local set — an admin's way to wipe a bad batch of
+    TCGPlayer IDs (from a tcgcsv mismatch, a stale Playwright auto-detect, a
+    manual typo, whatever the cause) so the set can be rechecked from
+    scratch, without also touching that edition's last_sales/last_listings
+    scrape-history clocks (see api_tcgplayer.clear_product_id/
+    clear_foil_product_id) — those stay meaningful bookkeeping even once the
+    ID that produced them is cleared, same as the existing per-card Clear
+    buttons elsewhere in the admin console leave product_id alone."""
+    from api_ga import DIR_SETS
+
+    set_file = new_json(f"{DIR_SETS}/{set_slug}.json")
+    with set_file.open("r", encoding="utf-8") as f:
+        set_data = json.load(f)  # collector_number -> [edition_id, ...]
+
+    edition_ids = set()
+    for eids in set_data.values():
+        edition_ids.update([eids] if isinstance(eids, str) else eids)
+
+    ids_data = api_tcgplayer.get_all_ids()
+
+    cleared_main = 0
+    cleared_foil = 0
+
+    for edition_id in edition_ids:
+        entry = ids_data.get(edition_id, {})
+
+        if entry.get("product_id"):
+            api_tcgplayer.clear_product_id(edition_id, debug)
+            cleared_main += 1
+
+        for foil_id, foil_entry in entry.get("foils", {}).items():
+            if foil_entry.get("product_id"):
+                api_tcgplayer.clear_foil_product_id(edition_id, foil_id, debug)
+                cleared_foil += 1
+
+    result = {"cleared_main": cleared_main, "cleared_foil": cleared_foil}
+
+    if debug:
+        print(f"tcgcsv clear | set={set_slug} | {result}")
+
+    return result
 
 
 def scrape_sales_tcg(card_name: str, debug: bool = False) -> None:

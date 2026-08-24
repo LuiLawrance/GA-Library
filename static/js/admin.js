@@ -9,6 +9,10 @@ let adminUserDetailDecks = null;
 let adminPidLoaded = false;
 let adminPidData = [];
 let adminPidSelected = new Set();
+// Sets panel's single selection (click a row to select it, like the card
+// list's own adminPidDetailSelected) — the header's Search/Clear/Sync
+// buttons act on whichever one set this is. null when nothing's selected.
+let adminSetsSelectedSlug = null;
 let adminPidRefreshStatus = {};
 let adminPidRefreshing = false;
 let adminPidSetFilter = new Set();
@@ -654,8 +658,9 @@ async function loadAdminFeaturedSets() {
 
 // set_filter (same slug scheme as _set_slug in api_ga.py) -> ISO date last
 // set-searched (see _set_search_cache in app.py) — which sets have already
-// had "Search Set" (searchAdminSet below) run on them, whether from here or
-// from the Cards page's own "$prefix" search (they share the same job/cache).
+// had "Search Set" (searchSelectedAdminSet below) run on them, whether from
+// here or from the Cards page's own "$prefix" search (they share the same
+// job/cache).
 let adminSetSearches = {};
 
 async function loadAdminSetSearches() {
@@ -714,18 +719,30 @@ function renderAdminInfoSetsPanel() {
 
     const rowHtml = ([prefix, {name, count}]) => {
         const slug = setSlug(prefix);
-        const searchedOn = adminSetSearches[slug];
+        const searchedOn = adminSetSearches[slug]?.last_searched;
+        const groupId = adminSetSearches[slug]?.tcgplayer_group_id || '';
+        const active = slug === adminSetsSelectedSlug;
 
+        // Clicking anywhere on the row selects it (see selectAdminSet) — the
+        // Group ID field and searched badge sit in their own
+        // event.stopPropagation()-ed span so editing/reading them doesn't
+        // also trigger a selection change.
         return `
-            <div class="admin-pricing-sets-row" id="admin-pricing-sets-row-${escapeHtml(slug)}">
+            <div class="admin-pricing-sets-row ${active ? 'admin-pricing-sets-row-active' : ''}"
+                 id="admin-pricing-sets-row-${escapeHtml(slug)}"
+                 onclick="selectAdminSet('${escapeHtml(slug)}')">
                 <span class="admin-pricing-sets-name" title="${escapeHtml(name)}">
                     ${escapeHtml(name)} <span class="admin-pricing-sets-prefix">${escapeHtml(prefix)}</span>
                 </span>
-                <span class="admin-pricing-sets-row-actions">
+                <span class="admin-pricing-sets-row-actions" onclick="event.stopPropagation()">
+                    <input type="text" class="admin-pricing-sets-groupid" value="${escapeHtml(groupId)}"
+                           placeholder="Group ID" inputmode="numeric" autocomplete="off"
+                           title="TCGplayer Group ID (tcgcsv.com) for this set"
+                           onkeydown="if (event.key === 'Enter') this.blur()"
+                           onchange="saveAdminSetGroupId('${escapeHtml(slug)}', this)">
+                    <span class="admin-pricing-sets-searched ${searchedOn ? 'admin-pricing-sets-searched-done' : ''}"
+                          title="${searchedOn ? `Set-searched ${escapeHtml(searchedOn)}` : 'Not yet set-searched'}">${searchedOn ? '✓' : '—'}</span>
                     <span class="admin-pricing-sets-count">${count}</span>
-                    <button type="button" class="admin-pricing-sets-search-btn ${searchedOn ? 'admin-pricing-sets-search-btn-done' : ''}"
-                            title="${searchedOn ? `Set-searched ${escapeHtml(searchedOn)} — click to search again` : 'Set-search this set (downloads every card in it)'}"
-                            onclick="searchAdminSet('${escapeHtml(prefix)}', this)">${searchedOn ? '✓' : '⤓'}</button>
                 </span>
             </div>
         `;
@@ -747,13 +764,29 @@ function renderAdminInfoSetsPanel() {
         ? groupHtml('Featured', featuredRows, true) + groupHtml('Other', otherRows, false)
         : rows.map(rowHtml).join('');
 
+    // The three action buttons (Search/Clear/Sync) act on whichever one set
+    // is currently selected (see selectAdminSet, searchSelectedAdminSet,
+    // clearSelectedAdminSetIds, syncSelectedAdminSetTcgcsv).
+    const anySelected = !!adminSetsSelectedSlug;
+
     panel.innerHTML = `
         <div class="admin-pricing-sets-header">
             <span class="admin-pricing-sets-title">Sets</span>
-            <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pricing-sets-featured-btn"
-                    onclick="checkFeaturedSets(this)">Check Featured</button>
+            <span class="admin-pricing-sets-header-actions">
+                <button type="button" class="admin-pricing-sets-action-btn" id="admin-pricing-sets-action-sync" ${anySelected ? '' : 'disabled'}
+                        title="Import product IDs from tcgcsv.com for the selected set" onclick="syncSelectedAdminSetTcgcsv()">♻️</button>
+                <button type="button" class="admin-pricing-sets-action-btn" id="admin-pricing-sets-action-search" ${anySelected ? '' : 'disabled'}
+                        title="Search Set (download cards) for the selected set" onclick="searchSelectedAdminSet()">📥</button>
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pricing-sets-featured-btn"
+                        onclick="checkFeaturedSets(this)">Check Featured</button>
+                <button type="button" class="admin-pricing-sets-action-btn admin-pricing-sets-action-btn-danger" id="admin-pricing-sets-action-clear" ${anySelected ? '' : 'disabled'}
+                        title="Clear saved TCGplayer product IDs for the selected set" onclick="clearSelectedAdminSetIds()">❌</button>
+                <a class="admin-pricing-sets-action-btn" href="https://tcgcsv.com" target="_blank" rel="noopener noreferrer"
+                   title="Open tcgcsv.com">🌐</a>
+            </span>
         </div>
         <div class="admin-pricing-sets-status" id="admin-pricing-sets-status"></div>
+        <div class="admin-pricing-sets-progress-wrap hidden" id="admin-pricing-sets-progress-wrap"></div>
         <div class="admin-pricing-sets-list">
             ${rowsHtml || '<div class="admin-pid-detail-empty-small">No cards loaded.</div>'}
         </div>
@@ -802,60 +835,270 @@ async function checkFeaturedSets(btnEl) {
     }
 }
 
-// Per-row "Search Set" button in the Sets panel — starts the SAME background
-// job the Cards page's own "$prefix" search bar starts (POST
-// /api/sets/search/start, see api_sets_search_start in app.py), which runs
-// set_search() (api_ga.py) to download every card in the set. Reuses that
-// endpoint rather than a separate admin-only one, so a set searched from
-// either place counts for both. Polls the button's own text with live
-// progress instead of a separate progress bar, matching this panel's compact
-// per-row scale; the "already searched" state (adminSetSearches, backed by
-// JSON_SET_SEARCHES — see app.py) persists across page loads, unlike a
-// plain in-memory flag would.
-async function searchAdminSet(prefix, btnEl) {
-    if (btnEl.disabled) return;
+// Clicking a Sets panel row selects it (mirrors the card list's own
+// adminPidDetailSelected single-selection) — the header's Search/Clear/Sync
+// buttons act on whichever one set this is. Clicking the already-selected
+// row deselects it (unlike the card list, which always has some card open) —
+// worth having here since one of those three buttons is destructive, so
+// leaving the previous click's target selected by default isn't assumed safe.
+function selectAdminSet(slug) {
+    adminSetsSelectedSlug = adminSetsSelectedSlug === slug ? null : slug;
+    renderAdminInfoSetsPanel();
+}
 
-    btnEl.disabled = true;
-    btnEl.classList.remove('admin-pricing-sets-search-btn-done');
-    btnEl.textContent = '…';
+// force=true always disables the three action buttons regardless of
+// selection (used while one of them is already mid-run); otherwise it's
+// purely "is a set currently selected". A full renderAdminInfoSetsPanel()
+// call already sets these correctly from adminSetsSelectedSlug on its own,
+// so this is only needed to restore them after an action finishes without
+// itself triggering a re-render (e.g. the catch branch below).
+function setAdminSetActionButtonsDisabled(force) {
+    const disabled = force || !adminSetsSelectedSlug;
+    ['admin-pricing-sets-action-search', 'admin-pricing-sets-action-clear', 'admin-pricing-sets-action-sync'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = disabled;
+    });
+}
+
+// Progress bar for the "Search Set" download — same visual language as the
+// Cards page's own set-search progress bar (cardsSetSearchProgressInnerHTML/
+// showCardsSetSearchProgress/updateCardsSetSearchProgress/
+// hideCardsSetSearchProgress in cards.js), just scoped to this panel's own
+// element IDs rather than sharing cards.js's (separate pages, so no
+// collision risk either way, but keeping them distinct avoids any confusion
+// reading the two side by side).
+function adminSetsProgressInnerHTML(done, total, slug, currentCard) {
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const label = currentCard
+        ? `Fetching ${slug.toUpperCase()} — ${done}/${total} — ${currentCard}`
+        : `Fetching ${slug.toUpperCase()}${total ? ` — ${done}/${total}` : '…'}`;
+    return `
+        <div class="admin-pricing-sets-progress-label" id="admin-pricing-sets-progress-label">${escapeHtml(label)}</div>
+        <div class="admin-pricing-sets-progress-track">
+            <div class="admin-pricing-sets-progress-bar" id="admin-pricing-sets-progress-bar" style="width:${pct}%"></div>
+        </div>`;
+}
+
+function showAdminSetsProgress(done, total, slug, currentCard) {
+    const wrap = document.getElementById('admin-pricing-sets-progress-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = adminSetsProgressInnerHTML(done, total, slug, currentCard);
+    wrap.classList.remove('hidden');
+}
+
+function updateAdminSetsProgress(done, total, slug, currentCard) {
+    const label = document.getElementById('admin-pricing-sets-progress-label');
+    const bar = document.getElementById('admin-pricing-sets-progress-bar');
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    if (label) {
+        label.textContent = currentCard
+            ? `Fetching ${slug.toUpperCase()} — ${done}/${total} — ${currentCard}`
+            : `Fetching ${slug.toUpperCase()}${total ? ` — ${done}/${total}` : '…'}`;
+    }
+    if (bar) bar.style.width = `${pct}%`;
+}
+
+function hideAdminSetsProgress() {
+    const wrap = document.getElementById('admin-pricing-sets-progress-wrap');
+    if (!wrap) return;
+    wrap.classList.add('hidden');
+    wrap.innerHTML = '';
+}
+
+// "Search Set" (📥) — starts the SAME background job the Cards page's own
+// "$prefix" search bar starts (POST /api/sets/search/start, see
+// api_sets_search_start in app.py), which runs set_search() (api_ga.py) to
+// download every card in the selected set. Reuses that endpoint rather than
+// a separate admin-only one, so a set searched from either place counts for
+// both.
+//
+// Card data only — deliberately does NOT also sync TCGPlayer product IDs;
+// that's the ♻ button's job (syncSelectedAdminSetTcgcsv), kept separate so
+// an admin can re-download cards without touching product IDs, or vice versa.
+async function searchSelectedAdminSet() {
+    const slug = adminSetsSelectedSlug;
+    if (!slug) return;
+
+    setAdminSetActionButtonsDisabled(true);
+    const status = document.getElementById('admin-pricing-sets-status');
+    if (status) {
+        status.classList.remove('admin-pricing-sets-status-error');
+        status.textContent = '';
+    }
+    showAdminSetsProgress(0, 0, slug, null);
+
+    let message;
+    let isError = false;
 
     try {
-        const startRes = await fetch(`/api/sets/search/start?prefix=${encodeURIComponent(prefix)}`, {method: 'POST'});
+        const startRes = await fetch(`/api/sets/search/start?prefix=${encodeURIComponent(slug)}`, {method: 'POST'});
         if (!startRes.ok) throw new Error('Failed to start set search');
         const startData = await startRes.json();
 
         if (startData.job_id) {
-            await pollAdminSetSearchJob(startData.job_id, btnEl);
+            await pollAdminSetSearchJob(startData.job_id, slug);
+        } else {
+            // "cached" fast-path — api_sets_search_start's own freshness
+            // check decided this set didn't need re-fetching, so there's no
+            // job (and no per-card progress) to show — just report it done.
+            updateAdminSetsProgress(1, 1, slug, null);
         }
-        // No job_id means api_sets_search_start's own "cached" fast-path —
-        // this set was already searched recently enough (UPDATE_THRESHOLD)
-        // not to need it again, so it's just as "searched" as if a job had
-        // actually run here.
 
-        const slug = prefix.trim().toLowerCase().replace(/ /g, '_');
-        adminSetSearches[slug] = new Date().toISOString().split('T')[0];
+        adminSetSearches[slug] = {...(adminSetSearches[slug] || {}), last_searched: new Date().toISOString().split('T')[0]};
+        message = `Downloaded ${slug.toUpperCase()}.`;
 
-        // set_search() may have just downloaded new cards into this set —
-        // refreshAdminPidData() re-fetches adminPidData and re-renders the
-        // Sets panel (and list) so the count next to it updates immediately
-        // instead of only reflecting the change on the next page load. That
-        // re-render rebuilds this row (and btnEl along with it) already
-        // showing the done state, since adminSetSearches was just updated
-        // above — no need to touch btnEl directly here.
+        // set_search() may have just downloaded new cards — refreshAdminPidData()
+        // re-fetches adminPidData and re-renders the list/Sets panel so counts
+        // and "already searched" indicators update immediately. That rebuilds
+        // the whole panel (status div included), so the message is set
+        // afterward via a fresh lookup rather than the `status` reference above.
         await refreshAdminPidData();
     } catch (err) {
-        btnEl.textContent = '⤓';
-        btnEl.title = 'Set search failed — click to retry';
-        btnEl.disabled = false;
+        message = `Failed to search ${slug.toUpperCase()}.`;
+        isError = true;
+    }
+
+    // refreshAdminPidData() already rebuilds the progress wrap back to its
+    // default hidden state on success — this is what actually clears it on
+    // the error path, where that rebuild never happened.
+    hideAdminSetsProgress();
+
+    const freshStatus = document.getElementById('admin-pricing-sets-status');
+    if (freshStatus) {
+        freshStatus.classList.toggle('admin-pricing-sets-status-error', isError);
+        freshStatus.textContent = message;
+    }
+    setAdminSetActionButtonsDisabled(false);
+}
+
+// "Clear Product IDs" (🗑️) — wipes every saved TCGPlayer product ID (main and
+// Curio Foil override alike) for the selected set (POST
+// /api/admin/set-searches/{slug}/clear-product-ids, see
+// api_admin_clear_set_product_ids in app.py and clear_product_ids_for_set in
+// pricing_ga.py). For when a batch of IDs turns out wrong — a tcgcsv
+// mismatch, a stale Playwright auto-detect, a manual typo, whatever the
+// cause — and needs to be wiped and rechecked from scratch rather than fixed
+// one card at a time.
+async function clearSelectedAdminSetIds() {
+    const slug = adminSetsSelectedSlug;
+    if (!slug) return;
+
+    setAdminSetActionButtonsDisabled(true);
+    let message;
+    let isError = false;
+
+    try {
+        const res = await fetch(`/api/admin/set-searches/${encodeURIComponent(slug)}/clear-product-ids`, {method: 'POST'});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Clear failed');
+
+        message = `Cleared ${data.cleared_main} product ID${data.cleared_main === 1 ? '' : 's'}`
+            + (data.cleared_foil ? ` + ${data.cleared_foil} Curio Foil` : '')
+            + ` from ${slug.toUpperCase()}.`;
+
+        await refreshAdminPidData();
+    } catch (err) {
+        message = err.message || 'Clear failed.';
+        isError = true;
+    }
+
+    const status = document.getElementById('admin-pricing-sets-status');
+    if (status) {
+        status.classList.toggle('admin-pricing-sets-status-error', isError);
+        status.textContent = message;
+    }
+    setAdminSetActionButtonsDisabled(false);
+}
+
+// "Sync from tcgcsv" (♻️) — backfills product IDs for the selected set from
+// tcgcsv.com by collector number (POST
+// /api/admin/set-searches/{slug}/import-tcgcsv, see api_admin_import_tcgcsv
+// in app.py and import_product_ids_from_tcgcsv in pricing_ga.py) instead of
+// the fuzzy Playwright search "Auto-detect from TCGPlayer" falls back to.
+// 400s (surfaced as a failure below) if this set has no Group ID saved (see
+// saveAdminSetGroupId) — tcgcsv needs it to know which set to fetch.
+async function syncSelectedAdminSetTcgcsv() {
+    const slug = adminSetsSelectedSlug;
+    if (!slug) return;
+
+    setAdminSetActionButtonsDisabled(true);
+    let message;
+    let isError = false;
+
+    try {
+        const res = await fetch(`/api/admin/set-searches/${encodeURIComponent(slug)}/import-tcgcsv`, {method: 'POST'});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Import failed');
+
+        message = `Matched ${data.matched_main} product ID${data.matched_main === 1 ? '' : 's'}`
+            + (data.matched_foil ? ` + ${data.matched_foil} Curio Foil` : '')
+            + ` from ${data.total_products} tcgcsv product${data.total_products === 1 ? '' : 's'}`
+            // A card whose Collector-rarity print keeps the base card's
+            // number can otherwise look like an unambiguous number-only
+            // match — surfaced here rather than silently folded into
+            // "matched" or a generic skip count (see TCGCSV_RARITY_CODE in
+            // pricing_ga.py) so a run that's quietly rejecting mismatches
+            // doesn't just look identical to one with nothing to reject.
+            + (data.skipped_rarity_mismatch
+                ? ` (${data.skipped_rarity_mismatch} rarity mismatch${data.skipped_rarity_mismatch === 1 ? '' : 'es'} skipped)`
+                : '')
+            + '.';
+
+        await refreshAdminPidData();
+    } catch (err) {
+        message = err.message || 'Import failed.';
+        isError = true;
+    }
+
+    const status = document.getElementById('admin-pricing-sets-status');
+    if (status) {
+        status.classList.toggle('admin-pricing-sets-status-error', isError);
+        status.textContent = message;
+    }
+    setAdminSetActionButtonsDisabled(false);
+}
+
+// Per-row TCGplayer Group ID field in the Sets panel — saves to
+// SET_SEARCHES.json via PATCH /api/admin/set-searches/{slug} (see
+// api_admin_set_group_id in app.py). tcgcsv.com's Group ID isn't discoverable
+// through anything this app can query on its own, so it's entered manually
+// by an admin here rather than looked up automatically. Updates
+// adminSetSearches in place rather than re-rendering the whole panel, since a
+// full renderAdminInfoSetsPanel() call would rebuild this very input out from
+// under the change event that's still firing on it.
+async function saveAdminSetGroupId(slug, inputEl) {
+    const value = inputEl.value.trim();
+    inputEl.disabled = true;
+    inputEl.classList.remove('admin-pricing-sets-groupid-error');
+
+    try {
+        const res = await fetch(`/api/admin/set-searches/${encodeURIComponent(slug)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tcgplayer_group_id: value})
+        });
+        if (!res.ok) throw new Error('Failed to save group ID');
+        const data = await res.json();
+
+        const entry = {...(adminSetSearches[slug] || {})};
+        if (data.tcgplayer_group_id) entry.tcgplayer_group_id = data.tcgplayer_group_id;
+        else delete entry.tcgplayer_group_id;
+        adminSetSearches[slug] = entry;
+
+        inputEl.value = data.tcgplayer_group_id || '';
+    } catch (err) {
+        inputEl.classList.add('admin-pricing-sets-groupid-error');
+    } finally {
+        inputEl.disabled = false;
     }
 }
 
-// Silent background refresh of adminPidData (e.g. after searchAdminSet just
-// downloaded new cards) — re-fetches the same data loadAdminPricingIds()
-// does and re-renders the list/Sets panel, but without that function's
-// "Loading…"/table-clearing side effects, since this isn't the page's own
-// initial load. Leaves the previous data in place if the refresh itself
-// fails, rather than clearing what was already showing.
+// Silent background refresh of adminPidData (e.g. after a bulk action just
+// changed product IDs or downloaded new cards) — re-fetches the same data
+// loadAdminPricingIds() does and re-renders the list/Sets panel, but without
+// that function's "Loading…"/table-clearing side effects, since this isn't
+// the page's own initial load. Leaves the previous data in place if the
+// refresh itself fails, rather than clearing what was already showing.
 async function refreshAdminPidData() {
     try {
         const res = await fetch('/api/admin/pricing/product-ids');
@@ -870,20 +1113,28 @@ async function refreshAdminPidData() {
 }
 
 // Polls GET /api/sets/search/status/{job_id} (same endpoint pollSetSearchJob
-// in cards.js polls) until the job finishes, updating btnEl's own text with
-// live done/total progress meanwhile. Throws on an error status so
-// searchAdminSet's catch block handles the button's error state in one place.
-async function pollAdminSetSearchJob(jobId, btnEl) {
+// in cards.js polls) until the job finishes or errors, driving this panel's
+// own progress bar (updateAdminSetsProgress) off the same done/total/
+// current_card fields cards.js's own poller reads.
+async function pollAdminSetSearchJob(jobId, slug) {
     while (true) {
         const res = await fetch(`/api/sets/search/status/${encodeURIComponent(jobId)}`);
         if (!res.ok) return; // job expired/not found — treat as done
 
         const data = await res.json();
 
-        if (data.status === 'done') return;
+        if (data.status === 'done') {
+            // Force the bar to visibly reach 100% (done/total may lag by one
+            // tick) before returning — same reasoning as cards.js's poller.
+            const total = data.total || data.done || 1;
+            updateAdminSetsProgress(total, total, slug, null);
+            return;
+        }
+
+        updateAdminSetsProgress(data.done || 0, data.total || 0, slug, data.current_card);
+
         if (data.status === 'error') throw new Error(data.error || 'Set search failed');
 
-        btnEl.textContent = data.total ? `${data.done}/${data.total}` : '…';
         await sleep(500);
     }
 }
@@ -3077,6 +3328,7 @@ function initAdmin() {
     adminPidLoaded = false;
     adminPidData = [];
     adminPidSelected = new Set();
+    adminSetsSelectedSlug = null;
     adminPidRefreshStatus = {};
     adminPidRefreshing = false;
     adminPidSetFilter = new Set();
