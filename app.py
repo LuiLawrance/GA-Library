@@ -1,13 +1,14 @@
-from api_ga import _api_search, _build_collector_map, _format_search, _group_slug, _sort_collector_number, \
-    _update_slug, card_reset, DIR_SETS, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, \
-    JSON_SLUGS, JSON_THEMA, JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
+from api_ga import _api_search, _build_collector_map, _download_card_image, _download_set_image, \
+    _format_search, _group_slug, _sort_collector_number, _update_slug, API_HOST, API_IMAGE, card_reset, \
+    DIR_SETS, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, JSON_THEMA, \
+    JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
     import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
@@ -16,6 +17,7 @@ from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id,
     scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, \
     scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
+from settings import load_settings, save_settings, SETTINGS_DEFAULTS
 from user import JSON_USERS, RANK_ORDER, user_create, user_delete, user_login
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
@@ -663,13 +665,12 @@ async def api_sets():
 # search every prefix in a release together (e.g. "RDO • RDO 1st • RDOA •
 # RDOP • RDOPD") rather than picking one to stand in for the rest.
 #
-# The image URL isn't stored anywhere — it's re-derived from group_name via
-# _group_slug, the same slug _set_image_download (api_ga.py) saves the cached
-# banner under, so JSON_FEATURED_SETS never needs to carry an image path at
-# all. Always points at DATA_GA/IMAGES_SETS_GA (served via /set-images/{name}
-# below), never hotlinked to api.gatcg.com; if a sync hasn't cached that
-# release's banner yet, the route 404s and cards.js's onerror just drops the
-# <img>, same as a missing card image degrades on the tiles below it.
+# The URL itself is always /set-images/{slug}.png — re-derived from
+# group_name via _group_slug, the same slug _download_set_image (api_ga.py)
+# saves the cached banner under — regardless of store_images_locally; that
+# route (below) is what actually branches on the setting, lazily downloading
+# and serving the cached file or redirecting to api.gatcg.com as appropriate,
+# so this endpoint doesn't need to know which mode is active.
 @app.get("/api/sets/featured")
 async def api_sets_featured():
     with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
@@ -1063,39 +1064,10 @@ def _save_users_data(data: dict) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-JSON_SETTINGS = "DATA_GENERAL/SETTINGS.json"
-SETTINGS_DEFAULTS = {
-    "store_images_locally": False,
-    "local_database": False,
-}
-
-
-def _load_settings_data() -> dict:
-    settings_file = new_json(JSON_SETTINGS)
-    with settings_file.open(encoding="utf-8") as f:
-        data = json.load(f)
-
-    # A fresh file starts as {} (see new_json) — fill in any default keys
-    # missing from it, but never overwrite a value already on disk, so an
-    # existing SETTINGS.json is always the source of truth once it exists.
-    missing = {k: v for k, v in SETTINGS_DEFAULTS.items() if k not in data}
-    if missing:
-        data.update(missing)
-        with settings_file.open("w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-
-    return data
-
-
-def _save_settings_data(data: dict) -> None:
-    with new_json(JSON_SETTINGS).open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-
 @app.get("/api/admin/settings")
 async def api_admin_get_settings(request: Request):
     require_admin(request)
-    return JSONResponse(_load_settings_data())
+    return JSONResponse(load_settings())
 
 
 @app.post("/api/admin/settings")
@@ -1104,12 +1076,12 @@ async def api_admin_set_settings(request: Request):
 
     body = await request.json()
 
-    settings_data = _load_settings_data()
+    settings_data = load_settings()
     for key in SETTINGS_DEFAULTS:
         if key in body:
             settings_data[key] = bool(body[key])
 
-    _save_settings_data(settings_data)
+    save_settings(settings_data)
 
     return JSONResponse(settings_data)
 
@@ -1927,22 +1899,56 @@ async def api_register(username: str = Form(...), password: str = Form(...)):
 
 @app.get("/images/{edition_id}.jpg")
 async def get_image(edition_id: str):
+    # The API's own image filename is always just "{edition_id}.jpg" (verified
+    # against its /cards/{slug} responses), so this redirect needs no lookup —
+    # with store_images_locally off, every card's image is served straight
+    # from the API instead of the (in that mode, never-populated) local cache.
+    if not load_settings().get("store_images_locally", False):
+        return RedirectResponse(f"{API_IMAGE}{edition_id}.jpg")
+
     path = f"DATA_GA/IMAGES_GA/{edition_id}.jpg"
 
-    if not os.path.exists(path):
+    # Card search/sync no longer download images themselves (see
+    # _download_card_image's own comment in api_ga.py) — the first request
+    # for a given edition's image is what fills DIR_IMAGES in, here.
+    if not os.path.exists(path) and not _download_card_image(edition_id):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(path)
 
 
-# Serves a featured-set release banner cached locally by _set_image_download
-# (api_ga.py) — filename is whatever the Featured Sets API itself names it
-# (e.g. "RDO.png"), same as get_image above keys off the edition_id filename.
+# Serves a featured-set release banner, downloaded on demand by
+# _download_set_image (api_ga.py) the first time it's requested — filename is
+# whatever _group_slug(group_name) resolves to (e.g. "RDO.png"), same as
+# get_image above keys off the edition_id filename. Unlike card art, this
+# filename doesn't reliably map back to the API's own image path (see
+# _download_set_image's own comment), so it's looked up from
+# JSON_FEATURED_SETS's "image_path" (recorded by sync_featured_sets) by
+# matching each group's own slug against this filename — needed either way,
+# whether that lookup ends up feeding a redirect or a download.
 @app.get("/set-images/{filename}")
 async def get_set_image(filename: str):
+    with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
+        featured = json.load(f)
+
+    image_path = next(
+        (
+            group_data["image_path"]
+            for group_name, group_data in featured.items()
+            if group_data.get("image_path") and f"{_group_slug(group_name)}.png" == filename
+        ),
+        None,
+    )
+
+    if not load_settings().get("store_images_locally", False):
+        if not image_path:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        return RedirectResponse(f"{API_HOST}{image_path}")
+
     path = f"DATA_GA/IMAGES_SETS_GA/{filename}"
 
-    if not os.path.exists(path):
+    if not os.path.exists(path) and not (image_path and _download_set_image(filename, image_path)):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(path)
