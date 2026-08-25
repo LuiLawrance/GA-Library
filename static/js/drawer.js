@@ -1276,7 +1276,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
                 <div class="drawer-edition-media tile-zoom">
                     <div class="edition-tile-wrap">
                         <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
-                        <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
+                        <img data-src="/images/${eid}.jpg" alt="${einfo.set_name}"
                             title="${einfo.set_name} (${einfo.set_prefix})"
                             onclick="event.stopPropagation(); selectDrawerEditionFor('${drawerId}', '${eid}')"
                             onload="revealTileImage(this)" onerror="revealTileImage(this)"
@@ -1351,6 +1351,14 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
         const doInsert = () => {
             drawerContent.innerHTML = '';
             drawerContent.appendChild(inner);
+
+            // Queued (tiles.js) rather than set directly in the template —
+            // see the matching comment in buildCardTile (cards.js). A card
+            // with many prints fires that many /images/ requests the instant
+            // this markup lands, competing with the drawer's own detail fetch.
+            inner.querySelectorAll('.drawer-editions img[data-src]').forEach(img => {
+                queueTileImageLoad(img, img.dataset.src, {priority: true});
+            });
 
             // Mark the selected edition tile immediately
             const initialTile = document.getElementById(`${cfg.tilePrefix}${editionId}`);

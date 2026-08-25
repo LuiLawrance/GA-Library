@@ -57,6 +57,73 @@ function revealTileImage(img) {
     }, {outMs: 150, inMs: 200});
 }
 
+// ── Concurrency-limited image loading queue ──
+// Every card image request — even with images cached server-side — goes
+// through OUR OWN server (/images/{id}.jpg, /set-images/{name}.png), and
+// browsers cap concurrent connections per origin (commonly ~6). A big result
+// grid setting dozens or hundreds of <img src> at once saturates that cap
+// entirely: anything else hitting the server afterward — opening the drawer,
+// its own edition images, a new search, /api/me — has to sit queued BEHIND
+// the whole grid's requests at the browser level before the server ever even
+// receives it. A server-side fix (e.g. a bounded thread pool for downloads)
+// can't touch this — the browser hasn't sent the request yet to be handled.
+// Throttling actual image loads to a handful "in flight" at a time keeps a
+// few connection slots always free for everything else.
+const TILE_IMG_MAX_CONCURRENT = 4;
+let _tileImgActive = 0;
+const _tileImgQueue = [];
+
+// Queues `img` to load `src` once a slot is free, rather than setting
+// img.src directly (which starts the fetch immediately, uncontrolled).
+// Callers build their tile markup with no src at all (or a bare <img> with
+// its URL kept only in a JS variable) and call this right after inserting
+// the tile into the DOM. priority:true jumps the front of the queue instead
+// of the back — for a surface the user is actively looking at right now
+// (the drawer's edition thumbnails) rather than an off-screen result grid
+// still working through a big batch in the background; otherwise the
+// drawer's own images would just wait their turn behind whatever the grid
+// queued first.
+function queueTileImageLoad(img, src, {priority = false} = {}) {
+    if (priority) {
+        _tileImgQueue.unshift({img, src});
+    } else {
+        _tileImgQueue.push({img, src});
+    }
+
+    // Deferred a tick rather than pumped synchronously here — this runs from
+    // inside a tile-builder function (buildCardTile etc.) whose own caller
+    // appends the returned tile right after, so `img` isn't connected to the
+    // DOM yet at this exact point, and neither are any sibling tiles still
+    // to come later in that same synchronous build loop. A microtask runs
+    // once that whole loop (and its appendChild calls) has finished, so the
+    // isConnected check below sees where things actually landed instead of
+    // "nothing is connected yet" — which would otherwise skip every tile,
+    // load nothing, and leave every spinner stuck forever.
+    queueMicrotask(_pumpTileImgQueue);
+}
+
+function _pumpTileImgQueue() {
+    while (_tileImgActive < TILE_IMG_MAX_CONCURRENT && _tileImgQueue.length) {
+        const {img, src} = _tileImgQueue.shift();
+
+        // The tile may have been torn down already (e.g. a new search
+        // replaced the whole grid) before its turn came up — skip it rather
+        // than spending a slot loading art nobody will ever see.
+        if (!img.isConnected) continue;
+
+        _tileImgActive++;
+
+        const release = () => {
+            _tileImgActive--;
+            _pumpTileImgQueue();
+        };
+
+        img.addEventListener('load', release, {once: true});
+        img.addEventListener('error', release, {once: true});
+        img.src = src;
+    }
+}
+
 // ── Look up a foil's info by id, checking each foil's variants (e.g. a
 // Curio Foil) when it isn't a top-level foil id itself. Mirrors
 // _foil_kind_for_id in pricing_ga.py. ──

@@ -938,7 +938,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
             ${imgSrc ? `<div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>` : ''}
-            <img class="${imgSrc ? '' : 'tile-img-loaded'}" src="${imgSrc}" alt="${cardName}"
+            <img class="${imgSrc ? '' : 'tile-img-loaded'}" alt="${cardName}"
                 onload="revealTileImage(this)"
                 onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
@@ -958,6 +958,9 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
             <button class="inv-tile-qty-btn inv-tile-qty-sub" type="button">−</button>
         </div>
         <div class="inv-tile-qty-indicator"></div>`;
+
+    // Queued (tiles.js) — see the matching comment in buildCardTile (cards.js).
+    if (imgSrc) queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), imgSrc);
 
     const input = tile.querySelector('.inv-tile-qty-input');
     const badge = tile.querySelector('.dga-qty-badge');

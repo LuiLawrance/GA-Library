@@ -1293,7 +1293,7 @@ function buildInvCardTile(row, index, total = 1) {
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
             <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
-            <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
+            <img alt="${row.cardName}"
                 onload="revealTileImage(this)"
                 onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
@@ -1328,6 +1328,10 @@ function buildInvCardTile(row, index, total = 1) {
         openCardContextMenu(e, row);
     });
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
+
+    // Queued (tiles.js) — see the matching comment in buildCardTile (cards.js).
+    queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), `/images/${row.edition_id}.jpg`);
+
     return tile;
 }
 

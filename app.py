@@ -22,6 +22,7 @@ from user import JSON_USERS, RANK_ORDER, user_create, user_delete, user_login
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
+import asyncio
 import json
 import os
 import random
@@ -29,6 +30,7 @@ import re
 import requests
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv(".env" if os.path.exists(".env") else "env")
 
@@ -1897,6 +1899,26 @@ async def api_register(username: str = Form(...), password: str = Form(...)):
     return await api_login(username=username, password=password)
 
 
+# _download_card_image/_download_set_image (api_ga.py) hit api.gatcg.com with
+# a plain synchronous `requests` call — calling either directly from an async
+# route handler runs that blocking network wait right on the single asyncio
+# event loop thread, freezing EVERY other request the server is handling
+# (unrelated ones included) for as long as that one download takes. A burst of
+# lazy image loads sharing one uncached page (e.g. opening the drawer with
+# several editions never fetched before) serializes completely and reads as
+# the whole app stalling. Routed through a small dedicated thread pool
+# instead: two workers so a slow download doesn't queue behind a single lane,
+# but still bounded rather than one thread per request (an unbounded burst
+# could otherwise fork off dozens of simultaneous outbound connections) —
+# anything beyond two just waits its turn in the pool's own queue.
+_IMAGE_DOWNLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="image-download")
+
+
+async def _run_blocking(func, *args):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_IMAGE_DOWNLOAD_EXECUTOR, func, *args)
+
+
 @app.get("/images/{edition_id}.jpg")
 async def get_image(edition_id: str):
     # The API's own image filename is always just "{edition_id}.jpg" (verified
@@ -1911,7 +1933,7 @@ async def get_image(edition_id: str):
     # Card search/sync no longer download images themselves (see
     # _download_card_image's own comment in api_ga.py) — the first request
     # for a given edition's image is what fills DIR_IMAGES in, here.
-    if not os.path.exists(path) and not _download_card_image(edition_id):
+    if not os.path.exists(path) and not await _run_blocking(_download_card_image, edition_id):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(path)
@@ -1948,7 +1970,7 @@ async def get_set_image(filename: str):
 
     path = f"DATA_GA/IMAGES_SETS_GA/{filename}"
 
-    if not os.path.exists(path) and not (image_path and _download_set_image(filename, image_path)):
+    if not os.path.exists(path) and not (image_path and await _run_blocking(_download_set_image, filename, image_path)):
         raise HTTPException(status_code=404, detail="Image not found")
 
     return FileResponse(path)

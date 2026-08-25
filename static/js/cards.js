@@ -215,7 +215,7 @@ function buildCardTile(card, index, total = 1) {
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
             <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
-            <img src="/images/${card.edition_id}.jpg" alt="${card.name}"
+            <img alt="${card.name}"
                 onload="revealTileImage(this)"
                 onerror="this.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}
@@ -224,6 +224,12 @@ function buildCardTile(card, index, total = 1) {
     `;
     tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
+
+    // Queued (tiles.js) rather than set directly — a big result grid setting
+    // hundreds of <img src> at once starves the browser's per-origin
+    // connection pool, so anything else hitting the server (opening the
+    // drawer, a new search) sits stuck behind them client-side.
+    queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), `/images/${card.edition_id}.jpg`);
 
     // tiles.js — attach inventory overlay for logged-in users
     attachInvOverlay(tile, card.card_id, card.edition_id, card.name);
