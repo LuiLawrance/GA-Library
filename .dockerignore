@@ -3,7 +3,5 @@
 .venv
 __pycache__
 *.pyc
-.env
-env
 DATA_GA
 DATA_GENERAL
