@@ -2636,7 +2636,9 @@ function renderAdminPricingImageCol() {
             <span class="drawer-set">${drawerSetLineHTML(record)}</span>
         </div>
         <div class="admin-pid-detail-image-wrap">
-            <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}">
+            <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
+            <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}"
+                 onload="revealTileImage(this)" onerror="revealTileImage(this)">
         </div>
         ${statsHtml}
         ${pidRowHtml}
