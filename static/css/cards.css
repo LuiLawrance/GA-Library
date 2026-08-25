@@ -328,10 +328,86 @@
     width: 100%;
     border-radius: 14px;
     display: block;
-    transition: transform 0.2s;
+    transition: transform 0.2s, opacity 0.2s ease;
 }
 
 /* img scale → see .card-tile--guest/authed below */
+
+/* ── Image loading placeholder ──
+   Card art now downloads lazily on first request (see get_image in app.py)
+   instead of being pre-fetched during sync, so a big result grid used to sit
+   on collapsed, blank tiles that popped in one by one as each image arrived.
+   Reserving the real card aspect ratio (5:7, confirmed against the API's own
+   images) up front means every tile has a stable box from the moment it's
+   inserted, with a spinner filling that box until buildCardTile's inline
+   onload removes it (onerror already replaces the whole tile, spinner
+   included, with .card-tile-missing). Scoped to #card-results specifically —
+   not the shared .edition-tile-wrap/.card-tile classes Inventory/Decks/
+   Prices/Drawer also use — since search results are where dozens of images
+   can be loading at once; those other surfaces show far fewer at a time.
+
+   The spinner-to-image handoff is a crossfade rather than an instant swap —
+   revealTileImage (cards.js) drives it via fadeSwap (modal-anim.js), the same
+   fade-out/mutate/fade-in mechanic page navigation and the drawer's edition
+   switch already use. Per fadeSwap's own convention, this defines its own
+   .fade-out/.fade-in pair scoped to .tile-img-spinner (not the .content
+   generic in main.css) rather than reusing another caller's. */
+#card-results .edition-tile-wrap {
+    position: relative;
+    aspect-ratio: 5 / 7;
+    background: var(--bg-card);
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+#card-results .edition-tile-wrap img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+}
+
+#card-results .edition-tile-wrap img.tile-img-loaded {
+    opacity: 1;
+}
+
+.tile-img-spinner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 1;
+}
+
+.tile-img-spinner.fade-out {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.tile-img-spinner.fade-in {
+    opacity: 1;
+    transition: opacity 0.2s ease;
+}
+
+.tile-img-spinner svg {
+    width: 26px;
+    height: 26px;
+    color: var(--text-muted);
+    opacity: 0.6;
+    animation: tile-img-spin 0.85s linear infinite;
+}
+
+@keyframes tile-img-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
 
 /* ── Featured sets — shown in #card-results before any search is made
    (see loadFeaturedSets in cards.js). Landscape banners rather than the
