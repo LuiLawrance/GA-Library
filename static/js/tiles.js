@@ -24,6 +24,39 @@ function priceBadgesHTML(lastPrice, lowestListing) {
     return html;
 }
 
+// ── Loading placeholder shown over a tile's image while it downloads — see
+// .tile-img-spinner (cards.css). Shared by Cards search results and the
+// drawer's edition grid. revealTileImage below (wired as the img's onload)
+// fades this out; a caller that also wires onerror can reuse it there too,
+// to fade out the spinner rather than leaving it spinning on a failed load. ──
+const TILE_SPINNER_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M20 4v5h-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+`;
+
+// Crossfades a tile's image in over its loading spinner once the image is
+// ready, rather than snapping from one to the other instantly — reuses
+// fadeSwap's fade-out/mutate/fade-in mechanic (modal-anim.js), the same one
+// page navigation and the drawer's edition switch already use.
+// .tile-img-spinner's own fade-out/fade-in pair (not main.css's generic
+// .content one) lives in cards.css, per fadeSwap's own convention that each
+// caller defines the CSS shape for whatever it's fading.
+function revealTileImage(img) {
+    const spinner = img.previousElementSibling;
+
+    if (!spinner || !spinner.classList.contains('tile-img-spinner')) {
+        img.classList.add('tile-img-loaded');
+        return;
+    }
+
+    fadeSwap(spinner, () => {
+        spinner.remove();
+        img.classList.add('tile-img-loaded');
+    }, {outMs: 150, inMs: 200});
+}
+
 // ── Look up a foil's info by id, checking each foil's variants (e.g. a
 // Curio Foil) when it isn't a top-level foil id itself. Mirrors
 // _foil_kind_for_id in pricing_ga.py. ──

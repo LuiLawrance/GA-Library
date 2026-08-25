@@ -1275,9 +1275,11 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
             <div class="drawer-edition-tile tile-hoverable" style="animation-delay: ${i * 60}ms">
                 <div class="drawer-edition-media tile-zoom">
                     <div class="edition-tile-wrap">
+                        <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
                         <img src="/images/${eid}.jpg" alt="${einfo.set_name}"
                             title="${einfo.set_name} (${einfo.set_prefix})"
                             onclick="event.stopPropagation(); selectDrawerEditionFor('${drawerId}', '${eid}')"
+                            onload="revealTileImage(this)" onerror="revealTileImage(this)"
                             id="${cfg.tilePrefix}${eid}">
                         <span class="edition-prefix-badge">${einfo.set_prefix}</span>
                         <span class="edition-rarity-badge ${rarityClass}">${rarity}</span>

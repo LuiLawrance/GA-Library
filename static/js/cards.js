@@ -135,37 +135,8 @@ const rarityMap = {
     5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
 };
 
-// Loading placeholder shown over a result tile's image while it downloads —
-// see .tile-img-spinner in cards.css. revealTileImage below (wired as the
-// img's onload) fades this out; onerror instead replaces the whole tile,
-// taking this with it.
-const TILE_SPINNER_SVG = `
-    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="M20 4v5h-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
-`;
-
-// Crossfades a result tile's image in over its loading spinner once the
-// image is ready, rather than snapping from one to the other instantly —
-// reuses fadeSwap's fade-out/mutate/fade-in mechanic (modal-anim.js), the
-// same one page navigation and the drawer's edition switch already use.
-// .tile-img-spinner's own fade-out/fade-in pair (not main.css's generic
-// .content one) lives in cards.css, per fadeSwap's own convention that each
-// caller defines the CSS shape for whatever it's fading.
-function revealTileImage(img) {
-    const spinner = img.previousElementSibling;
-
-    if (!spinner || !spinner.classList.contains('tile-img-spinner')) {
-        img.classList.add('tile-img-loaded');
-        return;
-    }
-
-    fadeSwap(spinner, () => {
-        spinner.remove();
-        img.classList.add('tile-img-loaded');
-    }, {outMs: 150, inMs: 200});
-}
+// TILE_SPINNER_SVG / revealTileImage now live in tiles.js — the drawer's
+// edition grid reuses them too.
 
 function toggleSetDropdown() {
     const menu = document.getElementById('set-dropdown-menu');
