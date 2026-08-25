@@ -27,6 +27,7 @@ const routes = {
     '/admin/cards/info': '/fragments/admin',
     '/admin/cards/pricing': '/fragments/admin',
     '/admin/users': '/fragments/admin',
+    '/admin/system': '/fragments/admin',
 };
 
 async function navigate(path, pushState = true) {

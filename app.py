@@ -1063,6 +1063,57 @@ def _save_users_data(data: dict) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
+JSON_SETTINGS = "DATA_GENERAL/SETTINGS.json"
+SETTINGS_DEFAULTS = {
+    "store_images_locally": False,
+    "local_database": False,
+}
+
+
+def _load_settings_data() -> dict:
+    settings_file = new_json(JSON_SETTINGS)
+    with settings_file.open(encoding="utf-8") as f:
+        data = json.load(f)
+
+    # A fresh file starts as {} (see new_json) — fill in any default keys
+    # missing from it, but never overwrite a value already on disk, so an
+    # existing SETTINGS.json is always the source of truth once it exists.
+    missing = {k: v for k, v in SETTINGS_DEFAULTS.items() if k not in data}
+    if missing:
+        data.update(missing)
+        with settings_file.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    return data
+
+
+def _save_settings_data(data: dict) -> None:
+    with new_json(JSON_SETTINGS).open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+@app.get("/api/admin/settings")
+async def api_admin_get_settings(request: Request):
+    require_admin(request)
+    return JSONResponse(_load_settings_data())
+
+
+@app.post("/api/admin/settings")
+async def api_admin_set_settings(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+
+    settings_data = _load_settings_data()
+    for key in SETTINGS_DEFAULTS:
+        if key in body:
+            settings_data[key] = bool(body[key])
+
+    _save_settings_data(settings_data)
+
+    return JSONResponse(settings_data)
+
+
 @app.get("/api/admin/users")
 async def api_admin_users(request: Request):
     require_admin(request)
@@ -1933,6 +1984,11 @@ async def admin_cards_pricing_page():
 
 @app.get("/admin/users", response_class=HTMLResponse)
 async def admin_users_page():
+    return serve_index()
+
+
+@app.get("/admin/system", response_class=HTMLResponse)
+async def admin_system_page():
     return serve_index()
 
 

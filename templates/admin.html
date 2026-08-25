@@ -2,6 +2,9 @@
     <div class="page-header">
         <span class="page-label">Admin Console</span>
         <nav class="admin-subnav">
+            <button class="admin-subnav-btn" data-section="system" onclick="switchAdminSection('system')">
+                System
+            </button>
             <button class="admin-subnav-btn active" data-section="pricing" onclick="switchAdminSection('pricing')">
                 Cards
             </button>
@@ -12,6 +15,32 @@
     </div>
 
     <div class="admin-content">
+        <div class="admin-section hidden" id="admin-section-system">
+            <span class="admin-section-title">System</span>
+            <div class="admin-system-options" id="admin-system-settings">
+                <div class="admin-system-option-row">
+                    <span class="admin-system-option-name">Store Images Locally</span>
+                    <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="store_images_locally">
+                        <span class="pill-indicator"></span>
+                        <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                onclick="updateAdminSystemSetting('store_images_locally', false)">Off</button>
+                        <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                onclick="updateAdminSystemSetting('store_images_locally', true)">On</button>
+                    </div>
+                </div>
+                <div class="admin-system-option-row">
+                    <span class="admin-system-option-name">Local Database</span>
+                    <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_database">
+                        <span class="pill-indicator"></span>
+                        <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                onclick="updateAdminSystemSetting('local_database', false)">Off</button>
+                        <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                onclick="updateAdminSystemSetting('local_database', true)">On</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="admin-section hidden" id="admin-section-users">
             <span class="admin-section-title">User Management</span>
             <div class="admin-user-controls">
