@@ -372,10 +372,31 @@
 /* Clips the image to its rounded corners — scoped to the drawer's own
    edition tiles rather than added to the base .edition-tile-wrap rule
    above, since that class is shared by the Cards/Inventory/Prices tiles
-   too (each opts into this via its own rule). */
+   too (each opts into this via its own rule). Also reserves the card's
+   aspect ratio (5:7) and a placeholder background up front, same as
+   #card-results' own tiles (cards.css) — otherwise a tile sits collapsed
+   to ~0 height until its image loads in, snapping the whole grid taller. */
 .drawer-edition-tile .edition-tile-wrap {
     overflow: hidden;
     border-radius: 8px;
+    aspect-ratio: 5 / 7;
+    background: var(--bg-card);
+}
+
+/* Positioned to fill the reserved aspect-ratio box and crossfaded in via
+   .tile-img-loaded (see .tile-img-spinner/revealTileImage in tiles.js) —
+   same loading treatment as #card-results' tiles (cards.css). */
+.drawer-edition-tile .edition-tile-wrap img {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.drawer-edition-tile .edition-tile-wrap img.tile-img-loaded {
+    opacity: 1;
 }
 
 /* Hover zoom and the selected-tile ring both live on this wrapper — not on

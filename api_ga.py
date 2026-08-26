@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from pricing_ga import _sync_info
+from settings import load_settings
 from tqdm import tqdm
 from util_file import new_dir, new_json
 
@@ -57,7 +58,6 @@ def _api_search(slug: str, debug: bool = False) -> dict:
                 f"{card_data['name']}"
             )
 
-        _image_download(card_data, debug)
         _update_edition(card_data, debug)
         _update_info(card_data, debug)
         _update_rule(card_data, debug)
@@ -149,105 +149,71 @@ def _format_search(card_name: str, debug: bool = False) -> str:
     return slug
 
 
-def _image_download(card_data: dict, debug: bool = False) -> None:
-    image_count = 0
-    skipped_count = 0
-    error_count = 0
-
+# Downloads one edition's card art straight to DIR_IMAGES/{edition_id}.jpg,
+# on demand — called by get_image (app.py) only once that specific image is
+# actually requested, rather than eagerly for every edition a card search or
+# set sync turns up. This also means a card searched while store_images_locally
+# was off (so nothing got cached, and _check_local now short-circuits future
+# re-searches of it) still fills in the moment its image is next requested
+# with the setting on, without needing a re-search to trigger it.
+# The API's own image filename is always exactly "{edition_id}.jpg" (verified
+# against its /cards/{slug} responses — same fact get_image's redirect branch
+# relies on), so this needs no edition/card lookup, just the id. Returns
+# whether the file is present locally afterward (True if it was already
+# cached), so the caller knows whether it's safe to serve.
+def _download_card_image(edition_id: str, debug: bool = False) -> bool:
     image_dir = new_dir(DIR_IMAGES)
+    image_file = image_dir / f"{edition_id}.jpg"
 
-    for edition in card_data["editions"]:
-        edition_id = edition["uuid"]
-        image_path = edition.get("image")
+    if image_file.exists() and image_file.stat().st_size > 0:
+        return True
 
-        if not image_path:
-            continue
-
-        image_name = image_path.split("/")[-1]
-        image_file = image_dir / f"{edition_id}.jpg"
-
-        if image_file.exists() and image_file.stat().st_size > 0:
-            skipped_count += 1
-
-            if debug:
-                print(
-                    f"Image exists: "
-                    f"{edition_id}.jpg"
-                )
-
-            continue
-
-        try:
-            response = requests.get(
-                f"{API_IMAGE}{image_name}",
-                timeout=10
-            )
-
-            response.raise_for_status()
-
-            with image_file.open("wb") as f:
-                f.write(response.content)
-
-            image_count += 1
-
-            if debug:
-                print(
-                    f"Downloaded image: "
-                    f"{edition_id}.jpg"
-                )
-
-        except requests.exceptions.HTTPError as e:
-            error_count += 1
-
-            _log_error(
-                edition_id,
-                e,
-                debug
-            )
-
-            print(
-                f"Image HTTP Error | "
-                f"edition_id={edition_id} | "
-                f"{e}"
-            )
-
-        except requests.exceptions.RequestException as e:
-            error_count += 1
-
-            _log_error(
-                edition_id,
-                e,
-                debug
-            )
-
-            print(
-                f"Image Request Error | "
-                f"edition_id={edition_id} | "
-                f"{e}"
-            )
-
-        except Exception as e:
-            error_count += 1
-
-            _log_error(
-                edition_id,
-                e,
-                debug
-            )
-
-            print(
-                f"Image Save Error | "
-                f"edition_id={edition_id} | "
-                f"{e}"
-            )
-
-    if debug:
-        print(
-            f"Updated IMAGES directory | "
-            f"downloaded={image_count} | "
-            f"skipped={skipped_count} | "
-            f"errors={error_count}"
+    try:
+        response = requests.get(
+            f"{API_IMAGE}{edition_id}.jpg",
+            timeout=10
         )
+
+        response.raise_for_status()
+
+        with image_file.open("wb") as f:
+            f.write(response.content)
+
+        if debug:
+            print(
+                f"Downloaded image: "
+                f"{edition_id}.jpg"
+            )
+
+        return True
+
+    except requests.exceptions.RequestException as e:
+        _log_error(
+            edition_id,
+            e,
+            debug
+        )
+
+        print(
+            f"Image Request Error | "
+            f"edition_id={edition_id} | "
+            f"{e}"
+        )
+
+    except Exception as e:
+        _log_error(
+            edition_id,
+            e,
+            debug
+        )
+
+        print(
+            f"Image Save Error | "
+            f"edition_id={edition_id} | "
+            f"{e}"
+        )
+
+    return False
 
 
 def _log_error(identifier: str, error: Exception | str, debug: bool = False) -> None:
@@ -661,9 +627,12 @@ def _set_slug(set_prefix: str) -> str:
 
 # Filename slug for a featured-set release's own banner image (e.g.
 # ".asphodel/paradise" -> "asphodel_paradise") — shared between
-# _set_image_download (which saves DIR_SET_IMAGES/{slug}.png) and
-# GET /api/sets/featured (app.py, which serves it from there), so neither
-# JSON_FEATURED_SETS nor this app has to store the image's path at all.
+# _download_set_image (which saves DIR_SET_IMAGES/{slug}.png) and
+# GET /api/sets/featured (app.py), which builds the /set-images/{slug}.png
+# URL every group's banner is fetched through without needing its own
+# image_path — that's only looked up from JSON_FEATURED_SETS by
+# get_set_image (app.py) itself, once a request for one of these URLs
+# actually comes in.
 def _group_slug(group_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", group_name.lower()).strip("_")
 
@@ -828,7 +797,10 @@ def card_reset(card_name: str, debug: bool = False) -> dict:
     """Force re-fetch a card from the API, overriding all local data and images."""
     slug = _format_search(card_name, debug)
 
-    # Look up existing edition IDs so we can delete their images before re-downloading
+    # Look up existing edition IDs so we can delete their cached images —
+    # _download_card_image (api_ga.py) refills each one lazily the next time
+    # GET /images/{edition_id}.jpg (app.py) is actually requested, rather than
+    # this eagerly re-downloading them itself.
     slug_file = new_json(JSON_SLUGS)
     info_file = new_json(JSON_INFO)
     image_dir = new_dir(DIR_IMAGES)
@@ -950,7 +922,6 @@ def set_search(set_prefix: str, debug: bool = False, progress_callback=None) -> 
                 if _check_local(slug, debug):
                     continue
 
-                _image_download(card_data, debug)
                 _update_edition(card_data, debug)
                 _update_info(card_data, debug)
                 _update_rule(card_data, debug)
@@ -997,32 +968,26 @@ def set_search(set_prefix: str, debug: bool = False, progress_callback=None) -> 
     return results
 
 
-def _set_image_download(group_name: str, image_path: str | None, debug: bool = False) -> None:
-    """Caches one featured-set release's banner locally, mirroring
-    _image_download's cache-and-skip-if-present behavior for card art. Saved
-    as DIR_SET_IMAGES/{_group_slug(group_name)}.png — under the group's own
-    name rather than the API's own filename (e.g. "RDO.png") — since that
-    naming doesn't reliably correspond to any of the group's own prefixes
-    (Dawn of Ashes' banner is "DOA.png" even though no set in that group is
-    prefixed "DOA"). Keying off the group name itself is what lets GET
-    /api/sets/featured (app.py) find the right file without JSON_FEATURED_SETS
-    needing to store the image's path at all — same tradeoff _image_download
-    makes keying card art off edition_id instead of the API's own filename.
-    image_path is relative to API_HOST (e.g. "/featured-sets/images/RDO.png"),
-    exactly as the Featured Sets API returns it — only used to fetch the
-    bytes. Called once per group in sync_featured_sets rather than once per
-    prefix, since every prefix in a group shares the same banner."""
-    if not image_path:
-        return
-
+# Downloads one featured-set release's banner straight to
+# DIR_SET_IMAGES/{filename}, on demand — called by get_set_image (app.py)
+# only once that specific banner is actually requested, mirroring
+# _download_card_image's lazy, cache-and-skip-if-present behavior for card
+# art. filename is {_group_slug(group_name)}.png — the group's own name
+# rather than the API's own filename (e.g. "RDO.png"), since that naming
+# doesn't reliably correspond to any of the group's own prefixes (Dawn of
+# Ashes' banner is "DOA.png" even though no set in that group is prefixed
+# "DOA") — so unlike _download_card_image, the caller has to pass image_path
+# in rather than this deriving a download URL from filename alone. image_path
+# is relative to API_HOST (e.g. "/featured-sets/images/RDO.png"), exactly as
+# the Featured Sets API returns it and as sync_featured_sets records it per
+# group in JSON_FEATURED_SETS. Returns whether the file is present locally
+# afterward (True if it was already cached).
+def _download_set_image(filename: str, image_path: str, debug: bool = False) -> bool:
     image_dir = new_dir(DIR_SET_IMAGES)
-    image_file = image_dir / f"{_group_slug(group_name)}.png"
+    image_file = image_dir / filename
 
     if image_file.exists() and image_file.stat().st_size > 0:
-        if debug:
-            print(f"Set image exists: {image_file.name}")
-
-        return
+        return True
 
     try:
         response = requests.get(f"{API_HOST}{image_path}", timeout=10)
@@ -1032,16 +997,20 @@ def _set_image_download(group_name: str, image_path: str | None, debug: bool = F
             f.write(response.content)
 
         if debug:
-            print(f"Downloaded set image: {image_file.name} ({group_name})")
+            print(f"Downloaded set image: {filename}")
+
+        return True
 
     except requests.exceptions.RequestException as e:
-        _log_error(f"featured-set:{group_name}", e, debug)
+        _log_error(f"featured-set-image:{filename}", e, debug)
 
         print(
             f"Set Image Request Error | "
-            f"group={group_name} | "
+            f"filename={filename} | "
             f"{e}"
         )
+
+    return False
 
 
 def sync_featured_sets(debug: bool = False) -> dict:
@@ -1054,12 +1023,16 @@ def sync_featured_sets(debug: bool = False) -> dict:
     set's own JSON filename (e.g. "DOA 1st" -> "doa_1st") — so a caller can go
     straight from one to DATA_GA/SETS_GA/{slug}.json without re-deriving it.
 
-    Also caches the release's own banner image to DIR_SET_IMAGES via
-    _set_image_download, saved as {_group_slug(group_name)}.png — deliberately
-    NOT recorded in JSON_FEATURED_SETS itself, since GET /api/sets/featured
-    (app.py) can re-derive that same filename from group_name alone, and the
-    API's own image path doesn't reliably correspond to any of the group's own
-    prefixes anyway (see _set_image_download's docstring).
+    Records each group's raw "image" path (relative to API_HOST) as
+    "image_path" — GET /api/sets/featured (app.py) re-derives the actual
+    /set-images/{filename} URL from group_name alone via _group_slug, so this
+    isn't needed for that; it's what get_set_image (app.py) looks up to
+    lazily download a group's banner (via _download_set_image) the first time
+    it's actually requested, or to redirect straight to the API when
+    store_images_locally is off. Doesn't reliably correspond to any of the
+    group's own prefixes (see _download_set_image's own comment), so it can't
+    be re-derived from the cached filename the way get_image's redirect
+    branch re-derives a card's own image URL from its edition_id.
 
     Used by the Admin Cards Info panel (Featured/Other grouping) and by
     GET /api/sets/featured (app.py), which now reads this grouped shape
@@ -1077,7 +1050,7 @@ def sync_featured_sets(debug: bool = False) -> dict:
         if not group_name:
             continue
 
-        _set_image_download(group_name, group.get("image"), debug)
+        image_path = group.get("image")
 
         sets = []
         for set_entry in group.get("sets", []):
@@ -1088,7 +1061,7 @@ def sync_featured_sets(debug: bool = False) -> dict:
 
             sets.append({"prefix": prefix, "slug": _set_slug(prefix)})
 
-        featured[group_name] = {"sets": sets}
+        featured[group_name] = {"sets": sets, "image_path": image_path}
 
     featured_file = new_json(JSON_FEATURED_SETS)
 

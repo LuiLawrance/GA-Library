@@ -930,9 +930,17 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
 
     const imgSrc = editionId ? `/images/${editionId}.jpg` : '';
 
+    // An empty src (no resolved edition yet) never fires load or error at
+    // all — so it can't rely on revealTileImage to ever clear the "loading"
+    // opacity:0 state (see .inv-card-tile .edition-tile-wrap img in
+    // inventory.css). No spinner in that case either, since there's nothing
+    // actually in flight to show progress on.
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
-            <img src="${imgSrc}" alt="${cardName}" onerror="this.style.opacity='0.1'">
+            ${imgSrc ? `<div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>` : ''}
+            <img class="${imgSrc ? '' : 'tile-img-loaded'}" alt="${cardName}"
+                onload="revealTileImage(this)"
+                onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
         </div>
         <span class="dga-qty-badge">x${qty}</span>
@@ -950,6 +958,9 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
             <button class="inv-tile-qty-btn inv-tile-qty-sub" type="button">−</button>
         </div>
         <div class="inv-tile-qty-indicator"></div>`;
+
+    // Queued (tiles.js) — see the matching comment in buildCardTile (cards.js).
+    if (imgSrc) queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), imgSrc);
 
     const input = tile.querySelector('.inv-tile-qty-input');
     const badge = tile.querySelector('.dga-qty-badge');

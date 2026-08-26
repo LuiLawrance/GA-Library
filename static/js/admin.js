@@ -1,6 +1,7 @@
 let adminActiveSection = 'pricing';
 let adminCardsView = 'pricing';
 let adminPidDetailMode = 'regular';
+let adminSystemLoaded = false;
 let adminUsersLoaded = false;
 let adminUsersData = [];
 let adminUserDetailSelected = null;
@@ -72,7 +73,14 @@ function adminPidIsScrapable(productId) {
 // glanced at (same reasoning showPriceGraph in prices.js uses for its own
 // URL sync).
 function syncAdminUrl() {
-    const path = adminActiveSection === 'users' ? '/admin/users' : `/admin/cards/${adminCardsView}`;
+    let path;
+    if (adminActiveSection === 'system') {
+        path = '/admin/system';
+    } else if (adminActiveSection === 'users') {
+        path = '/admin/users';
+    } else {
+        path = `/admin/cards/${adminCardsView}`;
+    }
     if (window.location.pathname !== path) {
         window.history.replaceState({}, '', path);
     }
@@ -105,11 +113,19 @@ async function switchAdminSection(section) {
         loadAdminUsers();
     }
 
+    if (section === 'system' && !adminSystemLoaded) {
+        loadAdminSystemSettings();
+    }
+
     if (section === 'pricing') {
         // Just became visible (or already was) — reposition without sliding from a
         // stale/never-measured spot.
         positionPillIndicator(document.querySelector('.admin-cards-subnav'));
         positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
+    }
+
+    if (section === 'system') {
+        document.querySelectorAll('.admin-system-option-toggle').forEach(positionPillIndicator);
     }
 
     content?.classList.remove('fade-out');
@@ -199,6 +215,61 @@ async function switchAdminCardsView(view) {
     // it loaded — not just 'pricing' like before.
     if (!adminPidLoaded) {
         loadAdminPricingIds();
+    }
+}
+
+async function loadAdminSystemSettings() {
+    const container = document.getElementById('admin-system-settings');
+    if (!container) return;
+
+    try {
+        const res = await fetch('/api/admin/settings');
+        if (!res.ok) throw new Error('Failed to load settings');
+        const data = await res.json();
+
+        adminSystemLoaded = true;
+
+        for (const key of ['store_images_locally', 'local_database']) {
+            renderAdminSystemToggle(key, !!data[key]);
+        }
+    } catch (err) {
+        // Leave the toggles at their last-known state rather than blanking
+        // the whole panel — same as the other admin sections' load failures.
+    }
+}
+
+// Sets which pill button is active for one System setting's toggle and
+// slides .pill-indicator to match (same positionPillIndicator used by the
+// Cards section's own Info/Pricing and Regular/Discord pills).
+function renderAdminSystemToggle(key, value) {
+    const toggle = document.querySelector(`.admin-system-option-toggle[data-setting="${key}"]`);
+    if (!toggle) return;
+
+    toggle.querySelectorAll('.admin-pid-source-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'true') === value);
+    });
+    positionPillIndicator(toggle);
+}
+
+async function updateAdminSystemSetting(key, value) {
+    const prevValue = document.querySelector(`.admin-system-option-toggle[data-setting="${key}"] .active`)?.dataset.value === 'true';
+    renderAdminSystemToggle(key, value);
+
+    try {
+        const res = await fetch('/api/admin/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({[key]: value}),
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.detail || 'Failed to update setting.');
+            renderAdminSystemToggle(key, prevValue);
+        }
+    } catch (err) {
+        alert('Failed to update setting.');
+        renderAdminSystemToggle(key, prevValue);
     }
 }
 
@@ -2565,7 +2636,9 @@ function renderAdminPricingImageCol() {
             <span class="drawer-set">${drawerSetLineHTML(record)}</span>
         </div>
         <div class="admin-pid-detail-image-wrap">
-            <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}">
+            <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
+            <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}"
+                 onload="revealTileImage(this)" onerror="revealTileImage(this)">
         </div>
         ${statsHtml}
         ${pidRowHtml}
@@ -3302,7 +3375,13 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
 //   /admin/users                                → Users section
 function initAdmin() {
     const path = window.location.pathname;
-    adminActiveSection = path.startsWith('/admin/users') ? 'users' : 'pricing';
+    if (path.startsWith('/admin/system')) {
+        adminActiveSection = 'system';
+    } else if (path.startsWith('/admin/users')) {
+        adminActiveSection = 'users';
+    } else {
+        adminActiveSection = 'pricing';
+    }
     // The Cards section's own Info/Pricing sub-view — reset (from the URL,
     // defaulting to Pricing) rather than left at whatever it was, since
     // adminCardsView is a plain JS variable that survives navigating away
@@ -3320,6 +3399,7 @@ function initAdmin() {
     // while that's what's actually on screen.
     syncAdminUrl();
 
+    adminSystemLoaded = false;
     adminUsersLoaded = false;
     adminUsersData = [];
     adminUserDetailSelected = null;
@@ -3371,8 +3451,11 @@ function initAdmin() {
     updateAdminUserRoleButtons();
     positionPillIndicator(document.querySelector('.admin-cards-subnav'));
     positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
+    document.querySelectorAll('.admin-system-option-toggle').forEach(positionPillIndicator);
 
-    if (adminActiveSection === 'users') {
+    if (adminActiveSection === 'system') {
+        loadAdminSystemSettings();
+    } else if (adminActiveSection === 'users') {
         loadAdminUsers();
     } else {
         loadAdminPricingIds();

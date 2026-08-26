@@ -135,6 +135,9 @@ const rarityMap = {
     5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"
 };
 
+// TILE_SPINNER_SVG / revealTileImage now live in tiles.js — the drawer's
+// edition grid reuses them too.
+
 function toggleSetDropdown() {
     const menu = document.getElementById('set-dropdown-menu');
     const btn = document.querySelector('.set-dropdown-btn');
@@ -211,7 +214,9 @@ function buildCardTile(card, index, total = 1) {
     tile.dataset.cardId = card.card_id;
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
-            <img src="/images/${card.edition_id}.jpg" alt="${card.name}"
+            <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
+            <img alt="${card.name}"
+                onload="revealTileImage(this)"
                 onerror="this.parentElement.parentElement.innerHTML='<div class=card-tile-missing>${card.name}</div>'">
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}">${rarity}</span>` : ''}
         </div>
@@ -220,6 +225,12 @@ function buildCardTile(card, index, total = 1) {
     tile.onclick = () => openCardDrawer(card.card_id, card.edition_id, card.name);
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
 
+    // Queued (tiles.js) rather than set directly — a big result grid setting
+    // hundreds of <img src> at once starves the browser's per-origin
+    // connection pool, so anything else hitting the server (opening the
+    // drawer, a new search) sits stuck behind them client-side.
+    queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), `/images/${card.edition_id}.jpg`);
+
     // tiles.js — attach inventory overlay for logged-in users
     attachInvOverlay(tile, card.card_id, card.edition_id, card.name);
 
@@ -227,8 +238,6 @@ function buildCardTile(card, index, total = 1) {
 }
 
 // ── Featured sets — shown in #card-results before any search is made ──
-let featuredSetsCache = null;
-
 function buildFeaturedSetTile(group, index, total) {
     const tile = document.createElement('div');
     tile.className = 'featured-set-tile tile-hoverable';
@@ -271,16 +280,20 @@ async function loadFeaturedSets() {
     if (!results) return;
 
     try {
-        if (!featuredSetsCache) {
-            const res = await fetch('/api/sets/featured');
-            const data = await res.json();
-            featuredSetsCache = data.groups || [];
-        }
+        // Fetched fresh on every call rather than cached client-side — this
+        // is a cheap local JSON read (no external API call), and caching it
+        // in a module-level variable previously meant a re-sync's changes
+        // (new images, reordered/added releases) never showed up again for
+        // the rest of the tab's session without a hard refresh, since
+        // navigating back to Cards client-side doesn't reload this script.
+        const res = await fetch('/api/sets/featured');
+        const data = await res.json();
+        const groups = data.groups || [];
 
         results.classList.add('card-grid--featured');
         results.innerHTML = '';
-        featuredSetsCache.forEach((group, i) => {
-            results.appendChild(buildFeaturedSetTile(group, i, featuredSetsCache.length));
+        groups.forEach((group, i) => {
+            results.appendChild(buildFeaturedSetTile(group, i, groups.length));
         });
     } catch {
         results.innerHTML = '';

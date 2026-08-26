@@ -716,6 +716,34 @@
     display: block;
 }
 
+/* ── Image loading placeholder — same treatment as #card-results (cards.css)
+   and the drawer's edition grid (drawer.css). Scoped to .inv-card-tile
+   rather than repeated per page: buildDeckCardTile (decks_ga.js) already
+   adds "inv-card-tile" alongside "dga-card-tile" specifically to inherit
+   shared tile styling like this, so Decks GA's own grid gets this for free.
+   .edition-tile-wrap's own position:relative is already global (drawer.css);
+   overflow:hidden/border-radius are already set for this class (tiles.css) —
+   only the aspect-ratio reservation and the spinner-to-image crossfade are
+   new here. buildInvCardTile/buildDeckCardTile wire the spinner markup and
+   the img's onload="revealTileImage(this)" (tiles.js). */
+.inv-card-tile .edition-tile-wrap {
+    aspect-ratio: 5 / 7;
+    background: var(--bg-card);
+}
+
+.inv-card-tile .edition-tile-wrap img {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.inv-card-tile .edition-tile-wrap img.tile-img-loaded {
+    opacity: 1;
+}
+
 /* Hover-zoom/dim behavior lives in tiles.css's shared .tile-hoverable/
    .tile-zoom vocabulary — see buildInvCardTile in inventory.js. */
 

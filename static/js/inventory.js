@@ -1292,8 +1292,10 @@ function buildInvCardTile(row, index, total = 1) {
 
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
-            <img src="/images/${row.edition_id}.jpg" alt="${row.cardName}"
-                onerror="this.style.opacity='0.1'">
+            <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
+            <img alt="${row.cardName}"
+                onload="revealTileImage(this)"
+                onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
             ${rarity ? `<span class="edition-rarity-badge ${rarityClass}${getFoilSuffix(row) ? ' has-foil-suffix' : ''}">${rarity}${getFoilSuffix(row)}</span>` : ''}
         </div>
@@ -1326,6 +1328,10 @@ function buildInvCardTile(row, index, total = 1) {
         openCardContextMenu(e, row);
     });
     tile.addEventListener('animationend', () => tile.classList.add('animated'));
+
+    // Queued (tiles.js) — see the matching comment in buildCardTile (cards.js).
+    queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), `/images/${row.edition_id}.jpg`);
+
     return tile;
 }
 
