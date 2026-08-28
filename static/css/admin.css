@@ -85,15 +85,31 @@
 
 /* Centered like a standalone options menu, rather than left-anchored like
    the Cards/Users sections' full-width working areas — System has no list
-   or grid to fill the space, just a short stack of settings rows. One
-   bordered card holds every row (divided by border-bottom below), rather
-   than each row being its own floating card. */
+   or grid to fill the space, just a short stack of settings rows (plus,
+   once Local Database is on, the Sync panel beside it — see
+   .admin-system-sync-panel below). justify-content:center keeps the pair
+   centered as a unit the same way the settings card alone used to center
+   itself via margin:auto; align-items:flex-start so the shorter panel
+   doesn't stretch to match the taller one's height. animateBoxResize
+   (admin.js's animateLocalDatabaseVisibility/animateSyncPanelVisibility)
+   animates this row's own size as either child appears/disappears. */
+.admin-system-panels {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    align-items: flex-start;
+    width: 100%;
+    margin-top: 32px;
+    overflow: hidden;
+}
+
+/* One bordered card holds every settings row (divided by border-bottom
+   below), rather than each row being its own floating card. */
 .admin-system-options {
     display: flex;
     flex-direction: column;
     width: 100%;
     max-width: 420px;
-    margin: 32px auto 0;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -124,6 +140,65 @@
    (admin.js) use to find the right pill, no visual overrides needed. */
 .admin-system-option-toggle {
     flex-shrink: 0;
+}
+
+/* Appears beside .admin-system-options once Use JSON is off — same trigger
+   as the Local Database row itself (see animateSyncPanelVisibility in
+   admin.js) — and stays visible regardless of Local Database's own on/off
+   state, since syncing is also useful to pre-populate Postgres before
+   switching Local Database on, not just after. Same bordered-card look as
+   the settings options card, narrower since it's just a button and some
+   text. */
+.admin-system-sync-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    max-width: 280px;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.admin-system-sync-title {
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.admin-system-sync-desc {
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+.admin-system-sync-btn {
+    align-self: flex-start;
+}
+
+/* Sync Now's result log — the same output CLI users of
+   scripts/migrate_json_to_pg.py see, just rendered in the panel instead of
+   a terminal (see runAdminSystemSync in admin.js). Monospace + pre-wrap so
+   the per-domain row counts stay readable without a horizontal scrollbar. */
+.admin-system-sync-log {
+    max-height: 240px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.admin-system-sync-log.admin-system-sync-log-error {
+    color: var(--error);
+    border-color: var(--error);
 }
 
 /* Sits inline to the left of the card search box (in .admin-cards-header-row

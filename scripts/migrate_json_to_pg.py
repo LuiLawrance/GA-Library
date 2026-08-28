@@ -25,10 +25,13 @@ from db.models import (
 from db.session import get_session
 from dotenv import load_dotenv
 from pathlib import Path
-from sqlalchemy import delete, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+import argparse
+import contextlib
+import io
 import json
 import os
 
@@ -58,9 +61,40 @@ def _load(path: Path) -> dict:
         return json.load(f)
 
 
+class SyncSafetyError(Exception):
+    """Raised when a full-replace phase's source JSON looks suspiciously
+    smaller than what's already in Postgres — see _guard_full_replace."""
+
+
 def _chunked(rows: list, size: int = 1000):
     for i in range(0, len(rows), size):
         yield rows[i:i + size]
+
+
+def _guard_full_replace(session: Session, model, new_count: int, label: str, force: bool) -> None:
+    """price_listings/price_sales/card_errors are wiped and fully re-inserted
+    from JSON every run (see their migrate_* functions) — correct as long as
+    the JSON is trustworthy, but an emptied or partially-written source file
+    (this happened for real on 2026-08-27: an emptied LISTINGS.json/
+    SALES.json silently deleted 13,797 real price rows with no way back)
+    would otherwise wipe Postgres too, with no source left to recover from.
+
+    Refuses to proceed when the new count looks like a drastic, likely-wrong
+    shrink from what's already stored. force=True (only ever passed via the
+    CLI's --force flag, never scripts.migrate_json_to_pg.run_migration() —
+    see its own docstring) skips this check for a genuinely expected shrink
+    (e.g. an admin deliberately deleted a bunch of bad sales entries)."""
+    if force:
+        return
+
+    existing_count = session.execute(select(func.count()).select_from(model)).scalar()
+
+    if existing_count > 10 and new_count < existing_count * 0.5:
+        raise SyncSafetyError(
+            f"{label}: source JSON has {new_count} entries but Postgres currently has {existing_count} — "
+            f"refusing to wipe and replace (the JSON source may be missing, empty, or corrupted). "
+            f"Re-run from the CLI with --force if this shrink is actually expected."
+        )
 
 
 def _upsert(session: Session, model, rows: list[dict], index_elements: list[str]) -> None:
@@ -442,7 +476,7 @@ def migrate_thema(info_data: dict) -> None:
     print(f"thema_scores: {len(rows)}")
 
 
-def migrate_card_errors() -> None:
+def migrate_card_errors(force: bool = False) -> None:
     errors_data = _load(DIR_CARDS / "ERRORS.json")
 
     rows = [
@@ -456,6 +490,7 @@ def migrate_card_errors() -> None:
 
     with get_session() as session:
         # Append-only log with no natural key — full replace each run.
+        _guard_full_replace(session, CardError, len(rows), "card_errors", force)
         session.execute(delete(CardError))
         for batch in _chunked(rows):
             session.execute(CardError.__table__.insert(), batch)
@@ -487,14 +522,19 @@ def _flatten_price_records(data: dict, known_foil_pairs: set[tuple[str, str]]) -
     return rows, skipped
 
 
-def migrate_pricing(known_foil_pairs: set[tuple[str, str]]) -> None:
+def migrate_pricing(known_foil_pairs: set[tuple[str, str]], force: bool = False) -> None:
     listings_rows, listings_skipped = _flatten_price_records(_load(DIR_PRICING / "LISTINGS.json"), known_foil_pairs)
     sales_rows, sales_skipped = _flatten_price_records(_load(DIR_PRICING / "SALES.json"), known_foil_pairs)
 
     with get_session() as session:
         # Pure historical logs sourced 1:1 from JSON, nothing DB-only writes
         # to them yet (pricing isn't wired to the toggle until a later
-        # stage) — full replace each run is simplest and always correct.
+        # stage) — full replace each run is simplest and always correct...
+        # as long as the JSON source is trustworthy, which _guard_full_replace
+        # checks first (see its docstring for why that's not hypothetical).
+        _guard_full_replace(session, PriceListing, len(listings_rows), "price_listings", force)
+        _guard_full_replace(session, PriceSale, len(sales_rows), "price_sales", force)
+
         session.execute(delete(PriceListing))
         for batch in _chunked(listings_rows):
             session.execute(PriceListing.__table__.insert(), batch)
@@ -666,7 +706,7 @@ def migrate_watchlist_and_wishlist(known_usernames: set[str], known_foil_pairs: 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main(force: bool = False) -> None:
     with get_session() as session:
         session.execute(text("SELECT 1"))
     print("Connected to Postgres.\n")
@@ -684,8 +724,8 @@ def main() -> None:
     known_foil_pairs = migrate_editions_and_foils(info_data)
     migrate_collector_numbers()
     migrate_thema(info_data)
-    migrate_card_errors()
-    migrate_pricing(known_foil_pairs)
+    migrate_card_errors(force=force)
+    migrate_pricing(known_foil_pairs, force=force)
     migrate_inventory(known_usernames, known_foil_pairs)
     migrate_decks(known_usernames, known_card_ids)
     migrate_watchlist_and_wishlist(known_usernames, known_foil_pairs)
@@ -693,5 +733,33 @@ def main() -> None:
     print("\nDone.")
 
 
+def run_migration() -> dict:
+    """Callable entry point for the admin System panel's Sync button (see
+    /api/admin/system/sync-to-database in app.py) — runs the exact same
+    migration as the CLI (force=False always; the safety guard in
+    _guard_full_replace can't be overridden from the UI, only from a human
+    running --force at a terminal on purpose) and returns
+    {"ok", "log", "error"} instead of printing straight to stdout/raising.
+
+    "ok": False with a SyncSafetyError means the guard tripped — "log" still
+    has everything that completed before it did. "ok": False from any other
+    exception means something else went wrong (e.g. Postgres unreachable)."""
+    buf = io.StringIO()
+
+    try:
+        with contextlib.redirect_stdout(buf):
+            main(force=False)
+        return {"ok": True, "log": buf.getvalue(), "error": None}
+    except Exception as e:
+        return {"ok": False, "log": buf.getvalue(), "error": str(e)}
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Skip the safety guard on price_listings/price_sales/card_errors that refuses to wipe "
+             "them when the JSON source looks suspiciously smaller than what's already in Postgres.",
+    )
+    args = parser.parse_args()
+    main(force=args.force)

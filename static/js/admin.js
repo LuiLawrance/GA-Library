@@ -233,6 +233,7 @@ async function loadAdminSystemSettings() {
             renderAdminSystemToggle(key, !!data[key]);
         }
         renderLocalDatabaseVisibility(!!data.use_json);
+        renderSyncPanelVisibility(!!data.use_json);
     } catch (err) {
         // Leave the toggles at their last-known state rather than blanking
         // the whole panel — same as the other admin sections' load failures.
@@ -261,20 +262,37 @@ function renderAdminSystemToggle(key, value) {
 // actual toggle click — see animateLocalDatabaseVisibility for that).
 function renderLocalDatabaseVisibility(useJson) {
     const row = document.getElementById('admin-system-local-database-row');
-    if (row) row.classList.toggle('hidden', useJson);
+    if (!row) return;
+
+    row.classList.toggle('hidden', useJson);
+
+    if (!useJson) {
+        // Row just became visible. loadAdminSystemSettings already called
+        // renderAdminSystemToggle('local_database', ...) — which positions
+        // this same toggle's pill indicator — BEFORE this function runs, so
+        // that positioning happened while the row was still display:none
+        // (offsetWidth/offsetHeight read 0 then) and landed the pill at a
+        // bogus 0x0. Reposition now that layout actually has it visible —
+        // same fix animateLocalDatabaseVisibility already applies for the
+        // click-triggered path below.
+        positionPillIndicator(row.querySelector('.admin-system-option-toggle'));
+    }
 }
 
-// Click-triggered counterpart to renderLocalDatabaseVisibility — animates
-// the settings card (#admin-system-settings, the bordered box holding every
-// row) reshaping around Local Database appearing/disappearing, via the
-// shared animateBoxResize (see modal-anim.js), same technique
-// dgaSwitchImportExportTab uses for its own panel swap.
+// Reveals/hides the Local Database row — animates the settings card
+// (#admin-system-settings, the bordered box holding every row) reshaping
+// around it via the shared animateBoxResize (see modal-anim.js), same
+// technique dgaSwitchImportExportTab uses for its own panel swap. Called as
+// the "vertical" half of animateSystemPanelsForUseJson's two-phase sequence
+// below (and returns that resize's own promise so that sequence can await
+// it), but kept as its own function since nothing else here needs to know
+// it's also doing this.
 function animateLocalDatabaseVisibility(useJson) {
     const box = document.getElementById('admin-system-settings');
     const row = document.getElementById('admin-system-local-database-row');
-    if (!box || !row) return;
+    if (!box || !row) return Promise.resolve();
 
-    animateBoxResize(box, () => {
+    const done = animateBoxResize(box, () => {
         row.classList.toggle('hidden', useJson);
     });
 
@@ -284,12 +302,202 @@ function animateLocalDatabaseVisibility(useJson) {
         // position it now that layout has it visible.
         positionPillIndicator(row.querySelector('.admin-system-option-toggle'));
     }
+
+    return done;
+}
+
+// The Sync panel tracks Use JSON alone, same as the Local Database row —
+// it stays visible whether Local Database itself is on or off, since
+// syncing is also useful to pre-populate Postgres BEFORE switching Local
+// Database on, not just after. Takes the raw use_json value, same
+// hide-when-true convention as renderLocalDatabaseVisibility right above
+// (every call site already has that value on hand, not its inverse).
+// Instant, unanimated — see renderLocalDatabaseVisibility for why load-time
+// state-setting never animates. No pill indicator inside this panel to
+// reposition on reveal (unlike renderLocalDatabaseVisibility) — just text
+// and a button.
+function renderSyncPanelVisibility(useJson) {
+    const panel = document.getElementById('admin-system-sync-panel');
+    if (panel) panel.classList.toggle('hidden', useJson);
+}
+
+// The panel's own entrance/exit motion — a slide-DOWN + scale + fade, not
+// just an opacity change, so it reads as the panel itself arriving/leaving.
+// "Vertical" to match the phase it plays in (see
+// animateSystemPanelsForUseJson) — the panel used to slide in from the
+// side, which fought with the settings card's own horizontal move instead
+// of reading as a separate, deliberate step. Reversed for the exit (see
+// _playSyncPanelMotion below).
+const ADMIN_SYNC_PANEL_ENTER_KEYFRAMES = [
+    {opacity: 0, transform: 'translateY(-14px) scale(0.94)'},
+    {opacity: 1, transform: 'translateY(0) scale(1)'},
+];
+
+// Tracks the panel's own in-flight entrance/exit animation (there's only
+// ever one such element, so a single variable does — unlike animateBoxResize/
+// animateGridColumns in modal-anim.js, which each track arbitrarily many
+// boxes via a WeakMap). Same reason those cancel their own prior animation
+// before starting a new one: a rapid double-toggle would otherwise leave two
+// animations racing on the same element, ending on whichever happened to
+// finish last rather than the actually-latest requested state.
+let _adminSyncPanelAnim = null;
+
+// Plays just the sync panel's own vertical motion (see
+// ADMIN_SYNC_PANEL_ENTER_KEYFRAMES) — the "vertical" half of
+// animateSystemPanelsForUseJson's two-phase sequence, entering or leaving.
+// Doesn't touch .hidden/display itself either way — on leaving, the caller
+// hides the panel once this resolves (see animateSystemPanelsForUseJson);
+// on entering, the caller is responsible for having already made the panel
+// visible (see the same function) before calling this.
+//
+// Resolves via a plain timer rather than anim.finished — see
+// animateBoxResize's own comment in modal-anim.js on why that promise isn't
+// reliable enough to await, which matters more here than it did for the
+// previous version of this animation: this result is now awaited as part
+// of a longer sequence, so a finished promise that never settles would
+// have hung phase 2 (or the slide back) forever instead of just leaving a
+// stray animation.
+function _playSyncPanelMotion(entering) {
+    const panel = document.getElementById('admin-system-sync-panel');
+    if (!panel) return Promise.resolve();
+
+    _adminSyncPanelAnim?.cancel();
+
+    const duration = entering ? 260 : 200;
+    const anim = panel.animate(
+        entering ? ADMIN_SYNC_PANEL_ENTER_KEYFRAMES : [...ADMIN_SYNC_PANEL_ENTER_KEYFRAMES].reverse(),
+        // fill:'backwards' on entry holds the first keyframe (opacity 0,
+        // offset) from the moment this is called, not just once playback
+        // starts — otherwise the panel would flash at full opacity/size
+        // for a frame first. fill:'forwards' on exit holds the last
+        // (invisible) keyframe until the caller hides it for real.
+        {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: entering ? 'backwards' : 'forwards'},
+    );
+    _adminSyncPanelAnim = anim;
+
+    return new Promise(resolve => {
+        setTimeout(() => {
+            if (_adminSyncPanelAnim !== anim) { resolve(); return; } // superseded by a later call already
+
+            if (entering) {
+                anim.cancel();
+                _adminSyncPanelAnim = null;
+                panel.style.opacity = '';
+                panel.style.transform = '';
+            }
+            // Exit: deliberately NOT cleaning up here — cancelling now would
+            // release the held opacity:0/offset state before the caller has
+            // actually added .hidden (that happens next, in
+            // animateSystemPanelsForUseJson's phase 1 slide-back), which
+            // would flash the panel back to full opacity for a frame in
+            // between. See _adminSyncPanelCleanupAfterHide, called once
+            // .hidden is actually in place.
+
+            resolve();
+        }, duration);
+    });
+}
+
+// Releases an exit _playSyncPanelMotion's held invisible state — safe to
+// call once the panel is already display:none (see the comment above), a
+// no-op otherwise. Call after adding .hidden, never before.
+function _adminSyncPanelCleanupAfterHide() {
+    const panel = document.getElementById('admin-system-sync-panel');
+    if (!panel) return;
+
+    _adminSyncPanelAnim?.cancel();
+    _adminSyncPanelAnim = null;
+    panel.style.opacity = '';
+    panel.style.transform = '';
+}
+
+// Phase 1 (horizontal) of animateSystemPanelsForUseJson — the settings
+// card's own horizontal position shifts as a side effect of
+// #admin-system-panels' justify-content:center re-centering around however
+// many flex items are actually visible (the card alone vs. paired with the
+// sync panel) — not a fixed pixel value there's any CSS property to
+// hand-animate. Uses the FLIP technique instead: measure the card's
+// position before `mutate` changes what's visible, apply it, measure
+// again, then play the resulting visual jump back down to zero so it reads
+// as a slide instead of a snap.
+function _slideSettingsCard(mutate) {
+    const card = document.getElementById('admin-system-settings');
+    if (!card) { mutate(); return Promise.resolve(); }
+
+    const before = card.getBoundingClientRect().left;
+    mutate();
+    const after = card.getBoundingClientRect().left;
+    const deltaX = before - after;
+
+    if (!deltaX) return Promise.resolve();
+
+    card.style.transform = `translateX(${deltaX}px)`;
+    card.getBoundingClientRect(); // flush layout so that jump is committed before animating away from it
+    const duration = 280;
+    const anim = card.animate(
+        [{transform: `translateX(${deltaX}px)`}, {transform: 'translateX(0)'}],
+        {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'},
+    );
+
+    return new Promise(resolve => {
+        setTimeout(() => {
+            anim.cancel();
+            card.style.transform = '';
+            resolve();
+        }, duration);
+    });
+}
+
+// Click-triggered counterpart to renderLocalDatabaseVisibility +
+// renderSyncPanelVisibility together — two distinct phases rather than
+// everything animating at once, which used to read as the settings card
+// snapping sideways while unrelated content faded in on top of it:
+//
+//   Showing:  1) the settings card slides HORIZONTALLY into its new
+//             position first (see _slideSettingsCard) — the sync panel
+//             already occupies its layout space during this (so the card
+//             ends up exactly where it's about to stay) but is held
+//             invisible so it doesn't appear before its own entrance;
+//             2) THEN the Local Database row and the sync panel grow/fade
+//             in VERTICALLY together (see animateLocalDatabaseVisibility /
+//             _playSyncPanelMotion).
+//
+//   Hiding:   the exact reverse — 1) the row and sync panel collapse
+//             vertically first, 2) THEN the settings card slides back
+//             horizontally once that space is actually gone.
+async function animateSystemPanelsForUseJson(useJson) {
+    const syncPanel = document.getElementById('admin-system-sync-panel');
+    if (!syncPanel) return;
+
+    if (!useJson) {
+        await _slideSettingsCard(() => {
+            syncPanel.classList.remove('hidden');
+            syncPanel.style.opacity = '0';
+        });
+        syncPanel.style.opacity = '';
+        await Promise.all([
+            animateLocalDatabaseVisibility(false),
+            _playSyncPanelMotion(true),
+        ]);
+    } else {
+        await Promise.all([
+            animateLocalDatabaseVisibility(true),
+            _playSyncPanelMotion(false),
+        ]);
+        await _slideSettingsCard(() => {
+            syncPanel.classList.add('hidden');
+        });
+        _adminSyncPanelCleanupAfterHide();
+    }
 }
 
 async function updateAdminSystemSetting(key, value) {
     const prevValue = document.querySelector(`.admin-system-option-toggle[data-setting="${key}"] .active`)?.dataset.value === 'true';
     renderAdminSystemToggle(key, value);
-    if (key === 'use_json') animateLocalDatabaseVisibility(value);
+
+    if (key === 'use_json') {
+        animateSystemPanelsForUseJson(value);
+    }
 
     try {
         const res = await fetch('/api/admin/settings', {
@@ -302,12 +510,72 @@ async function updateAdminSystemSetting(key, value) {
             const data = await res.json().catch(() => ({}));
             alert(data.detail || 'Failed to update setting.');
             renderAdminSystemToggle(key, prevValue);
-            if (key === 'use_json') animateLocalDatabaseVisibility(prevValue);
+            if (key === 'use_json') {
+                animateSystemPanelsForUseJson(prevValue);
+            }
         }
     } catch (err) {
         alert('Failed to update setting.');
         renderAdminSystemToggle(key, prevValue);
-        if (key === 'use_json') animateLocalDatabaseVisibility(prevValue);
+        if (key === 'use_json') {
+            animateSystemPanelsForUseJson(prevValue);
+        }
+    }
+}
+
+// Sync Now — runs scripts/migrate_json_to_pg.py's full migration via the
+// background job pattern (see _run_sync_job/api_admin_sync_to_database_*
+// in app.py; same start-a-job-then-poll-its-status shape as e.g.
+// runAdminPricingRefresh), and renders its captured stdout log in place.
+// The safety guard that refuses to wipe price_listings/price_sales/
+// card_errors when the JSON source looks suspiciously empty (see
+// _guard_full_replace in migrate_json_to_pg.py) surfaces here as an "ok:
+// false" job with an "error" message — same as any other failure — not a
+// distinct UI state, since from this button's point of view both just mean
+// "didn't finish cleanly, here's why."
+async function runAdminSystemSync() {
+    const btn = document.getElementById('admin-system-sync-btn');
+    const log = document.getElementById('admin-system-sync-log');
+    if (!btn || !log) return;
+
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+    log.classList.remove('hidden', 'admin-system-sync-log-error');
+    log.textContent = 'Running…';
+
+    try {
+        const startRes = await fetch('/api/admin/system/sync-to-database/start', {method: 'POST'});
+        if (!startRes.ok) {
+            const data = await startRes.json().catch(() => ({}));
+            throw new Error(data.detail || 'Failed to start sync.');
+        }
+        const {job_id} = await startRes.json();
+
+        let result;
+        while (true) {
+            await new Promise(r => setTimeout(r, 800));
+            const statusRes = await fetch(`/api/admin/system/sync-to-database/status/${job_id}`);
+            if (!statusRes.ok) throw new Error('Lost track of the sync job.');
+            const snapshot = await statusRes.json();
+            if (snapshot.status === 'done' || snapshot.status === 'error') {
+                result = snapshot;
+                break;
+            }
+        }
+
+        if (result.ok) {
+            log.textContent = result.log || '(no output)';
+        } else {
+            log.classList.add('admin-system-sync-log-error');
+            log.textContent = (result.error ? `${result.error}\n\n` : '') + (result.log || '');
+        }
+    } catch (err) {
+        log.classList.add('admin-system-sync-log-error');
+        log.textContent = err.message || 'Sync failed.';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
     }
 }
 

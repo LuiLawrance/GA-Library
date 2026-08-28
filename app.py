@@ -90,6 +90,11 @@ _pricing_batch_jobs_lock = threading.Lock()
 _product_id_jobs = {}
 _product_id_jobs_lock = threading.Lock()
 
+# ── JSON -> Postgres sync jobs (admin-only, System panel's Sync button) ──
+# job_id → {status: "running"|"done"|"error", ok, log, error}
+_sync_jobs = {}
+_sync_jobs_lock = threading.Lock()
+
 
 def create_token(username: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
@@ -965,6 +970,56 @@ async def api_find_product_ids_status(job_id: str, request: Request):
     if snapshot["status"] in ("done", "error"):
         with _product_id_jobs_lock:
             _product_id_jobs.pop(job_id, None)
+
+    return JSONResponse(snapshot)
+
+
+# A full run touches every DATA_GA/DATA_GENERAL domain (~7s against the real
+# local dataset) — long enough to freeze every other request for that whole
+# stretch if run directly in this async route, so it gets the same
+# background-thread-plus-job-polling treatment as the scrape/product-ID jobs
+# above rather than a synchronous call.
+def _run_sync_job(job_id: str) -> None:
+    from scripts.migrate_json_to_pg import run_migration
+
+    result = run_migration()
+
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if job is not None:
+            job["status"] = "done" if result["ok"] else "error"
+            job["ok"] = result["ok"]
+            job["log"] = result["log"]
+            job["error"] = result["error"]
+
+
+@app.post("/api/admin/system/sync-to-database/start")
+async def api_admin_sync_to_database_start(request: Request):
+    require_admin(request)
+
+    job_id = uuid.uuid4().hex
+    with _sync_jobs_lock:
+        _sync_jobs[job_id] = {"status": "running", "ok": None, "log": "", "error": None}
+
+    thread = threading.Thread(target=_run_sync_job, args=(job_id,), daemon=True)
+    thread.start()
+
+    return JSONResponse({"job_id": job_id})
+
+
+@app.get("/api/admin/system/sync-to-database/status/{job_id}")
+async def api_admin_sync_to_database_status(job_id: str, request: Request):
+    require_admin(request)
+
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        snapshot = dict(job)
+
+    if snapshot["status"] in ("done", "error"):
+        with _sync_jobs_lock:
+            _sync_jobs.pop(job_id, None)
 
     return JSONResponse(snapshot)
 

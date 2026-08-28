@@ -17,36 +17,50 @@
     <div class="admin-content">
         <div class="admin-section hidden" id="admin-section-system">
             <span class="admin-section-title">System</span>
-            <div class="admin-system-options" id="admin-system-settings">
-                <div class="admin-system-option-row">
-                    <span class="admin-system-option-name">Store Images Locally</span>
-                    <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="store_images_locally">
-                        <span class="pill-indicator"></span>
-                        <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                onclick="updateAdminSystemSetting('store_images_locally', false)">Off</button>
-                        <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                onclick="updateAdminSystemSetting('store_images_locally', true)">On</button>
+            <div class="admin-system-panels" id="admin-system-panels">
+                <div class="admin-system-options" id="admin-system-settings">
+                    <div class="admin-system-option-row">
+                        <span class="admin-system-option-name">Store Images Locally</span>
+                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="store_images_locally">
+                            <span class="pill-indicator"></span>
+                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                    onclick="updateAdminSystemSetting('store_images_locally', false)">Off</button>
+                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                    onclick="updateAdminSystemSetting('store_images_locally', true)">On</button>
+                        </div>
+                    </div>
+                    <div class="admin-system-option-row">
+                        <span class="admin-system-option-name">Use JSON</span>
+                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
+                            <span class="pill-indicator"></span>
+                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                    onclick="updateAdminSystemSetting('use_json', false)">Off</button>
+                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                    onclick="updateAdminSystemSetting('use_json', true)">On</button>
+                        </div>
+                    </div>
+                    <div class="admin-system-option-row hidden" id="admin-system-local-database-row">
+                        <span class="admin-system-option-name">Local Database</span>
+                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_database">
+                            <span class="pill-indicator"></span>
+                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                    onclick="updateAdminSystemSetting('local_database', false)">Off</button>
+                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                    onclick="updateAdminSystemSetting('local_database', true)">On</button>
+                        </div>
                     </div>
                 </div>
-                <div class="admin-system-option-row">
-                    <span class="admin-system-option-name">Use JSON</span>
-                    <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
-                        <span class="pill-indicator"></span>
-                        <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                onclick="updateAdminSystemSetting('use_json', false)">Off</button>
-                        <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                onclick="updateAdminSystemSetting('use_json', true)">On</button>
-                    </div>
-                </div>
-                <div class="admin-system-option-row hidden" id="admin-system-local-database-row">
-                    <span class="admin-system-option-name">Local Database</span>
-                    <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_database">
-                        <span class="pill-indicator"></span>
-                        <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                onclick="updateAdminSystemSetting('local_database', false)">Off</button>
-                        <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                onclick="updateAdminSystemSetting('local_database', true)">On</button>
-                    </div>
+                <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
+                    <span class="admin-system-sync-title">Sync JSON &rarr; Database</span>
+                    <p class="admin-system-sync-desc">
+                        Copies your current DATA_GA/DATA_GENERAL JSON files into Postgres. Safe to
+                        re-run — existing rows are updated in place, nothing here reads back out of
+                        the database. Refuses to wipe sales/listings history if the JSON source looks
+                        suspiciously smaller than what's already stored.
+                    </p>
+                    <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
+                            id="admin-system-sync-btn" onclick="runAdminSystemSync()">Sync Now</button>
+                    <pre class="admin-system-sync-log hidden" id="admin-system-sync-log"></pre>
                 </div>
             </div>
         </div>
