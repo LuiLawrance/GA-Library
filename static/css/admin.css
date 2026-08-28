@@ -146,15 +146,15 @@
    as the Local Database row itself (see animateSyncPanelVisibility in
    admin.js) — and stays visible regardless of Local Database's own on/off
    state, since syncing is also useful to pre-populate Postgres before
-   switching Local Database on, not just after. Same bordered-card look as
-   the settings options card, narrower since it's just a button and some
-   text. */
+   switching Local Database on, not just after. Holds the Database
+   Connection editor plus the Sync / Wipe actions. Same bordered-card look
+   as the settings options card. */
 .admin-system-sync-panel {
     display: flex;
     flex-direction: column;
     gap: 10px;
     width: 100%;
-    max-width: 280px;
+    max-width: 320px;
     padding: 16px;
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -218,6 +218,98 @@
 .admin-system-sync-log.admin-system-sync-log-error {
     color: var(--error);
     border-color: var(--error);
+}
+
+/* Database Connection lives at the top of .admin-system-sync-panel (above
+   Sync / Wipe), so it wipes in with that panel's phase-2 vertical reveal
+   for free — see _playSyncPanelWipe / animateSystemPanelsForUseJson in
+   admin.js. The fields sit in a 2-up grid to keep the panel from getting
+   tall. */
+.admin-system-db-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+}
+
+.admin-system-db-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.admin-system-db-label {
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.admin-system-db-input {
+    width: 100%;
+    padding: 7px 9px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.admin-system-db-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* The SSL field is an .admin-pid-dropdown widget (rotating arrow +
+   dropdownReveal menu, same look as the Cards page filters — see
+   admin.html). Nudge its button padding to sit level with the sibling text
+   inputs in this row; the menu is already left:0/right:0 so it tracks the
+   narrow grid cell. */
+.admin-system-db-ssl-wrap .admin-pid-dropdown-btn {
+    padding: 7px 9px;
+}
+
+/* Matches #set-dropdown-options's scrollbar on the Cards page exactly (same
+   as the Set/Rarity column filters do — see #admin-pid-table-header
+   .set-dropdown-menu below). */
+.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar {
+    width: 6px;
+}
+
+.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar-track {
+    background: var(--bg-card);
+}
+
+.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
+.admin-system-db-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.admin-system-db-status {
+    margin: 0;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    word-break: break-word;
+    color: var(--text-muted);
+}
+
+.admin-system-db-status.admin-system-db-status-error {
+    color: var(--error);
+}
+
+.admin-system-db-status.admin-system-db-status-ok {
+    color: var(--accent);
 }
 
 /* Sits inline to the left of the card search box (in .admin-cards-header-row

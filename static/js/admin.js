@@ -234,6 +234,7 @@ async function loadAdminSystemSettings() {
         }
         renderLocalDatabaseVisibility(!!data.use_json);
         renderSyncPanelVisibility(!!data.use_json);
+        loadAdminSystemDatabaseSettings();
     } catch (err) {
         // Leave the toggles at their last-known state rather than blanking
         // the whole panel — same as the other admin sections' load failures.
@@ -283,10 +284,10 @@ function renderLocalDatabaseVisibility(useJson) {
 // (#admin-system-settings, the bordered box holding every row) reshaping
 // around it via the shared animateBoxResize (see modal-anim.js), same
 // technique dgaSwitchImportExportTab uses for its own panel swap. Called as
-// the "vertical" half of animateSystemPanelsForUseJson's two-phase sequence
-// below (and returns that resize's own promise so that sequence can await
-// it), but kept as its own function since nothing else here needs to know
-// it's also doing this.
+// the "vertical" (phase 2) half of animateSystemPanelsForUseJson's
+// two-phase sequence below, alongside _playSyncPanelWipe (and returns that
+// resize's own promise so that sequence can await it), but kept as its own
+// function since nothing else here needs to know it's also doing this.
 function animateLocalDatabaseVisibility(useJson) {
     const box = document.getElementById('admin-system-settings');
     const row = document.getElementById('admin-system-local-database-row');
@@ -321,94 +322,94 @@ function renderSyncPanelVisibility(useJson) {
     if (panel) panel.classList.toggle('hidden', useJson);
 }
 
-// The panel's own entrance/exit motion — a slide-DOWN + scale + fade, not
-// just an opacity change, so it reads as the panel itself arriving/leaving.
-// "Vertical" to match the phase it plays in (see
-// animateSystemPanelsForUseJson) — the panel used to slide in from the
-// side, which fought with the settings card's own horizontal move instead
-// of reading as a separate, deliberate step. Reversed for the exit (see
-// _playSyncPanelMotion below).
-const ADMIN_SYNC_PANEL_ENTER_KEYFRAMES = [
-    {opacity: 0, transform: 'translateY(-14px) scale(0.94)'},
-    {opacity: 1, transform: 'translateY(0) scale(1)'},
-];
+// Phase 2's vertical reveal of the sync panel — a height "wipe" (0 <-> its
+// natural height, overflow clipped), NOT a fade or a scale/zoom. Same
+// technique and 300ms timing as the animateBoxResize (see modal-anim.js)
+// that grows the settings card for the Local Database row, so
+// animateSystemPanelsForUseJson can run the two together and have them wipe
+// down / collapse up in lockstep. Only the height moves here — the panel's
+// horizontal space is already claimed in phase 1 (see _slideSettingsCard).
+const ADMIN_SYNC_PANEL_WIPE_MS = 300;
 
-// Tracks the panel's own in-flight entrance/exit animation (there's only
-// ever one such element, so a single variable does — unlike animateBoxResize/
-// animateGridColumns in modal-anim.js, which each track arbitrarily many
-// boxes via a WeakMap). Same reason those cancel their own prior animation
-// before starting a new one: a rapid double-toggle would otherwise leave two
-// animations racing on the same element, ending on whichever happened to
-// finish last rather than the actually-latest requested state.
+// Tracks the panel's in-flight wipe (only ever one such element, so a
+// single variable does — unlike animateBoxResize's per-box WeakMap). A
+// rapid re-toggle cancels the previous wipe rather than leaving two racing
+// on the same element and ending on whichever finishes last.
 let _adminSyncPanelAnim = null;
 
-// Plays just the sync panel's own vertical motion (see
-// ADMIN_SYNC_PANEL_ENTER_KEYFRAMES) — the "vertical" half of
-// animateSystemPanelsForUseJson's two-phase sequence, entering or leaving.
-// Doesn't touch .hidden/display itself either way — on leaving, the caller
-// hides the panel once this resolves (see animateSystemPanelsForUseJson);
-// on entering, the caller is responsible for having already made the panel
-// visible (see the same function) before calling this.
-//
-// Resolves via a plain timer rather than anim.finished — see
-// animateBoxResize's own comment in modal-anim.js on why that promise isn't
-// reliable enough to await, which matters more here than it did for the
-// previous version of this animation: this result is now awaited as part
-// of a longer sequence, so a finished promise that never settles would
-// have hung phase 2 (or the slide back) forever instead of just leaving a
-// stray animation.
-function _playSyncPanelMotion(entering) {
+// Clears the inline styles a height wipe leaves on the panel, handing
+// sizing back to CSS. Safe to call anytime.
+function _clearSyncPanelWipeStyles() {
+    const panel = document.getElementById('admin-system-sync-panel');
+    if (!panel) return;
+    for (const prop of ['height', 'overflow', 'paddingTop', 'paddingBottom']) {
+        panel.style[prop] = '';
+    }
+}
+
+// Plays the panel's vertical wipe — entering (0 -> open height) or leaving
+// (open height -> 0). Vertical padding collapses with the height so the
+// panel wipes down to nothing rather than leaving a thin bar of its own
+// padding. The panel is already un-hidden and holding its horizontal space
+// (phase 1) before an entering wipe; the caller adds .hidden after a
+// leaving one. Resolves on a plain timer, not anim.finished — see
+// animateBoxResize's comment on why.
+function _playSyncPanelWipe(entering) {
     const panel = document.getElementById('admin-system-sync-panel');
     if (!panel) return Promise.resolve();
 
     _adminSyncPanelAnim?.cancel();
 
-    const duration = entering ? 260 : 200;
+    // Clear the pins phase 1 left (height/padding at 0) so
+    // getComputedStyle/getBoundingClientRect read the true open box, then
+    // clip overflow for the tween.
+    panel.style.height = '';
+    panel.style.paddingTop = '';
+    panel.style.paddingBottom = '';
+    panel.style.overflow = 'hidden';
+    const cs = getComputedStyle(panel);
+    const openPadTop = cs.paddingTop;
+    const openPadBottom = cs.paddingBottom;
+    const openHeight = panel.getBoundingClientRect().height;
+
+    const shut = {height: '0px', paddingTop: '0px', paddingBottom: '0px'};
+    const open = {height: openHeight + 'px', paddingTop: openPadTop, paddingBottom: openPadBottom};
+
     const anim = panel.animate(
-        entering ? ADMIN_SYNC_PANEL_ENTER_KEYFRAMES : [...ADMIN_SYNC_PANEL_ENTER_KEYFRAMES].reverse(),
-        // fill:'backwards' on entry holds the first keyframe (opacity 0,
-        // offset) from the moment this is called, not just once playback
-        // starts — otherwise the panel would flash at full opacity/size
-        // for a frame first. fill:'forwards' on exit holds the last
-        // (invisible) keyframe until the caller hides it for real.
-        {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: entering ? 'backwards' : 'forwards'},
+        entering ? [shut, open] : [open, shut],
+        // fill:'backwards' holds the 0 frame from the instant this is
+        // called (no delay) so an opening panel never flashes at full
+        // height first; fill:'forwards' holds the 0 frame after a closing
+        // wipe until the caller adds .hidden (see
+        // _adminSyncPanelCleanupAfterHide).
+        {
+            duration: ADMIN_SYNC_PANEL_WIPE_MS,
+            easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+            fill: entering ? 'backwards' : 'forwards',
+        },
     );
     _adminSyncPanelAnim = anim;
 
-    return new Promise(resolve => {
-        setTimeout(() => {
-            if (_adminSyncPanelAnim !== anim) { resolve(); return; } // superseded by a later call already
+    return sleep(ADMIN_SYNC_PANEL_WIPE_MS).then(() => {
+        if (_adminSyncPanelAnim !== anim) return; // superseded by a later toggle
 
-            if (entering) {
-                anim.cancel();
-                _adminSyncPanelAnim = null;
-                panel.style.opacity = '';
-                panel.style.transform = '';
-            }
-            // Exit: deliberately NOT cleaning up here — cancelling now would
-            // release the held opacity:0/offset state before the caller has
-            // actually added .hidden (that happens next, in
-            // animateSystemPanelsForUseJson's phase 1 slide-back), which
-            // would flash the panel back to full opacity for a frame in
-            // between. See _adminSyncPanelCleanupAfterHide, called once
-            // .hidden is actually in place.
-
-            resolve();
-        }, duration);
+        if (entering) {
+            anim.cancel();
+            _adminSyncPanelAnim = null;
+            _clearSyncPanelWipeStyles();
+        }
+        // Leaving: keep the held 0-height state until .hidden is actually
+        // in place — releasing it now would flash the panel back to full
+        // height for a frame. _adminSyncPanelCleanupAfterHide does it.
     });
 }
 
-// Releases an exit _playSyncPanelMotion's held invisible state — safe to
-// call once the panel is already display:none (see the comment above), a
-// no-op otherwise. Call after adding .hidden, never before.
+// Releases a closing wipe's held 0-height state — call only once .hidden is
+// on the panel, never before.
 function _adminSyncPanelCleanupAfterHide() {
-    const panel = document.getElementById('admin-system-sync-panel');
-    if (!panel) return;
-
     _adminSyncPanelAnim?.cancel();
     _adminSyncPanelAnim = null;
-    panel.style.opacity = '';
-    panel.style.transform = '';
+    _clearSyncPanelWipeStyles();
 }
 
 // Phase 1 (horizontal) of animateSystemPanelsForUseJson — the settings
@@ -448,45 +449,57 @@ function _slideSettingsCard(mutate) {
     });
 }
 
-// Click-triggered counterpart to renderLocalDatabaseVisibility +
-// renderSyncPanelVisibility together — two distinct phases rather than
-// everything animating at once, which used to read as the settings card
-// snapping sideways while unrelated content faded in on top of it:
+// Bumped once per animateSystemPanelsForUseJson call. Each phase re-checks
+// it after its await and bails if a newer toggle has since started, so a
+// stale run can't drive phase 2, slide the card, or hide the panel out
+// from under the latest one (rapid double-toggling the switch).
+let _adminSystemPanelsGen = 0;
+
+// Click-triggered reveal/hide of everything that only applies once Use JSON
+// is off: the Local Database toggle row (inside the settings card) and the
+// combined Database Connection / Sync / Wipe panel beside it. Two distinct
+// phases, not everything at once — the menus settle their HORIZONTAL
+// positions first, then the new content wipes in VERTICALLY:
 //
-//   Showing:  1) the settings card slides HORIZONTALLY into its new
-//             position first (see _slideSettingsCard) — the sync panel
-//             already occupies its layout space during this (so the card
-//             ends up exactly where it's about to stay) but is held
-//             invisible so it doesn't appear before its own entrance;
-//             2) THEN the Local Database row and the sync panel grow/fade
-//             in VERTICALLY together (see animateLocalDatabaseVisibility /
-//             _playSyncPanelMotion).
+//   Showing:  1) un-hide the sync panel but pin it to zero height, so it
+//             claims only its width; the settings card slides across to its
+//             paired position around that (see _slideSettingsCard).
+//             2) THEN the Local Database row and the sync panel wipe open
+//             downward together (animateLocalDatabaseVisibility /
+//             _playSyncPanelWipe — same 300ms height animation).
 //
-//   Hiding:   the exact reverse — 1) the row and sync panel collapse
-//             vertically first, 2) THEN the settings card slides back
-//             horizontally once that space is actually gone.
+//   Hiding:   the exact reverse — 1) the row and panel collapse their
+//             height to zero, 2) THEN the panel is dropped (releasing its
+//             width) and the settings card slides back to centered.
 async function animateSystemPanelsForUseJson(useJson) {
     const syncPanel = document.getElementById('admin-system-sync-panel');
     if (!syncPanel) return;
 
+    const gen = ++_adminSystemPanelsGen;
+
     if (!useJson) {
         await _slideSettingsCard(() => {
             syncPanel.classList.remove('hidden');
-            syncPanel.style.opacity = '0';
+            syncPanel.style.height = '0px';
+            syncPanel.style.paddingTop = '0px';
+            syncPanel.style.paddingBottom = '0px';
+            syncPanel.style.overflow = 'hidden';
         });
-        syncPanel.style.opacity = '';
+        if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
         await Promise.all([
             animateLocalDatabaseVisibility(false),
-            _playSyncPanelMotion(true),
+            _playSyncPanelWipe(true),
         ]);
     } else {
         await Promise.all([
             animateLocalDatabaseVisibility(true),
-            _playSyncPanelMotion(false),
+            _playSyncPanelWipe(false),
         ]);
+        if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
         await _slideSettingsCard(() => {
             syncPanel.classList.add('hidden');
         });
+        if (gen !== _adminSystemPanelsGen) return;
         _adminSyncPanelCleanupAfterHide();
     }
 }
@@ -520,6 +533,131 @@ async function updateAdminSystemSetting(key, value) {
         if (key === 'use_json') {
             animateSystemPanelsForUseJson(prevValue);
         }
+    }
+}
+
+// ── Database Connection panel ───────────────────────────────────────────
+// Reads/writes the pieces of DATABASE_URL via /api/admin/system/database-url
+// (see app.py). A save writes .env + os.environ and resets the engine
+// server-side — no page reload needed, but the panel refetches so the
+// fields show exactly what got parsed back out.
+const ADMIN_DB_FIELDS = ['host', 'port', 'database', 'username', 'password', 'sslmode'];
+
+function _adminDbInput(name) {
+    return document.getElementById(`admin-system-db-${name}`);
+}
+
+function _readAdminDbFields() {
+    const out = {};
+    for (const name of ADMIN_DB_FIELDS) {
+        out[name] = _adminDbInput(name)?.value ?? '';
+    }
+    return out;
+}
+
+function _setAdminDbStatus(text, kind) {
+    const el = document.getElementById('admin-system-db-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+    el.classList.toggle('admin-system-db-status-error', kind === 'error');
+    el.classList.toggle('admin-system-db-status-ok', kind === 'ok');
+}
+
+// The SSL field is an .admin-pid-dropdown widget (rotating arrow +
+// dropdownReveal, same as the Cards page filters — see admin.html) over a
+// hidden <input id="admin-system-db-sslmode"> that _readAdminDbFields /
+// load / save treat like any other field. After those write the hidden
+// value, mirror it onto the visible button label and the menu's .selected
+// row (which a user click keeps in sync itself via selectAdminPidDropdownOption).
+function _syncAdminDbSslDropdown() {
+    const hidden = document.getElementById('admin-system-db-sslmode');
+    const label = document.getElementById('admin-system-db-ssl-label');
+    const menu = document.getElementById('admin-system-db-ssl-menu');
+    if (!hidden || !label || !menu) return;
+
+    const value = hidden.value || '';
+    let matched = null;
+    menu.querySelectorAll('.admin-pid-dropdown-option').forEach(opt => {
+        const on = opt.dataset.value === value;
+        opt.classList.toggle('selected', on);
+        if (on) matched = opt;
+    });
+    label.textContent = matched ? matched.textContent.trim() : (value || 'default');
+}
+
+async function loadAdminSystemDatabaseSettings() {
+    if (!document.getElementById('admin-system-db-host')) return;
+
+    try {
+        const res = await fetch('/api/admin/system/database-url');
+        if (!res.ok) throw new Error('Failed to load connection');
+        const data = await res.json();
+
+        for (const name of ADMIN_DB_FIELDS) {
+            const input = _adminDbInput(name);
+            if (input) input.value = data[name] ?? '';
+        }
+        _syncAdminDbSslDropdown();
+        _setAdminDbStatus('', null);
+    } catch (err) {
+        // Leave fields as-is, same as the toggle-load failure path.
+    }
+}
+
+async function saveAdminSystemDatabaseSettings() {
+    const btn = document.getElementById('admin-system-db-save-btn');
+    if (btn) btn.disabled = true;
+    _setAdminDbStatus('Saving…', null);
+
+    try {
+        const res = await fetch('/api/admin/system/database-url', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(_readAdminDbFields()),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            _setAdminDbStatus(data.detail || 'Failed to save connection.', 'error');
+            return;
+        }
+
+        for (const name of ADMIN_DB_FIELDS) {
+            const input = _adminDbInput(name);
+            if (input) input.value = data[name] ?? '';
+        }
+        _syncAdminDbSslDropdown();
+        _setAdminDbStatus('Saved — connection updated.', 'ok');
+    } catch (err) {
+        _setAdminDbStatus('Failed to save connection.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function testAdminSystemDatabaseConnection() {
+    const btn = document.getElementById('admin-system-db-test-btn');
+    if (btn) btn.disabled = true;
+    _setAdminDbStatus('Testing…', null);
+
+    try {
+        const res = await fetch('/api/admin/system/database-url/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(_readAdminDbFields()),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (data.ok) {
+            _setAdminDbStatus('Connection succeeded.', 'ok');
+        } else {
+            _setAdminDbStatus(data.error || 'Connection failed.', 'error');
+        }
+    } catch (err) {
+        _setAdminDbStatus('Connection failed.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -3829,4 +3967,5 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#admin-pid-marketplace-dropdown-wrap')) closeAdminPidMarketplaceDropdown();
     if (!e.target.closest('.admin-pid-col-rarity .set-dropdown-wrap')) closeAdminPidRarityFilter();
     if (!e.target.closest('.admin-pid-col-set .set-dropdown-wrap')) closeAdminPidSetFilter();
+    if (!e.target.closest('#admin-system-db-ssl-wrap')) closeAdminPidDropdown('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn');
 }, true);

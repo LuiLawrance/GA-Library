@@ -51,22 +51,79 @@
                     </div>
                 </div>
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
+                    <span class="admin-system-sync-title">Database Connection</span>
+                    <p class="admin-system-sync-desc">Which Postgres to use. Written to <code>.env</code>, applied live.</p>
+                    <div class="admin-system-db-fields">
+                        <label class="admin-system-db-field">
+                            <span class="admin-system-db-label">Host</span>
+                            <input type="text" id="admin-system-db-host" class="admin-system-db-input"
+                                   autocomplete="off" spellcheck="false">
+                        </label>
+                        <label class="admin-system-db-field">
+                            <span class="admin-system-db-label">Port</span>
+                            <input type="number" id="admin-system-db-port" class="admin-system-db-input"
+                                   autocomplete="off">
+                        </label>
+                        <label class="admin-system-db-field">
+                            <span class="admin-system-db-label">Database</span>
+                            <input type="text" id="admin-system-db-database" class="admin-system-db-input"
+                                   autocomplete="off" spellcheck="false">
+                        </label>
+                        <label class="admin-system-db-field">
+                            <span class="admin-system-db-label">Username</span>
+                            <input type="text" id="admin-system-db-username" class="admin-system-db-input"
+                                   autocomplete="off" spellcheck="false">
+                        </label>
+                        <label class="admin-system-db-field">
+                            <span class="admin-system-db-label">Password</span>
+                            <input type="password" id="admin-system-db-password" class="admin-system-db-input"
+                                   autocomplete="off">
+                        </label>
+                        <div class="admin-system-db-field">
+                            <span class="admin-system-db-label">SSL</span>
+                            <div class="admin-pid-dropdown-wrap admin-system-db-ssl-wrap" id="admin-system-db-ssl-wrap">
+                                <button type="button" class="admin-pid-dropdown-btn" id="admin-system-db-ssl-btn"
+                                        onclick="toggleAdminPidDropdown('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn')">
+                                    <span id="admin-system-db-ssl-label">default</span>
+                                    <span class="admin-pid-dropdown-arrow">&#8249;</span>
+                                </button>
+                                <div class="admin-pid-dropdown-menu hidden" id="admin-system-db-ssl-menu">
+                                    <div class="admin-pid-dropdown-option selected" data-value=""
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', '', 'default')">default</div>
+                                    <div class="admin-pid-dropdown-option" data-value="disable"
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', 'disable', 'disable')">disable</div>
+                                    <div class="admin-pid-dropdown-option" data-value="allow"
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', 'allow', 'allow')">allow</div>
+                                    <div class="admin-pid-dropdown-option" data-value="prefer"
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', 'prefer', 'prefer')">prefer</div>
+                                    <div class="admin-pid-dropdown-option" data-value="require"
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', 'require', 'require')">require</div>
+                                    <div class="admin-pid-dropdown-option" data-value="verify-ca"
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', 'verify-ca', 'verify-ca')">verify-ca</div>
+                                    <div class="admin-pid-dropdown-option" data-value="verify-full"
+                                         onclick="selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn', 'admin-system-db-sslmode', 'admin-system-db-ssl-label', 'verify-full', 'verify-full')">verify-full</div>
+                                </div>
+                                <input type="hidden" id="admin-system-db-sslmode" value="">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="admin-system-db-actions">
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                id="admin-system-db-test-btn" onclick="testAdminSystemDatabaseConnection()">Test</button>
+                        <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
+                                id="admin-system-db-save-btn" onclick="saveAdminSystemDatabaseSettings()">Save</button>
+                    </div>
+                    <p class="admin-system-db-status hidden" id="admin-system-db-status"></p>
+
+                    <div class="admin-system-wipe-divider"></div>
                     <span class="admin-system-sync-title">Sync JSON &rarr; Database</span>
-                    <p class="admin-system-sync-desc">
-                        Copies your current DATA_GA/DATA_GENERAL JSON files into Postgres. Safe to
-                        re-run — existing rows are updated in place, nothing here reads back out of
-                        the database. Refuses to wipe sales/listings history if the JSON source looks
-                        suspiciously smaller than what's already stored.
-                    </p>
+                    <p class="admin-system-sync-desc">Copies the JSON files into Postgres. Safe to re-run.</p>
                     <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
                             id="admin-system-sync-btn" onclick="runAdminSystemSync()">Sync Now</button>
 
                     <div class="admin-system-wipe-divider"></div>
                     <span class="admin-system-sync-title">Wipe Database</span>
-                    <p class="admin-system-sync-desc">
-                        Permanently deletes every card, pricing, inventory, deck, and watchlist row
-                        from Postgres. Your user accounts are kept. This cannot be undone.
-                    </p>
+                    <p class="admin-system-sync-desc">Deletes all catalog, pricing, and inventory rows. Keeps users. Permanent.</p>
                     <button type="button" class="admin-pid-refresh-btn admin-system-wipe-btn"
                             id="admin-system-wipe-btn" onclick="runAdminSystemWipe()">Wipe Database</button>
 

@@ -7,10 +7,11 @@ from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear
     import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
+from db.connection_url import compose as compose_database_url, parse as parse_database_url
 from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection
-from db.session import get_session
+from db.session import get_session, reset_engine
 from db_mode import is_db_mode
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,7 +23,7 @@ from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
-from sqlalchemy import delete, select, update
+from sqlalchemy import create_engine, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from user import RANK_ORDER, user_create, user_delete, user_get_auth_type, user_list, user_login, user_set_role
 from util_file import new_json
@@ -1039,6 +1040,77 @@ async def api_admin_wipe_database(request: Request):
         return JSONResponse(result)
 
     raise HTTPException(status_code=500, detail=result["error"] or "Wipe failed.")
+
+
+# ── Database Connection panel ────────────────────────────────────────────
+# Reads/edits the pieces of DATABASE_URL (host, port, db, user, password,
+# sslmode). DATABASE_URL stays the single source of truth — a save writes
+# the reassembled string back to .env AND to os.environ, then resets the
+# engine so the next query reconnects. On Railway the platform injects
+# DATABASE_URL as a real env var and /app is ephemeral, so a save there
+# takes effect for the running process only — it won't survive a redeploy
+# and won't override the platform var on the next boot (persistent prod
+# changes belong in the Railway dashboard).
+_DOTENV_PATH = ".env"
+
+
+@app.get("/api/admin/system/database-url")
+async def api_admin_get_database_url(request: Request):
+    require_admin(request)
+
+    return JSONResponse(parse_database_url(os.getenv("DATABASE_URL")))
+
+
+@app.post("/api/admin/system/database-url")
+async def api_admin_set_database_url(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+
+    try:
+        url = compose_database_url(body, base_url=os.getenv("DATABASE_URL"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    set_key(_DOTENV_PATH, "DATABASE_URL", url, quote_mode="never")
+    os.environ["DATABASE_URL"] = url
+
+    # Different database ⇒ different rows: drop the pooled engine and every
+    # memoized whole-table read (same reason the wipe handler above busts).
+    reset_engine()
+    db_cache.bust()
+
+    return JSONResponse(parse_database_url(url))
+
+
+@app.post("/api/admin/system/database-url/test")
+async def api_admin_test_database_url(request: Request):
+    require_admin(request)
+
+    body = await request.json()
+
+    # Test the posted fields if any were sent, otherwise whatever is saved.
+    if any((body or {}).get(k) for k in ("host", "database", "username", "password", "port", "sslmode")):
+        try:
+            url = compose_database_url(body, base_url=os.getenv("DATABASE_URL"))
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)})
+    else:
+        url = os.getenv("DATABASE_URL")
+        if not url:
+            return JSONResponse({"ok": False, "error": "No connection configured."})
+
+    engine = None
+    try:
+        engine = create_engine(url, connect_args={"connect_timeout": 5})
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)})
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 
 def _days_since(iso_date: str | None) -> int | None:

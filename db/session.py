@@ -30,6 +30,22 @@ def _get_engine():
     return _engine
 
 
+def reset_engine() -> None:
+    """Drop the cached engine so the next get_session() reconnects using the
+    current DATABASE_URL. Called after the Admin -> System "Database
+    Connection" panel changes the connection string — _get_engine() re-reads
+    os.getenv("DATABASE_URL") when it rebuilds. In-flight requests already
+    holding a session finish on the old pooled connection; dispose() only
+    stops new checkouts."""
+    global _engine, _SessionLocal
+
+    if _engine is not None:
+        _engine.dispose()
+
+    _engine = None
+    _SessionLocal = None
+
+
 @contextmanager
 def get_session() -> Session:
     _get_engine()
