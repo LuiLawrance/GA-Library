@@ -1,10 +1,12 @@
 """SQLAlchemy models mirroring the full DATA_GA/DATA_GENERAL JSON data model.
 
-Stage 1 (see the migration plan) only wires the `users`/`app_settings` domain
-up to real read/write code in user.py/settings.py — every other model here
-exists so the schema and the one-time JSON->Postgres import script
-(scripts/migrate_json_to_pg.py) are complete from day one. Later stages wire
-each remaining domain's app.py routes to these tables one at a time.
+The migration proceeded domain by domain (see the migration plan) — `users`
+first, then the card catalog and pricing reads. Admin settings deliberately
+stayed out: SETTINGS.json is their sole source of truth in every mode (see
+settings.py), and the `app_settings` table that briefly mirrored them was
+dropped in migration a1b2c3d4e5f6. Models whose app.py routes aren't wired
+to Postgres yet still exist here so the schema and the import script
+(scripts/migrate_json_to_pg.py) stay complete.
 
 Primary keys reuse the JSON data's own string IDs (card_id, edition_id,
 foil_id, username, slug, ...) wherever one already exists, so a table reads
@@ -45,14 +47,6 @@ class User(Base):
     auth_type: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=dt.datetime.utcnow)
-
-
-class AppSetting(Base):
-    """Every SETTINGS.json key except local_database itself — see db_mode.py."""
-    __tablename__ = "app_settings"
-
-    key: Mapped[str] = mapped_column(Text, primary_key=True)
-    value: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 # ── Card catalog ──────────────────────────────────────────────────────────────

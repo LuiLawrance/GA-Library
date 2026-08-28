@@ -579,6 +579,49 @@ async function runAdminSystemSync() {
     }
 }
 
+// Wipe Database — deletes every row from every Postgres table except
+// `users` (see wipe_database in scripts/migrate_json_to_pg.py for why
+// users is kept, and for the deliberate choice to put no safety guard
+// there the way Sync has: this action is SUPPOSED to destroy data, so the
+// only thing standing between a misclick and an irreversible wipe is the
+// confirmation right here). Runs synchronously (no job/polling — a
+// TRUNCATE is near-instant, unlike Sync's row-by-row work) and shares
+// Sync's own result log area.
+async function runAdminSystemWipe() {
+    const typed = prompt(
+        'This permanently deletes every card, pricing, inventory, deck, and watchlist row from the ' +
+        'database. Your user accounts are kept. This cannot be undone.\n\nType DELETE to confirm:'
+    );
+    if (typed !== 'DELETE') return;
+
+    const btn = document.getElementById('admin-system-wipe-btn');
+    const log = document.getElementById('admin-system-sync-log');
+    if (!btn || !log) return;
+
+    const originalLabel = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Wiping…';
+    log.classList.remove('hidden', 'admin-system-sync-log-error');
+    log.textContent = 'Running…';
+
+    try {
+        const res = await fetch('/api/admin/system/wipe-database', {method: 'POST'});
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            throw new Error(data.detail || 'Wipe failed.');
+        }
+
+        log.textContent = data.log || '(no output)';
+    } catch (err) {
+        log.classList.add('admin-system-sync-log-error');
+        log.textContent = err.message || 'Wipe failed.';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+    }
+}
+
 async function loadAdminUsers() {
     const summary = document.getElementById('admin-user-summary');
     const table = document.getElementById('admin-user-table');

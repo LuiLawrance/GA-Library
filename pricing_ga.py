@@ -664,6 +664,14 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
 
 
 def _sync_info(card_data: dict, debug: bool = False) -> None:
+    # JSON mode only: pre-creates empty {card_id: {edition_id: {foil_id: []}}}
+    # buckets in LISTINGS/SALES so a foil is addressable before it has any
+    # price rows. In DB mode price_listings/price_sales are append-only log
+    # tables with surrogate keys — there's no empty bucket to seed, and a
+    # foil is addressable via its foils row alone.
+    if is_db_mode():
+        return
+
     from api_ga import JSON_INFO
 
     info_file = new_json(JSON_INFO)

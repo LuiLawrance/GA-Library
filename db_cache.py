@@ -1,12 +1,14 @@
 """Process-wide read-through cache for DB-mode whole-table loaders.
 
-In DB mode the card catalog and pricing tables only change on an explicit
-admin "Sync to Database" job (see _run_sync_job in app.py) — the live-sync
-writers all still write JSON, not Postgres (see the Stage 5/6 scope notes in
-api_ga.py / api_tcgplayer.py / pricing_ga.py). So the loaders that pull an
-entire table (load_info_data, load_slugs_data, load_sales_data, ...) can be
-memoized for the life of the process: bust() is called at the end of every
-sync job, and the TTL is only a backstop in case that call is ever missed.
+In DB mode the card catalog tables change on the admin "Sync to Database"
+job (see _run_sync_job in app.py) AND on a live API card fetch — _persist_card
+in api_ga.py (and sync_featured_sets) write Postgres directly and call
+bust() themselves right after. Pricing tables still only move on the sync
+job (see the Stage 6 notes in api_tcgplayer.py / pricing_ga.py). So the
+loaders that pull an entire table (load_info_data, load_slugs_data,
+load_sales_data, ...) can be memoized for the life of the process: every
+writer that touches these tables busts afterward, and the TTL is only a
+backstop in case a bust() call is ever missed.
 
 Only the DB-mode branch of each loader goes through here. JSON mode keeps
 reading files directly — that path is already fast, and caching it would

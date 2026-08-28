@@ -176,6 +176,25 @@
     align-self: flex-start;
 }
 
+/* Visually separates Sync (constructive) from Wipe (destructive) within
+   the same panel, so the two aren't just two same-weight buttons stacked
+   with nothing distinguishing which one is the dangerous one. */
+.admin-system-wipe-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+}
+
+/* Wipe Database — same shape as .admin-system-sync-btn (inherits
+   .admin-pid-refresh-btn's base look) but in --error instead of --accent,
+   the one deliberately alarming-looking control in this panel. Actual
+   confirmation happens in JS (runAdminSystemWipe requires typing DELETE)
+   — this is just the visual warning, not the safeguard itself. */
+.admin-system-wipe-btn {
+    align-self: flex-start;
+    background: var(--error);
+}
+
 /* Sync Now's result log — the same output CLI users of
    scripts/migrate_json_to_pg.py see, just rendered in the panel instead of
    a terminal (see runAdminSystemSync in admin.js). Monospace + pre-wrap so

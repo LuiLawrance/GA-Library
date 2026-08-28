@@ -60,6 +60,16 @@
                     </p>
                     <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
                             id="admin-system-sync-btn" onclick="runAdminSystemSync()">Sync Now</button>
+
+                    <div class="admin-system-wipe-divider"></div>
+                    <span class="admin-system-sync-title">Wipe Database</span>
+                    <p class="admin-system-sync-desc">
+                        Permanently deletes every card, pricing, inventory, deck, and watchlist row
+                        from Postgres. Your user accounts are kept. This cannot be undone.
+                    </p>
+                    <button type="button" class="admin-pid-refresh-btn admin-system-wipe-btn"
+                            id="admin-system-wipe-btn" onclick="runAdminSystemWipe()">Wipe Database</button>
+
                     <pre class="admin-system-sync-log hidden" id="admin-system-sync-log"></pre>
                 </div>
             </div>

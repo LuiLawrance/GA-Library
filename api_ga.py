@@ -1,5 +1,7 @@
 from datetime import date, datetime
-from db.models import Card, CardSlug, Edition, FeaturedSetGroup, Foil, Set, ThemaScore
+from db import catalog_sync
+from db.catalog_sync import TEMP_FOIL_ID
+from db.models import Card, CardError, CardSlug, Edition, FeaturedSetGroup, Foil, Set, ThemaScore
 from db.session import get_session
 from db_mode import is_db_mode
 from pricing_ga import _sync_info
@@ -40,9 +42,10 @@ UPDATE_THRESHOLD = 30
 # Synthetic foil_id for an edition whose API payload has no circulation data
 # yet (typically a very recently released, low-print special/promo card).
 # Lets the edition stay selectable everywhere a real foil_id normally would
-# be required; _migrate_temp_foil() swaps it for the real one once the API
-# reports it on a later sync.
-TEMP_FOIL_ID = "temp"
+# be required; _migrate_temp_foil() (JSON) / catalog_sync.migrate_temp_foil_db
+# (Postgres) swaps it for the real one once the API reports it on a later
+# sync. Defined in db/catalog_sync.py and re-exported here — both storage
+# paths need the same sentinel.
 
 
 def _api_search(slug: str, debug: bool = False) -> dict:
@@ -64,15 +67,7 @@ def _api_search(slug: str, debug: bool = False) -> dict:
                 f"{card_data['name']}"
             )
 
-        _update_edition(card_data, debug)
-        _update_info(card_data, debug)
-        _update_rule(card_data, debug)
-        _update_sets(card_data, debug)
-        _update_slug(slug, card_data, debug)
-        _update_thema(card_data, debug)
-        _update_update(card_data, debug)
-
-        _sync_info(card_data, debug)
+        _persist_card(slug, card_data, debug)
 
         return card_data
 
@@ -92,6 +87,38 @@ def _api_search(slug: str, debug: bool = False) -> dict:
 
 
 def _check_local(slug: str, debug: bool = False) -> bool:
+    if is_db_mode():
+        with get_session() as session:
+            row = session.execute(
+                select(Card.last_synced)
+                .join(CardSlug, CardSlug.card_id == Card.card_id)
+                .where(CardSlug.slug == slug)
+            ).first()
+
+        if row is None or row[0] is None:
+            if debug:
+                print(f"Not found locally: {slug}")
+            return False
+
+        days_since_update = (date.today() - row[0]).days
+
+        if days_since_update > UPDATE_THRESHOLD:
+            if debug:
+                print(
+                    f"Update needed: {slug} | "
+                    f"last_updated={row[0].isoformat()} | "
+                    f"days={days_since_update}"
+                )
+            return False
+
+        if debug:
+            print(
+                f"Found locally: {slug} | "
+                f"last_updated={row[0].isoformat()} | "
+                f"days={days_since_update}"
+            )
+        return True
+
     slug_file = new_json(JSON_SLUGS)
     update_file = new_json(JSON_UPDATE)
 
@@ -223,12 +250,26 @@ def _download_card_image(edition_id: str, debug: bool = False) -> bool:
 
 
 def _log_error(identifier: str, error: Exception | str, debug: bool = False) -> None:
+    timestamp = datetime.now().isoformat()
+
+    if is_db_mode():
+        # Never let error logging itself raise — it runs inside except: blocks.
+        try:
+            with get_session() as session:
+                session.execute(CardError.__table__.insert().values(
+                    occurred_at=timestamp, identifier=str(identifier), error=str(error),
+                ))
+        except Exception as e:
+            print(f"Error log to Postgres failed | identifier={identifier} | {e}")
+
+        if debug:
+            print(f"Logged error | {identifier}")
+        return
+
     error_file = new_json(JSON_ERRORS)
 
     with error_file.open("r", encoding="utf-8") as f:
         error_data = json.load(f)
-
-    timestamp = datetime.now().isoformat()
 
     error_data[f"{timestamp}_{identifier}"] = {
         "timestamp": timestamp,
@@ -313,13 +354,15 @@ def _build_collector_map() -> dict:
 # `with new_json(JSON_X).open(...) as f: data = json.load(f)` for one line
 # (`data = load_x_data()`) with no other changes needed downstream.
 #
-# Scope note (see the Stage 5 migration plan): this covers READS only. The
-# live-sync writers below (_update_info, _update_edition, _update_slug,
-# _update_thema, _update_rule, _update_sets, _api_search, set_search,
-# card_reset, sync_featured_sets, ...) are unchanged and always write JSON,
-# regardless of local_database — so a card_id/edition_id searched for the
-# first time while DB mode is on won't appear in these readers until
-# scripts/migrate_json_to_pg.py is re-run.
+# These are the READ side. The catalog WRITE side is storage-aware too:
+# _persist_card (used by _api_search / set_search) and sync_featured_sets
+# write Postgres directly in DB mode via db/catalog_sync.py — a card found
+# by a live API search shows up here on the very next read (the write path
+# calls db_cache.bust()), no migrate_json_to_pg.py run needed. Only the
+# _update_* helpers themselves stay JSON-only; they're the JSON branch of
+# _persist_card now, not called directly. Still JSON-only in every mode:
+# card/set image files and the pricing-scrape writers (see pricing_ga.py /
+# api_tcgplayer.py Stage 6 notes).
 
 def _json_load(path: str) -> dict:
     with new_json(path).open("r", encoding="utf-8") as f:
@@ -794,6 +837,142 @@ def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: 
         )
 
 
+def _card_data_to_info_entry(card_data: dict) -> dict:
+    """Build the INFO.json-style entry (`info_data[card_id]`) for one card
+    straight from a raw Grand Archive API payload.
+
+    This is the shape db/catalog_sync.py consumes in DB mode, and the same
+    shape _update_info merges into INFO.json in JSON mode — the per-card /
+    per-edition field handling here is deliberately parallel to _update_info
+    below; change both together. One addition: `collector_number` per
+    edition (the editions table carries it as a column; _update_info leaves
+    collector numbers to the per-set files via _update_sets)."""
+    legality = {"draft": True, "pantheon": True, "standard": True}
+    for format_name, format_data in (card_data.get("legality") or {}).items():
+        if format_data.get("limit") == 0:
+            legality[format_name.lower()] = False
+
+    combined_types = []
+    for value in card_data.get("types", []) + card_data.get("subtypes", []):
+        if value not in combined_types:
+            combined_types.append(value)
+
+    def _date(value):
+        return value.split("T")[0] if value else value
+
+    entry = {
+        "effect": card_data.get("effect"),
+        "effect_html": card_data.get("effect_html"),
+        "effect_raw": card_data.get("effect_raw"),
+        "element": card_data.get("element"),
+        "legality": legality,
+        "stats": {
+            "cost_memory": card_data.get("cost_memory"),
+            "cost_reserve": card_data.get("cost_reserve"),
+            "durability": card_data.get("durability"),
+            "level": card_data.get("level"),
+            "life": card_data.get("life"),
+            "power": card_data.get("power"),
+            "speed": card_data.get("speed"),
+        },
+        "types": combined_types,
+        "editions": {},
+    }
+
+    for edition in card_data["editions"]:
+        foils = {}
+        for foil in edition.get("circulationTemplates", []) + edition.get("circulations", []):
+            foils[foil["uuid"]] = {
+                "kind": foil["kind"],
+                "population": foil.get("population"),
+                "printing": foil.get("printing"),
+                "variants": {
+                    variant["uuid"]: {
+                        "kind": variant.get("description", variant["kind"]),
+                        "population": variant.get("population"),
+                        "printing": variant.get("printing"),
+                    }
+                    for variant in foil.get("variants", [])
+                },
+            }
+
+        # No circulation data yet — synthetic foil so the edition stays
+        # selectable. A real foil arriving on a later sync is promoted off
+        # the placeholder by catalog_sync.persist_card (DB) / _update_info's
+        # merge branch + _migrate_temp_foil (JSON).
+        if not foils:
+            foils[TEMP_FOIL_ID] = {"kind": "NONFOIL", "population": None, "printing": None, "variants": {}}
+
+        entry["editions"][edition["uuid"]] = {
+            "collector_number": edition.get("collector_number"),
+            "date_created": _date(edition.get("created_at")),
+            "date_release": _date(edition["set"].get("release_date")),
+            "date_update": _date(edition.get("last_update")),
+            "flavor": edition.get("flavor") or None,
+            "illustrator": edition["illustrator"],
+            "rarity": edition["rarity"],
+            "set_name": edition["set"]["name"],
+            "set_prefix": edition["set"]["prefix"],
+            "foils": foils,
+        }
+
+    return entry
+
+
+def _card_data_to_rules(card_data: dict) -> list[dict]:
+    """RULES.json-style list for one card from a raw API payload — shared by
+    _update_rule (JSON) and catalog_sync.replace_card_rules (DB)."""
+    rules = [
+        {
+            "date": rule.get("date_added"),
+            "title": rule.get("title") or None,
+            "description": rule.get("description"),
+        }
+        for rule in (card_data.get("rule") or [])
+    ]
+    rules.sort(key=lambda rule: rule.get("date") or "")
+    return rules
+
+
+def _card_data_to_thema(card_data: dict) -> dict:
+    """THEMA.json-style {edition_id: {foil_type: scores}} for one card from a
+    raw API payload — shared by _update_thema (JSON) and
+    catalog_sync.build_thema_rows (DB). Only editions that actually carry
+    thema scores appear."""
+    result = {}
+
+    for edition in card_data["editions"]:
+        edition_thema = {}
+
+        for foil_type in ["foil", "nonfoil"]:
+            scores = {}
+
+            for key, value in edition.items():
+                if not key.startswith("thema_"):
+                    continue
+
+                if key in {"thema_foil", "thema_nonfoil", "thema_foil_dynamic", "thema_nonfoil_dynamic"}:
+                    continue
+
+                if not key.endswith(f"_{foil_type}"):
+                    continue
+
+                if value is None:
+                    continue
+
+                category = key.replace("thema_", "").replace(f"_{foil_type}", "")
+                scores[category] = value
+
+            if scores:
+                scores["dynamic"] = edition.get(f"thema_{foil_type}_dynamic", False)
+                edition_thema[foil_type] = scores
+
+        if edition_thema:
+            result[edition["uuid"]] = edition_thema
+
+    return result
+
+
 def _update_info(card_data: dict, debug: bool = False) -> None:
     card_id = card_data["editions"][0]["card_id"]
 
@@ -995,20 +1174,7 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
 
 def _update_rule(card_data: dict, debug: bool = False) -> None:
     card_id = card_data["editions"][0]["card_id"]
-    rule_data = card_data.get("rule") or []
-
-    rules = []
-
-    for rule in rule_data:
-        rules.append({
-            "date": rule.get("date_added"),
-            "title": rule.get("title") or None,
-            "description": rule.get("description")
-        })
-
-    rules.sort(
-        key=lambda rule: rule.get("date") or ""
-    )
+    rules = _card_data_to_rules(card_data)
 
     rule_file = new_json(JSON_RULES)
 
@@ -1129,48 +1295,8 @@ def _update_thema(card_data: dict, debug: bool = False) -> None:
     with thema_file.open("r", encoding="utf-8") as f:
         thema_data = json.load(f)
 
-    edition_count = 0
-
-    for edition in card_data["editions"]:
-        edition_id = edition["uuid"]
-        edition_thema = {}
-
-        for foil_type in ["foil", "nonfoil"]:
-            scores = {}
-
-            for key, value in edition.items():
-                if not key.startswith("thema_"):
-                    continue
-
-                if key in {
-                    "thema_foil",
-                    "thema_nonfoil",
-                    "thema_foil_dynamic",
-                    "thema_nonfoil_dynamic"
-                }:
-                    continue
-
-                if not key.endswith(f"_{foil_type}"):
-                    continue
-
-                if value is None:
-                    continue
-
-                category = key.replace("thema_", "").replace(f"_{foil_type}", "")
-
-                scores[category] = value
-
-            if scores:
-                scores["dynamic"] = edition.get(
-                    f"thema_{foil_type}_dynamic",
-                    False
-                )
-
-                edition_thema[foil_type] = scores
-
-        if edition_thema:
-            thema_data[edition_id] = edition_thema
-            edition_count += 1
+    new_thema = _card_data_to_thema(card_data)
+    thema_data.update(new_thema)
 
     with thema_file.open("w", encoding="utf-8") as f:
         json.dump(thema_data, f, indent=4)
@@ -1178,7 +1304,7 @@ def _update_thema(card_data: dict, debug: bool = False) -> None:
     if debug:
         print(
             f"Updated THEMA.json | "
-            f"editions={edition_count}"
+            f"editions={len(new_thema)}"
         )
 
 
@@ -1203,28 +1329,88 @@ def _update_update(card_data: dict, debug: bool = False) -> None:
         )
 
 
+def _persist_card(slug: str, card_data: dict, debug: bool = False, bust: bool = True) -> None:
+    """Store one freshly-fetched card. DB mode writes the whole card's
+    catalog footprint to Postgres in a single transaction (so a failure
+    can't leave it half-written); JSON mode runs the per-file writer chain
+    as before. Called by _api_search and set_search — the only two paths
+    that turn a raw API payload into stored catalog data.
+
+    `bust` drops the DB-mode read cache so the write is visible on the next
+    read; set_search passes bust=False and busts once after its whole run
+    instead of once per card."""
+    if is_db_mode():
+        card_id = card_data["editions"][0]["card_id"]
+
+        with get_session() as session:
+            catalog_sync.persist_card(
+                session,
+                card_id=card_id,
+                slug=slug,
+                name=card_data["name"],
+                info_entry=_card_data_to_info_entry(card_data),
+                rules_list=_card_data_to_rules(card_data),
+                thema_by_edition=_card_data_to_thema(card_data),
+                last_synced=date.today().isoformat(),
+            )
+
+        # Live writers now move Postgres directly, so the whole-table read
+        # cache (load_info_data, load_slugs_data, ...) is stale — drop it so
+        # api_cards_search's Step-1 re-read sees this card immediately.
+        if bust:
+            db_cache.bust()
+
+        if debug:
+            print(f"Persisted card to Postgres | card_id={card_id}")
+        return
+
+    _update_edition(card_data, debug)
+    _update_info(card_data, debug)
+    _update_rule(card_data, debug)
+    _update_sets(card_data, debug)
+    _update_slug(slug, card_data, debug)
+    _update_thema(card_data, debug)
+    _update_update(card_data, debug)
+
+    _sync_info(card_data, debug)
+
+
+def _existing_edition_ids(slug: str) -> list[str]:
+    """edition_ids already stored for the card behind `slug`, or [] if it's
+    unknown locally — used only to clear cached images on card_reset."""
+    if is_db_mode():
+        with get_session() as session:
+            row = session.execute(
+                select(Card.card_id)
+                .join(CardSlug, CardSlug.card_id == Card.card_id)
+                .where(CardSlug.slug == slug)
+            ).first()
+            if row is None:
+                return []
+            return list(session.execute(
+                select(Edition.edition_id).where(Edition.card_id == row[0])
+            ).scalars().all())
+
+    with new_json(JSON_SLUGS).open("r", encoding="utf-8") as f:
+        slug_data = json.load(f)
+    if slug not in slug_data:
+        return []
+    with new_json(JSON_INFO).open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+    return list(info_data.get(slug_data[slug]["card_id"], {}).get("editions", {}).keys())
+
+
 def card_reset(card_name: str, debug: bool = False) -> dict:
     """Force re-fetch a card from the API, overriding all local data and images."""
     slug = _format_search(card_name, debug)
 
-    # Look up existing edition IDs so we can delete their cached images —
-    # _download_card_image (api_ga.py) refills each one lazily the next time
-    # GET /images/{edition_id}.jpg (app.py) is actually requested, rather than
-    # this eagerly re-downloading them itself.
-    slug_file = new_json(JSON_SLUGS)
-    info_file = new_json(JSON_INFO)
+    # Delete cached images for the card's existing editions — _download_card_image
+    # refills each one lazily the next time GET /images/{edition_id}.jpg is
+    # actually requested, rather than this eagerly re-downloading them.
     image_dir = new_dir(DIR_IMAGES)
+    existing_editions = _existing_edition_ids(slug)
 
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    if slug in slug_data:
-        card_id = slug_data[slug]["card_id"]
-        existing_editions = info_data.get(card_id, {}).get("editions", {}).keys()
-
+    if existing_editions:
         deleted = 0
         for edition_id in existing_editions:
             image_file = image_dir / f"{edition_id}.jpg"
@@ -1332,15 +1518,7 @@ def set_search(set_prefix: str, debug: bool = False, progress_callback=None) -> 
                 if _check_local(slug, debug):
                     continue
 
-                _update_edition(card_data, debug)
-                _update_info(card_data, debug)
-                _update_rule(card_data, debug)
-                _update_sets(card_data, debug)
-                _update_slug(slug, card_data, debug)
-                _update_thema(card_data, debug)
-                _update_update(card_data, debug)
-
-                _sync_info(card_data, debug)
+                _persist_card(slug, card_data, debug, bust=False)
 
                 results[card_name] = card_data
 
@@ -1367,6 +1545,11 @@ def set_search(set_prefix: str, debug: bool = False, progress_callback=None) -> 
 
     if progress:
         progress.close()
+
+    # One cache bust for the whole run (see _persist_card's bust arg) rather
+    # than one per card — a set search touches hundreds of cards.
+    if is_db_mode() and results:
+        db_cache.bust()
 
     if debug:
         print(
@@ -1473,10 +1656,39 @@ def sync_featured_sets(debug: bool = False) -> dict:
 
         featured[group_name] = {"sets": sets, "image_path": image_path}
 
-    featured_file = new_json(JSON_FEATURED_SETS)
+    if is_db_mode():
+        # featured_set_groups holds each group's image_path; sets.featured_*
+        # carries membership + the deliberate per-group ordering. Mirrors
+        # migrate_json_to_pg.migrate_sets sources A & D. update_cols is
+        # scoped so an already-synced set keeps its prefix/name/catalog data.
+        set_rows = [
+            {
+                "slug": member["slug"],
+                "prefix": member["prefix"],
+                "featured_group": group_name,
+                "featured_position": position,
+            }
+            for group_name, data in featured.items()
+            for position, member in enumerate(data["sets"])
+        ]
 
-    with featured_file.open("w", encoding="utf-8") as f:
-        json.dump(featured, f, indent=4)
+        with get_session() as session:
+            catalog_sync.upsert(
+                session, FeaturedSetGroup,
+                [{"group_name": g, "image_path": d["image_path"]} for g, d in featured.items()],
+                ["group_name"],
+            )
+            catalog_sync.upsert(
+                session, Set, set_rows, ["slug"],
+                update_cols=["featured_group", "featured_position"],
+            )
+
+        db_cache.bust()
+    else:
+        featured_file = new_json(JSON_FEATURED_SETS)
+
+        with featured_file.open("w", encoding="utf-8") as f:
+            json.dump(featured, f, indent=4)
 
     if debug:
         print(

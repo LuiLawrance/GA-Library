@@ -10,15 +10,19 @@ tables that are pure historical logs with no natural key (card_rules is a
 per-card full-replace list, card_errors/price_listings/price_sales are
 append-only logs), clears and re-inserts from the current JSON each run.
 
-Only `users` and `app_settings` are actually read from Postgres by the app
-yet (Stage 1 — see the migration plan). Every other table here is populated
-so later stages have real data to build their routes against, and so this
-run itself is a first integrity check of the schema (every foreign key below
-is enforced by Postgres, not just assumed).
+Admin settings are never read from Postgres — SETTINGS.json is their sole
+source of truth in every mode (see settings.py). `users` and the card
+catalog / pricing domains are read from Postgres in DB mode; this run is
+also a first integrity check of the schema (every foreign key below is
+enforced by Postgres, not just assumed).
 """
 
+from db.catalog_sync import (
+    _chunked, _set_slug, _split_speed, build_card_row, build_edition_row, build_foil_rows, build_rule_rows,
+    build_thema_rows, upsert as _upsert,
+)
 from db.models import (
-    AppSetting, Card, CardError, CardRule, CardSlug, Deck, DeckCard, DeckSection, Edition, FeaturedSetGroup, Foil,
+    Card, CardError, CardRule, CardSlug, Deck, DeckCard, DeckSection, Edition, FeaturedSetGroup, Foil,
     FoilTcgOverride, InventoryBin, InventoryCard, InventorySection, PriceListing, PriceSale, Set, ThemaScore, User,
     WatchlistEntry, WishlistEntry,
 )
@@ -66,11 +70,6 @@ class SyncSafetyError(Exception):
     smaller than what's already in Postgres — see _guard_full_replace."""
 
 
-def _chunked(rows: list, size: int = 1000):
-    for i in range(0, len(rows), size):
-        yield rows[i:i + size]
-
-
 def _guard_full_replace(session: Session, model, new_count: int, label: str, force: bool) -> None:
     """price_listings/price_sales/card_errors are wiped and fully re-inserted
     from JSON every run (see their migrate_* functions) — correct as long as
@@ -97,35 +96,11 @@ def _guard_full_replace(session: Session, model, new_count: int, label: str, for
         )
 
 
-def _upsert(session: Session, model, rows: list[dict], index_elements: list[str]) -> None:
-    """Batch INSERT ... ON CONFLICT (index_elements) DO UPDATE for every other column."""
-    if not rows:
-        return
-
-    columns = [c.name for c in model.__table__.columns]
-    update_cols = [c for c in columns if c not in index_elements]
-
-    for batch in _chunked(rows):
-        stmt = pg_insert(model).values(batch)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=index_elements,
-            set_={col: getattr(stmt.excluded, col) for col in update_cols},
-        )
-        session.execute(stmt)
-
-
-def _set_slug(prefix: str) -> str:
-    """Mirrors api_ga.py's _set_slug: lowercase, spaces -> underscores."""
-    return prefix.lower().replace(" ", "_")
-
-
-def _split_speed(value) -> tuple[int | None, bool | None]:
-    """INFO.json's stats.speed is usually a number, but some cards (confirmed
-    in the real local data) carry a boolean "Fast" keyword under the same
-    key instead — see Card.speed_fast's comment in db/models.py."""
-    if isinstance(value, bool):
-        return None, value
-    return value, None
+# _chunked / _upsert / _set_slug / _split_speed and the build_*_row helpers
+# now live in db/catalog_sync.py — shared with api_ga.py's live per-card
+# writer so the JSON/API-payload -> row mapping can't drift between the bulk
+# import and the live sync. _upsert here is catalog_sync.upsert (its extra
+# update_cols arg defaults to "every non-key column", unchanged for this file).
 
 
 # ── Users & settings ─────────────────────────────────────────────────────────
@@ -150,20 +125,9 @@ def migrate_users() -> set[str]:
     return set(users_data.keys())
 
 
-def migrate_settings() -> None:
-    settings_data = _load(DIR_GENERAL / "SETTINGS.json")
-
-    # local_database itself never migrates — see db_mode.py.
-    rows = [
-        {"key": key, "value": bool(value)}
-        for key, value in settings_data.items()
-        if key != "local_database"
-    ]
-
-    with get_session() as session:
-        _upsert(session, AppSetting, rows, index_elements=["key"])
-
-    print(f"app_settings: {len(rows)}")
+# Admin settings are not migrated — SETTINGS.json is the sole source of truth
+# for them in every mode (see settings.py). The app_settings table was
+# dropped in migration a1b2c3d4e5f6.
 
 
 # ── Card catalog ──────────────────────────────────────────────────────────────
@@ -238,32 +202,10 @@ def migrate_cards(info_data: dict) -> None:
 
     name_by_card_id = {data["card_id"]: data["name"] for data in slugs_data.values()}
 
-    rows = []
-    for card_id, card in info_data.items():
-        legality = card.get("legality", {})
-        stats = card.get("stats", {})
-        speed, speed_fast = _split_speed(stats.get("speed"))
-        rows.append({
-            "card_id": card_id,
-            "name": name_by_card_id.get(card_id),
-            "element": card.get("element"),
-            "effect": card.get("effect"),
-            "effect_html": card.get("effect_html"),
-            "effect_raw": card.get("effect_raw"),
-            "legality_draft": legality.get("draft"),
-            "legality_pantheon": legality.get("pantheon"),
-            "legality_standard": legality.get("standard"),
-            "cost_memory": stats.get("cost_memory"),
-            "cost_reserve": stats.get("cost_reserve"),
-            "durability": stats.get("durability"),
-            "level": stats.get("level"),
-            "life": stats.get("life"),
-            "power": stats.get("power"),
-            "speed": speed,
-            "speed_fast": speed_fast,
-            "types": card.get("types", []),
-            "last_synced": update_data.get(card_id),
-        })
+    rows = [
+        build_card_row(card_id, card, name_by_card_id.get(card_id), update_data.get(card_id))
+        for card_id, card in info_data.items()
+    ]
 
     with get_session() as session:
         _upsert(session, Card, rows, index_elements=["card_id"])
@@ -293,17 +235,11 @@ def migrate_card_rules(info_data: dict) -> None:
     rules_data = _load(DIR_CARDS / "RULES.json")
     known_card_ids = set(info_data.keys())
 
-    rows = []
-    for card_id, rules in rules_data.items():
-        if card_id not in known_card_ids:
-            continue
-        for rule in rules:
-            rows.append({
-                "card_id": card_id,
-                "date": rule.get("date") or None,
-                "title": rule.get("title"),
-                "description": rule.get("description", ""),
-            })
+    rows = [
+        row
+        for card_id, rules in rules_data.items() if card_id in known_card_ids
+        for row in build_rule_rows(card_id, rules)
+    ]
 
     with get_session() as session:
         # No natural unique key per rule — RULES.json is a full-replace list
@@ -326,19 +262,12 @@ def migrate_editions_and_foils(info_data: dict) -> set[tuple[str, str]]:
             tcg = id_tcg_data.get(edition_id, {})
             product_id = tcg.get("product_id")
             is_no_listings = product_id == NO_LISTINGS_SENTINEL
-            set_prefix = edition.get("set_prefix")
 
             edition_rows.append({
-                "edition_id": edition_id,
-                "card_id": card_id,
-                "set_slug": _set_slug(set_prefix) if set_prefix else None,
-                "collector_number": None,  # filled in by migrate_collector_numbers()
-                "rarity": edition.get("rarity"),
-                "illustrator": edition.get("illustrator"),
-                "flavor": edition.get("flavor"),
-                "date_created": edition.get("date_created"),
-                "date_release": edition.get("date_release"),
-                "date_update": edition.get("date_update"),
+                # catalog columns (shared with the live per-card sync);
+                # collector_number is None here — migrate_collector_numbers()
+                # fills it from the per-set files right after this phase.
+                **build_edition_row(card_id, edition_id, edition),
                 "tcg_product_id": None if is_no_listings else product_id,
                 "tcg_is_no_listings": is_no_listings,
                 "tcg_last_sales": tcg.get("last_sales"),
@@ -367,27 +296,10 @@ def migrate_editions_and_foils(info_data: dict) -> set[tuple[str, str]]:
         for edition_id, edition in card.get("editions", {}).items():
             if edition_id not in known_edition_ids:
                 continue
-            for foil_id, foil in edition.get("foils", {}).items():
-                top_level_rows.append({
-                    "foil_id": foil_id,
-                    "edition_id": edition_id,
-                    "parent_foil_id": None,
-                    "kind": foil.get("kind"),
-                    "population": foil.get("population"),
-                    "printing": foil.get("printing"),
-                })
-                known_foil_pairs.add((edition_id, foil_id))
-
-                for variant_id, variant in foil.get("variants", {}).items():
-                    variant_rows.append({
-                        "foil_id": variant_id,
-                        "edition_id": edition_id,
-                        "parent_foil_id": foil_id,
-                        "kind": variant.get("kind"),
-                        "population": variant.get("population"),
-                        "printing": variant.get("printing"),
-                    })
-                    known_foil_pairs.add((edition_id, variant_id))
+            top, variants = build_foil_rows(edition_id, edition.get("foils", {}))
+            top_level_rows.extend(top)
+            variant_rows.extend(variants)
+            known_foil_pairs.update((r["edition_id"], r["foil_id"]) for r in top + variants)
 
     with get_session() as session:
         _upsert(session, Foil, top_level_rows, index_elements=["edition_id", "foil_id"])
@@ -454,21 +366,11 @@ def migrate_thema(info_data: dict) -> None:
         for edition_id in card.get("editions", {})
     }
 
-    rows = []
-    for edition_id, foil_types in thema_data.items():
-        if edition_id not in known_edition_ids:
-            continue
-        for foil_type, scores in foil_types.items():
-            rows.append({
-                "edition_id": edition_id,
-                "foil_type": foil_type,
-                "charm": scores.get("charm"),
-                "ferocity": scores.get("ferocity"),
-                "grace": scores.get("grace"),
-                "mystique": scores.get("mystique"),
-                "valor": scores.get("valor"),
-                "dynamic": scores.get("dynamic"),
-            })
+    rows = build_thema_rows({
+        edition_id: foil_types
+        for edition_id, foil_types in thema_data.items()
+        if edition_id in known_edition_ids
+    })
 
     with get_session() as session:
         _upsert(session, ThemaScore, rows, index_elements=["edition_id", "foil_type"])
@@ -712,7 +614,6 @@ def main(force: bool = False) -> None:
     print("Connected to Postgres.\n")
 
     known_usernames = migrate_users()
-    migrate_settings()
 
     info_data = _load(DIR_CARDS / "INFO.json")
     known_card_ids = set(info_data.keys())
@@ -731,6 +632,61 @@ def main(force: bool = False) -> None:
     migrate_watchlist_and_wishlist(known_usernames, known_foil_pairs)
 
     print("\nDone.")
+
+
+# Every table except `users` — see wipe_database's own docstring for why
+# users is deliberately left out. Order doesn't matter here (TRUNCATE ...
+# CASCADE below works it out), but every table needs to be listed since
+# CASCADE only pulls in tables NOT already named that reference the ones
+# that are — it won't silently miss one, but it also won't silently add one
+# outside this list that isn't actually FK-connected to it.
+_WIPE_TABLE_NAMES = [
+    "price_listings", "price_sales", "foil_tcg_overrides", "thema_scores", "card_errors",
+    "inventory_cards", "inventory_sections", "inventory_bins",
+    "deck_cards", "deck_sections", "decks",
+    "watchlist_entries", "wishlist_entries",
+    "foils", "editions", "card_rules", "card_slugs", "cards", "sets", "featured_set_groups",
+]
+
+
+def wipe_database() -> dict:
+    """Deletes every row from every Postgres table EXCEPT `users` — the admin
+    System panel's Wipe Database button (see /api/admin/system/wipe-database
+    in app.py). Deliberately never touches `users`: wiping it out from under
+    a currently-logged-in DB-mode admin would 403-lock them out of the very
+    button they just clicked (get_current_user/get_user_auth_type re-check
+    Postgres on every request in DB mode), with no way back in short of
+    editing the database by hand or switching back to JSON mode.
+
+    Unlike run_migration() above, this has no safety guard of its own to
+    skip — wiping IS the whole point here, unlike the sync's full-replace
+    phases where destruction is an accidental side effect of bad source
+    data. The confirmation step lives in the UI instead (typing DELETE —
+    see runAdminSystemWipe in admin.js), matching how differently the two
+    actions are meant to be reached: Sync should never destroy data without
+    warning, Wipe is supposed to and just needs to not be a misclick.
+
+    One TRUNCATE ... CASCADE across every table in _WIPE_TABLE_NAMES at
+    once, rather than row-by-row DELETEs in dependency order — CASCADE lets
+    Postgres work out the correct order itself (including the
+    self-referential FK on foils.parent_foil_id) instead of this needing to
+    get that right by hand. RESTART IDENTITY resets the surrogate-key
+    sequences (rules, errors, price rows, bins, sections, decks, deck
+    cards, watchlist/wishlist entries) back to 1, so a subsequent Sync
+    starts from a clean slate instead of picking up wherever the old ids
+    left off."""
+    table_list = ", ".join(_WIPE_TABLE_NAMES)
+
+    try:
+        with get_session() as session:
+            session.execute(text(f"TRUNCATE TABLE {table_list} RESTART IDENTITY CASCADE"))
+        return {
+            "ok": True,
+            "log": f"Wiped {len(_WIPE_TABLE_NAMES)} tables. User accounts were kept.",
+            "error": None,
+        }
+    except Exception as e:
+        return {"ok": False, "log": "", "error": str(e)}
 
 
 def run_migration() -> dict:

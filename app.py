@@ -356,13 +356,11 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
         card_data = _api_search_variants(q)
 
         if card_data:
-            # Re-read to pick up what _api_search_variants (via
-            # _api_search) just synced. In DB mode this re-read still comes
-            # from Postgres (and, now, from the db_cache read cache) — see the
-            # Stage 5 scope note on load_info_data — so a genuinely new card
-            # won't show up here until the next migrate_json_to_pg.py run
-            # anyway, even though the JSON files themselves were just updated
-            # by the sync above.
+            # Re-read to pick up what _api_search_variants (via _api_search)
+            # just synced. Correct in both modes: JSON mode re-reads the
+            # files that were just written; DB mode re-reads Postgres, which
+            # _persist_card wrote directly and then db_cache.bust()-ed, so a
+            # brand-new card is visible here immediately.
             slug_data = load_slugs_data()
             info_data = load_info_data()
 
@@ -1020,6 +1018,27 @@ async def api_admin_sync_to_database_status(job_id: str, request: Request):
             _sync_jobs.pop(job_id, None)
 
     return JSONResponse(snapshot)
+
+
+# TRUNCATE is near-instant even across every row in every table (unlike the
+# sync job, it isn't scanning/inserting anything) — synchronous, no
+# background-job-plus-polling needed here.
+@app.post("/api/admin/system/wipe-database")
+async def api_admin_wipe_database(request: Request):
+    require_admin(request)
+
+    from scripts.migrate_json_to_pg import wipe_database
+
+    result = wipe_database()
+
+    if result["ok"]:
+        # Every table the wipe just emptied is exactly what db_cache.py
+        # memoizes — without this, DB-mode reads would keep serving the
+        # pre-wipe rows out of cache for up to its TTL.
+        db_cache.bust()
+        return JSONResponse(result)
+
+    raise HTTPException(status_code=500, detail=result["error"] or "Wipe failed.")
 
 
 def _days_since(iso_date: str | None) -> int | None:
@@ -3353,7 +3372,8 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
         api_result = _api_search_variants(card_name)
         if api_result:
             # Re-read to pick up what _api_search_variants just synced —
-            # see load_info_data's Stage 5 scope note re: DB mode.
+            # _persist_card writes JSON or Postgres per mode and busts the
+            # read cache, so the new card is visible on this re-read.
             slug_data = load_slugs_data()
             card_id = slug_data[slug]["card_id"] if slug in slug_data else None
 
