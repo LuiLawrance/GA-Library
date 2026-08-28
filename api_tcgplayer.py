@@ -1,5 +1,5 @@
 from datetime import date
-from db.models import Edition, FoilTcgOverride
+from db.models import Edition, Foil, FoilTcgOverride
 from db.session import get_session
 from db_mode import is_db_mode
 from playwright.sync_api import sync_playwright
@@ -51,16 +51,14 @@ def _build_url(product_id: str, page: int = 1) -> str:
     return f"{BASE_URL}{product_id}?page={page}"
 
 
-# Scope note (Stage 6 of the migration plan): only these READS branch on
-# local_database — get_all_ids/get_product_id/get_last_sales/etc. and their
-# foil-scoped counterparts below. Every WRITE in this file (_set_ids_field,
-# import_ids, set_product_id, clear_last_sales, ...) always writes JSON,
-# same as the card-catalog sync functions in api_ga.py. That means a getter
-# in DB mode can read a value slightly staler than what a write just put in
-# JSON (e.g. the 7-day listings-refresh gate, which reads via
-# get_last_listings/get_foil_last_listings, might under-throttle until the
-# next scripts/migrate_json_to_pg.py run) — the same staleness trade-off
-# already accepted for the card catalog, not a new one.
+# Scope note: both reads and writes here follow is_db_mode(). In DB mode the
+# per-edition product_id / no-listings flag / last_sales / last_listings live
+# on the editions row (tcg_* columns), and their foil-scoped counterparts on
+# foil_tcg_overrides; _set_ids_field / _set_foil_ids_field / import_ids write
+# those directly and bust db_cache, so the getters below (and the 7-day
+# listings-refresh gate that reads through them) stay current between
+# scripts/migrate_json_to_pg.py runs. In JSON mode everything reads and
+# writes ID_TCGPLAYER.json as before.
 
 def _get_ids_field(edition_id: str, field: str) -> str | None:
     if is_db_mode():
@@ -162,7 +160,16 @@ def import_ids(import_data: dict) -> dict:
 
     Single bulk read + write regardless of how many editions are in
     import_data, matching get_all_ids()'s reasoning above — not one file
-    round-trip per edition via _set_ids_field/_set_foil_ids_field."""
+    round-trip per edition via _set_ids_field/_set_foil_ids_field.
+
+    In DB mode the same "only fill a blank" rule applies to editions.tcg_* /
+    foil_tcg_overrides. The one difference the schema forces: a product_id
+    can't conjure an editions/foils row, so an (edition/foil) absent from the
+    catalog is skipped rather than created — a live card fetch builds the
+    row, then a re-import backfills it."""
+    if is_db_mode():
+        return _import_ids_db(import_data)
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
@@ -203,7 +210,82 @@ def import_ids(import_data: dict) -> dict:
     return {"added_main": added_main, "added_foil": added_foil}
 
 
-def _set_ids_field(edition_id: str, field: str, value: str, debug: bool = False) -> None:
+def _import_ids_db(import_data: dict) -> dict:
+    added_main = 0
+    added_foil = 0
+
+    with get_session() as session:
+        for edition_id, entry in import_data.items():
+            if not isinstance(entry, dict):
+                continue
+
+            product_id = entry.get("product_id")
+            if product_id:
+                edition = session.get(Edition, edition_id)
+                if edition is not None and not edition.tcg_product_id and not edition.tcg_is_no_listings:
+                    if product_id == NO_LISTINGS_SENTINEL:
+                        edition.tcg_is_no_listings = True
+                    else:
+                        edition.tcg_product_id = product_id
+                    added_main += 1
+
+            for foil_id, foil_entry in (entry.get("foils") or {}).items():
+                if not isinstance(foil_entry, dict):
+                    continue
+
+                foil_product_id = foil_entry.get("product_id")
+                if not foil_product_id:
+                    continue
+
+                override = session.get(FoilTcgOverride, (edition_id, foil_id))
+                if override is None:
+                    foil_exists = session.execute(
+                        select(Foil.foil_id).where(Foil.edition_id == edition_id, Foil.foil_id == foil_id)
+                    ).first()
+                    if foil_exists is None:
+                        continue
+                    override = FoilTcgOverride(edition_id=edition_id, foil_id=foil_id)
+                    session.add(override)
+                elif override.product_id or override.is_no_listings:
+                    continue
+
+                if foil_product_id == NO_LISTINGS_SENTINEL:
+                    override.is_no_listings = True
+                else:
+                    override.product_id = foil_product_id
+                added_foil += 1
+
+    db_cache.bust()
+    return {"added_main": added_main, "added_foil": added_foil}
+
+
+def _set_ids_field(edition_id: str, field: str, value: str | None, debug: bool = False) -> None:
+    if is_db_mode():
+        with get_session() as session:
+            edition = session.get(Edition, edition_id)
+
+            if edition is None:
+                # JSON mode would create a bare entry; DB mode has no edition
+                # to hang tcg_* on. A live card fetch will create the row and
+                # the next scrape/sync re-stamps it.
+                if debug:
+                    print(f"Skipped tcg write — unknown edition | edition_id={edition_id} | {field}={value}")
+                return
+
+            if field == "product_id":
+                edition.tcg_is_no_listings = value == NO_LISTINGS_SENTINEL
+                edition.tcg_product_id = None if value in (None, NO_LISTINGS_SENTINEL) else value
+            elif field == "last_sales":
+                edition.tcg_last_sales = date.fromisoformat(value) if value else None
+            elif field == "last_listings":
+                edition.tcg_last_listings = date.fromisoformat(value) if value else None
+
+        db_cache.bust()
+
+        if debug:
+            print(f"Updated editions.tcg_{field} | edition_id={edition_id} | {field}={value}")
+        return
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
@@ -305,7 +387,38 @@ def _get_foil_ids_field(edition_id: str, foil_id: str, field: str) -> str | None
     return ids_data.get(edition_id, {}).get("foils", {}).get(foil_id, {}).get(field)
 
 
-def _set_foil_ids_field(edition_id: str, foil_id: str, field: str, value: str, debug: bool = False) -> None:
+def _set_foil_ids_field(edition_id: str, foil_id: str, field: str, value: str | None, debug: bool = False) -> None:
+    if is_db_mode():
+        with get_session() as session:
+            override = session.get(FoilTcgOverride, (edition_id, foil_id))
+
+            if override is None:
+                foil_exists = session.execute(
+                    select(Foil.foil_id).where(Foil.edition_id == edition_id, Foil.foil_id == foil_id)
+                ).first()
+
+                if foil_exists is None:
+                    if debug:
+                        print(f"Skipped foil tcg write — unknown foil | edition_id={edition_id} | foil_id={foil_id}")
+                    return
+
+                override = FoilTcgOverride(edition_id=edition_id, foil_id=foil_id)
+                session.add(override)
+
+            if field == "product_id":
+                override.is_no_listings = value == NO_LISTINGS_SENTINEL
+                override.product_id = None if value in (None, NO_LISTINGS_SENTINEL) else value
+            elif field == "last_sales":
+                override.last_sales = date.fromisoformat(value) if value else None
+            elif field == "last_listings":
+                override.last_listings = date.fromisoformat(value) if value else None
+
+        db_cache.bust()
+
+        if debug:
+            print(f"Updated foil_tcg_overrides.{field} | edition_id={edition_id} | foil_id={foil_id} | {field}={value}")
+        return
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:

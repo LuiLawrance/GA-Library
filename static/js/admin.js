@@ -2417,15 +2417,24 @@ function submitAdminPidImportIds() {
 // two genuinely distinct sales/listings sharing a date both come through).
 // Refreshes the open card's own Sales/Listings tables afterward, if one's
 // open — nothing else on this list changes from a sales/listings import.
+// data.skipped_unknown_foil is DB-mode only — entries whose edition/foil
+// isn't in the catalog (price rows FK to it, so they can't be inserted blind
+// the way a JSON bucket can be).
+function adminPidImportSkippedSuffix(data) {
+    return data.skipped_unknown_foil
+        ? ` (${data.skipped_unknown_foil} skipped — unknown edition/foil)`
+        : '';
+}
+
 function submitAdminPidImportSales() {
     return submitAdminPidImport('admin-pid-import-sales', '/api/admin/pricing/import-sales',
-        data => `Added ${data.added} sale(s).`,
+        data => `Added ${data.added} sale(s)${adminPidImportSkippedSuffix(data)}.`,
         () => adminPidDetailSelected ? loadAdminPricingDetailHistory() : null);
 }
 
 function submitAdminPidImportListings() {
     return submitAdminPidImport('admin-pid-import-listings', '/api/admin/pricing/import-listings',
-        data => `Added ${data.added} listing(s).`,
+        data => `Added ${data.added} listing(s)${adminPidImportSkippedSuffix(data)}.`,
         () => adminPidDetailSelected ? loadAdminPricingDetailHistory() : null);
 }
 

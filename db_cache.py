@@ -3,12 +3,14 @@
 In DB mode the card catalog tables change on the admin "Sync to Database"
 job (see _run_sync_job in app.py) AND on a live API card fetch — _persist_card
 in api_ga.py (and sync_featured_sets) write Postgres directly and call
-bust() themselves right after. Pricing tables still only move on the sync
-job (see the Stage 6 notes in api_tcgplayer.py / pricing_ga.py). So the
-loaders that pull an entire table (load_info_data, load_slugs_data,
-load_sales_data, ...) can be memoized for the life of the process: every
-writer that touches these tables busts afterward, and the TTL is only a
-backstop in case a bust() call is ever missed.
+bust() themselves right after. The pricing tables (price_sales /
+price_listings) and the tcg_* / foil_tcg_overrides fields likewise move on
+the live add / import / scrape / paste / delete writers in pricing_ga.py /
+api_tcgplayer.py, each of which busts afterward. So the loaders that pull an
+entire table (load_info_data, load_slugs_data, load_sales_data, ...) can be
+memoized for the life of the process: every writer that touches these tables
+busts afterward, and the TTL is only a backstop in case a bust() call is
+ever missed.
 
 Only the DB-mode branch of each loader goes through here. JSON mode keeps
 reading files directly — that path is already fast, and caching it would
