@@ -8,6 +8,8 @@ from sqlalchemy import select
 from tqdm import tqdm
 from util_file import new_dir, new_json
 
+import copy
+import db_cache
 import json
 import os
 import re
@@ -276,11 +278,18 @@ def _sort_collector_number(collector_number: str, debug: bool = False) -> tuple:
 def _build_collector_map() -> dict:
     """edition_id → collector_number, across all set files."""
     if is_db_mode():
+        cached = db_cache.peek("collector_map")
+        if cached is not None:
+            return cached
+
         with get_session() as session:
             rows = session.execute(
                 select(Edition.edition_id, Edition.collector_number).where(Edition.collector_number.isnot(None))
             ).all()
-            return {row.edition_id: row.collector_number for row in rows}
+            result = {row.edition_id: row.collector_number for row in rows}
+
+        db_cache.put("collector_map", result)
+        return result
 
     result = {}
     if os.path.exists(DIR_SETS):
@@ -317,10 +326,94 @@ def _json_load(path: str) -> dict:
         return json.load(f)
 
 
+# ── DB-mode read cache ────────────────────────────────────────────────────────
+#
+# Every whole-table reader below caches its DB-mode result (see db_cache.py for
+# why that's safe — the data only moves on an explicit admin sync). JSON mode
+# is never cached: it reads files directly, which is already fast and keeps
+# api_cards_search's read-after-write correct. _db_cached wraps the
+# peek/build/put dance so each reader stays a two-line change.
+
+def _db_cached(key: str, build):
+    cached = db_cache.peek(key)
+    if cached is not None:
+        return cached
+    result = build()
+    db_cache.put(key, result)
+    return result
+
+
 def load_info_data() -> dict:
     if not is_db_mode():
         return _json_load(JSON_INFO)
+    return _db_cached("info_data", _load_info_data_db)
 
+
+def _shape_db_foils(edition_foils: list) -> dict:
+    """[Foil rows for one edition] → INFO.json-style {foil_id: {...}} dict,
+    folding each variant row in under its parent foil's `variants`."""
+    def foil_shape(f) -> dict:
+        return {"kind": f.kind, "population": f.population, "printing": f.printing}
+
+    variants_by_parent: dict[str, dict] = {}
+    for f in edition_foils:
+        if f.parent_foil_id is not None:
+            variants_by_parent.setdefault(f.parent_foil_id, {})[f.foil_id] = foil_shape(f)
+
+    return {
+        f.foil_id: {**foil_shape(f), "variants": variants_by_parent.get(f.foil_id, {})}
+        for f in edition_foils if f.parent_foil_id is None
+    }
+
+
+def _shape_db_edition(edition, set_name, set_prefix, foils_dict: dict, *, with_collector: bool) -> dict:
+    shaped = {
+        "date_created": edition.date_created.isoformat() if edition.date_created else None,
+        "date_release": edition.date_release.isoformat() if edition.date_release else None,
+        "date_update": edition.date_update.isoformat() if edition.date_update else None,
+        "flavor": edition.flavor,
+        "illustrator": edition.illustrator,
+        "rarity": edition.rarity,
+        "set_name": set_name or edition.set_slug,
+        "set_prefix": set_prefix or edition.set_slug,
+        "foils": foils_dict,
+    }
+    if with_collector:
+        # load_info_data() leaves this to callers (JSON mode only has it in
+        # the per-set files); load_card_detail_data() fills it in since the
+        # column is right there on the row.
+        shaped["collector_number"] = edition.collector_number or "?"
+    return shaped
+
+
+def _shape_db_card(card, editions_dict: dict, *, with_name: bool) -> dict:
+    shaped = {
+        "effect": card.effect,
+        "effect_html": card.effect_html,
+        "effect_raw": card.effect_raw,
+        "element": card.element,
+        "legality": {
+            "draft": card.legality_draft, "pantheon": card.legality_pantheon, "standard": card.legality_standard,
+        },
+        "stats": {
+            "cost_memory": card.cost_memory, "cost_reserve": card.cost_reserve, "durability": card.durability,
+            "level": card.level, "life": card.life, "power": card.power,
+            # See Card.speed_fast's comment — a boolean "Fast" keyword some
+            # cards carry instead of a numeric Speed stat.
+            "speed": card.speed if card.speed_fast is None else card.speed_fast,
+        },
+        "types": card.types or [],
+        "editions": editions_dict,
+    }
+    if with_name:
+        # load_info_data() omits name (INFO.json has none — it's resolved
+        # from SLUGS.json); the DB row carries it, so the scoped single-card
+        # reader can skip that lookup.
+        shaped["name"] = card.name
+    return shaped
+
+
+def _load_info_data_db() -> dict:
     with get_session() as session:
         cards = session.execute(select(Card)).scalars().all()
         editions = session.execute(
@@ -336,62 +429,95 @@ def load_info_data() -> dict:
     for f in foils:
         foils_by_edition.setdefault(f.edition_id, []).append(f)
 
-    def foil_shape(f) -> dict:
-        return {"kind": f.kind, "population": f.population, "printing": f.printing}
-
     result = {}
     for card in cards:
-        editions_dict = {}
-        for edition, set_name, set_prefix in editions_by_card.get(card.card_id, []):
-            edition_foils = foils_by_edition.get(edition.edition_id, [])
-            variants_by_parent: dict[str, dict] = {}
-            for f in edition_foils:
-                if f.parent_foil_id is not None:
-                    variants_by_parent.setdefault(f.parent_foil_id, {})[f.foil_id] = foil_shape(f)
-
-            foils_dict = {
-                f.foil_id: {**foil_shape(f), "variants": variants_by_parent.get(f.foil_id, {})}
-                for f in edition_foils if f.parent_foil_id is None
-            }
-
-            editions_dict[edition.edition_id] = {
-                "date_created": edition.date_created.isoformat() if edition.date_created else None,
-                "date_release": edition.date_release.isoformat() if edition.date_release else None,
-                "date_update": edition.date_update.isoformat() if edition.date_update else None,
-                "flavor": edition.flavor,
-                "illustrator": edition.illustrator,
-                "rarity": edition.rarity,
-                "set_name": set_name or edition.set_slug,
-                "set_prefix": set_prefix or edition.set_slug,
-                "foils": foils_dict,
-            }
-
-        result[card.card_id] = {
-            "effect": card.effect,
-            "effect_html": card.effect_html,
-            "effect_raw": card.effect_raw,
-            "element": card.element,
-            "legality": {
-                "draft": card.legality_draft, "pantheon": card.legality_pantheon, "standard": card.legality_standard,
-            },
-            "stats": {
-                "cost_memory": card.cost_memory, "cost_reserve": card.cost_reserve, "durability": card.durability,
-                "level": card.level, "life": card.life, "power": card.power,
-                # See Card.speed_fast's comment — a boolean "Fast" keyword some
-                # cards carry instead of a numeric Speed stat.
-                "speed": card.speed if card.speed_fast is None else card.speed_fast,
-            },
-            "types": card.types or [],
-            "editions": editions_dict,
+        editions_dict = {
+            edition.edition_id: _shape_db_edition(
+                edition, set_name, set_prefix,
+                _shape_db_foils(foils_by_edition.get(edition.edition_id, [])),
+                with_collector=False,
+            )
+            for edition, set_name, set_prefix in editions_by_card.get(card.card_id, [])
         }
+        result[card.card_id] = _shape_db_card(card, editions_dict, with_name=False)
 
     return result
+
+
+def load_card_detail_data(card_id: str) -> dict | None:
+    """Everything GET /api/cards/{card_id} needs about ONE card: the same
+    shape as load_info_data()[card_id], plus the card `name` and each
+    edition's `collector_number` already filled in — or None if there's no
+    such card.
+
+    DB mode runs a few card-scoped indexed queries instead of
+    load_info_data()'s whole-catalog hydration; this is the hot path behind
+    the card drawer. JSON mode slices the bulk readers, matching what
+    api_card_detail did inline before."""
+    if not is_db_mode():
+        info = load_info_data().get(card_id)
+        if not info:
+            return None
+
+        # Deep-copied because the caller mutates editions (adds thema,
+        # pricing, product_id, ...) and load_info_data()'s result can be
+        # shared with other readers in the same request.
+        info = copy.deepcopy(info)
+
+        slug_data = load_slugs_data()
+        info["name"] = next(
+            (data["name"] for data in slug_data.values() if data.get("card_id") == card_id),
+            None,
+        )
+
+        for edition_id, edition_info in info.get("editions", {}).items():
+            set_slug = edition_info.get("set_prefix", "").lower().replace(" ", "_")
+            set_data = load_set_collector_data(set_slug)
+            edition_info["collector_number"] = next(
+                (num for num, eids in set_data.items()
+                 if edition_id in (eids if isinstance(eids, list) else [eids])),
+                "?",
+            )
+        return info
+
+    with get_session() as session:
+        card = session.get(Card, card_id)
+        if card is None:
+            return None
+
+        edition_rows = session.execute(
+            select(Edition, Set.name, Set.prefix)
+            .outerjoin(Set, Set.slug == Edition.set_slug)
+            .where(Edition.card_id == card_id)
+        ).all()
+        edition_ids = [edition.edition_id for edition, _, _ in edition_rows]
+        foils = (
+            session.execute(select(Foil).where(Foil.edition_id.in_(edition_ids))).scalars().all()
+            if edition_ids else []
+        )
+
+    foils_by_edition: dict[str, list] = {}
+    for f in foils:
+        foils_by_edition.setdefault(f.edition_id, []).append(f)
+
+    editions_dict = {
+        edition.edition_id: _shape_db_edition(
+            edition, set_name, set_prefix,
+            _shape_db_foils(foils_by_edition.get(edition.edition_id, [])),
+            with_collector=True,
+        )
+        for edition, set_name, set_prefix in edition_rows
+    }
+    return _shape_db_card(card, editions_dict, with_name=True)
 
 
 def load_editions_data() -> dict:
     if not is_db_mode():
         return _json_load(JSON_EDITIONS)
+    return _db_cached("editions_data", _load_editions_data_db)
 
+
+def _load_editions_data_db() -> dict:
     with get_session() as session:
         rows = session.execute(select(Edition.edition_id, Edition.card_id)).all()
         return {row.edition_id: {"card_id": row.card_id} for row in rows}
@@ -400,7 +526,10 @@ def load_editions_data() -> dict:
 def load_slugs_data() -> dict:
     if not is_db_mode():
         return _json_load(JSON_SLUGS)
+    return _db_cached("slugs_data", _load_slugs_data_db)
 
+
+def _load_slugs_data_db() -> dict:
     with get_session() as session:
         rows = session.execute(select(CardSlug)).scalars().all()
         return {row.slug: {"name": row.name, "card_id": row.card_id} for row in rows}
@@ -409,9 +538,37 @@ def load_slugs_data() -> dict:
 def load_thema_data() -> dict:
     if not is_db_mode():
         return _json_load(JSON_THEMA)
+    return _db_cached("thema_data", _load_thema_data_db)
 
+
+def _load_thema_data_db() -> dict:
     with get_session() as session:
         rows = session.execute(select(ThemaScore)).scalars().all()
+
+    result: dict[str, dict] = {}
+    for row in rows:
+        result.setdefault(row.edition_id, {})[row.foil_type] = {
+            "charm": row.charm, "ferocity": row.ferocity, "grace": row.grace,
+            "mystique": row.mystique, "valor": row.valor, "dynamic": row.dynamic,
+        }
+    return result
+
+
+def load_thema_for_editions(edition_ids: list[str]) -> dict:
+    """load_thema_data() sliced to just `edition_ids` — the drawer only ever
+    needs one card's editions, so DB mode queries those rows directly instead
+    of hydrating the whole thema_scores table."""
+    if not is_db_mode():
+        data = load_thema_data()
+        return {eid: data.get(eid, {}) for eid in edition_ids}
+
+    if not edition_ids:
+        return {}
+
+    with get_session() as session:
+        rows = session.execute(
+            select(ThemaScore).where(ThemaScore.edition_id.in_(edition_ids))
+        ).scalars().all()
 
     result: dict[str, dict] = {}
     for row in rows:
@@ -425,7 +582,10 @@ def load_thema_data() -> dict:
 def load_update_data() -> dict:
     if not is_db_mode():
         return _json_load(JSON_UPDATE)
+    return _db_cached("update_data", _load_update_data_db)
 
+
+def _load_update_data_db() -> dict:
     with get_session() as session:
         rows = session.execute(
             select(Card.card_id, Card.last_synced).where(Card.last_synced.isnot(None))
@@ -436,7 +596,10 @@ def load_update_data() -> dict:
 def load_featured_sets_data() -> dict:
     if not is_db_mode():
         return _json_load(JSON_FEATURED_SETS)
+    return _db_cached("featured_sets_data", _load_featured_sets_data_db)
 
+
+def _load_featured_sets_data_db() -> dict:
     with get_session() as session:
         groups = session.execute(select(FeaturedSetGroup)).scalars().all()
         sets = session.execute(
@@ -468,7 +631,10 @@ def load_set_names() -> list[str]:
             os.path.splitext(f.name)[0].upper().replace("_", " ")
             for f in os.scandir(DIR_SETS) if f.name.endswith(".json")
         ])
+    return _db_cached("set_names", _load_set_names_db)
 
+
+def _load_set_names_db() -> list[str]:
     with get_session() as session:
         rows = session.execute(
             select(Set.prefix).where(Set.slug.in_(select(Edition.set_slug).distinct()))
@@ -485,7 +651,10 @@ def load_set_collector_data(set_slug: str) -> dict:
     if not is_db_mode():
         path = f"{DIR_SETS}/{set_slug}.json"
         return _json_load(path) if os.path.exists(path) else {}
+    return _db_cached(f"set_collector:{set_slug}", lambda: _load_set_collector_data_db(set_slug))
 
+
+def _load_set_collector_data_db(set_slug: str) -> dict:
     with get_session() as session:
         rows = session.execute(
             select(Edition.edition_id, Edition.collector_number)
@@ -510,7 +679,10 @@ def load_all_set_collector_data() -> dict:
                 prefix = f.name[:-5].upper().replace("_", " ")
                 result[prefix] = _json_load(f.path)
         return result
+    return _db_cached("all_set_collector_data", _load_all_set_collector_data_db)
 
+
+def _load_all_set_collector_data_db() -> dict:
     with get_session() as session:
         rows = session.execute(
             select(Set.prefix, Edition.edition_id, Edition.collector_number)

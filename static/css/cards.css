@@ -403,6 +403,16 @@
     animation: tile-img-spin 0.85s linear infinite;
 }
 
+/* Parked by queueTileImageLoad (tiles.js): the tile is too far from the
+   viewport for its image to have been requested yet. Keep the frame but
+   hold the spin — a long deck/bin/search list can park hundreds of these
+   at once, and none of them are actually loading. The spin resumes when
+   the tile scrolls near view and its load starts. */
+.tile-img-spinner--parked svg {
+    animation: none;
+    opacity: 0.3;
+}
+
 @keyframes tile-img-spin {
     to {
         transform: rotate(360deg);

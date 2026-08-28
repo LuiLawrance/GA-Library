@@ -6,6 +6,7 @@ from sqlalchemy import select
 from util_file import new_json
 
 import api_tcgplayer
+import db_cache
 import json
 import re
 
@@ -55,10 +56,27 @@ TCGCSV_RARITY_CODE = {
 # it in the migration plan — every writer below (scraping, add_manual_entry,
 # import_sales/import_listings, delete_entry, ...) always writes JSON.
 
+def _price_entry(row) -> dict:
+    return {
+        "date": row.date.isoformat(),
+        "marketplace": row.marketplace,
+        "price": float(row.price) if row.price is not None else None,
+        "quantity": row.quantity,
+        "condition": row.condition,
+    }
+
+
 def _load_price_data(model, json_path: str) -> dict:
     if not is_db_mode():
         with new_json(json_path).open("r", encoding="utf-8") as f:
             return json.load(f)
+
+    # Cached — like the catalog readers in api_ga.py, the DB-mode price
+    # tables only change on an explicit admin sync (see db_cache.py).
+    cache_key = f"price_data:{model.__tablename__}"
+    cached = db_cache.peek(cache_key)
+    if cached is not None:
+        return cached
 
     with get_session() as session:
         rows = session.execute(
@@ -67,15 +85,36 @@ def _load_price_data(model, json_path: str) -> dict:
 
     result: dict[str, dict] = {}
     for card_id, row in rows:
-        entry = {
-            "date": row.date.isoformat(),
-            "marketplace": row.marketplace,
-            "price": float(row.price) if row.price is not None else None,
-            "quantity": row.quantity,
-            "condition": row.condition,
-        }
-        result.setdefault(card_id, {}).setdefault(row.edition_id, {}).setdefault(row.foil_id, []).append(entry)
+        result.setdefault(card_id, {}).setdefault(row.edition_id, {}).setdefault(row.foil_id, []).append(
+            _price_entry(row)
+        )
+
+    db_cache.put(cache_key, result)
     return result
+
+
+def _load_price_data_for_card(model, json_path: str, card_id: str) -> dict:
+    """One card's slice of _load_price_data's result — {card_id: {edition_id:
+    {foil_id: [entry, ...]}}} or {} if the card has no rows. DB mode queries
+    only that card's price rows instead of the whole table."""
+    if not is_db_mode():
+        with new_json(json_path).open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {card_id: data[card_id]} if card_id in data else {}
+
+    with get_session() as session:
+        rows = session.execute(
+            select(model).join(Edition, Edition.edition_id == model.edition_id)
+            .where(Edition.card_id == card_id)
+        ).scalars().all()
+
+    if not rows:
+        return {}
+
+    editions: dict[str, dict] = {}
+    for row in rows:
+        editions.setdefault(row.edition_id, {}).setdefault(row.foil_id, []).append(_price_entry(row))
+    return {card_id: editions}
 
 
 def load_sales_data() -> dict:
@@ -84,6 +123,15 @@ def load_sales_data() -> dict:
 
 def load_listings_data() -> dict:
     return _load_price_data(PriceListing, JSON_LISTINGS)
+
+
+def load_price_data_for_card(card_id: str) -> tuple[dict, dict]:
+    """(sales, listings) scoped to one card_id — see _load_price_data_for_card.
+    Used by the card drawer, which only ever shows one card at a time."""
+    return (
+        _load_price_data_for_card(PriceSale, JSON_SALES, card_id),
+        _load_price_data_for_card(PriceListing, JSON_LISTINGS, card_id),
+    )
 
 
 def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, condition: str, debug: bool = False) -> None:

@@ -57,7 +57,7 @@ function revealTileImage(img) {
     }, {outMs: 150, inMs: 200});
 }
 
-// ── Concurrency-limited image loading queue ──
+// ── Viewport-gated, concurrency-limited image loading queue ──
 // Every card image request — even with images cached server-side — goes
 // through OUR OWN server (/images/{id}.jpg, /set-images/{name}.png), and
 // browsers cap concurrent connections per origin (commonly ~6). A big result
@@ -67,39 +67,186 @@ function revealTileImage(img) {
 // the whole grid's requests at the browser level before the server ever even
 // receives it. A server-side fix (e.g. a bounded thread pool for downloads)
 // can't touch this — the browser hasn't sent the request yet to be handled.
-// Throttling actual image loads to a handful "in flight" at a time keeps a
-// few connection slots always free for everything else.
+//
+// Two layers deal with that here:
+//   1. A viewport gate (IntersectionObserver). Pages like Cards, My Decks,
+//      and Inventory can lay out hundreds of tiles at once, almost all of
+//      them scrolled well out of view. Those don't get queued at all until
+//      they're about to enter the viewport — so with "Store Images Locally"
+//      off (every hit a live redirect to the upstream API) we're not firing
+//      hundreds of upstream fetches for art nobody has scrolled to yet.
+//   2. A concurrency cap on the tiles that DO get queued, so even a fast
+//      scroll through a long list keeps a few connection slots free for
+//      everything else.
 const TILE_IMG_MAX_CONCURRENT = 4;
+
+// How far outside the viewport a tile can be and still start loading. A
+// one-ish-screen buffer so images finish just before they're scrolled to,
+// rather than visibly popping in late.
+const TILE_IMG_VIEWPORT_MARGIN = '800px';
+
+const _tileImgSupported = typeof IntersectionObserver === 'function';
+
 let _tileImgActive = 0;
 const _tileImgQueue = [];
+
+// Tiles parked until they scroll near view. <img> → {src, observer}.
+// `observer` is null between queueTileImageLoad (which parks it) and the
+// microtask that actually attaches it (see _attachParked). Tracked in this
+// map — not just left living inside the observer — so a re-render that
+// throws the old grid away (every one of these pages clears its grid with
+// `container.innerHTML = ''`) can have its now-detached imgs, and their src
+// strings, swept back out instead of pinned for the life of the page.
+const _tileImgParked = new Map();
+
+// One IntersectionObserver per scroll root. The Cards grid scrolls with the
+// page (root null); the Inventory and My Decks grids scroll inside their own
+// overflow container, and the near-view buffer (rootMargin) only means
+// anything when it's measured against the box that actually clips the tiles
+// — so each such container gets its own observer keyed on that element.
+const _tileImgObservers = new Map(); // rootEl|null → IntersectionObserver
+
+function _tileImgObserverFor(root) {
+    // Prune observers whose scroll container has since been removed from the
+    // page (SPA navigation swaps the whole grid out) — otherwise every visit
+    // to a page leaves its previous grid's observer behind for good.
+    for (const [el, obs] of _tileImgObservers) {
+        if (el && !el.isConnected) {
+            obs.disconnect();
+            _tileImgObservers.delete(el);
+        }
+    }
+
+    let observer = _tileImgObservers.get(root);
+    if (!observer) {
+        observer = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const img = entry.target;
+                observer.unobserve(img);
+                const parked = _tileImgParked.get(img);
+                _tileImgParked.delete(img);
+                if (parked && img.isConnected) _tileImgQueue.push({img, src: parked.src});
+            }
+            _pumpTileImgQueue();
+        }, {root, rootMargin: `${TILE_IMG_VIEWPORT_MARGIN} 0px`});
+        _tileImgObservers.set(root, observer);
+    }
+    return observer;
+}
+
+// Nearest scrollable ancestor of `el` (the box the tile scrolls within), or
+// null for the page/viewport. Mirrors what the browser uses as the clip for
+// intersection, so the observer's root matches. Positive hits are memoised
+// per ancestor: every tile in one grid shares the chain above it, so once
+// the grid's own scroll container is found for the first tile the rest short
+// -circuit to it. (Only positives are cached — a "not scrollable yet"
+// container can start overflowing on the next, bigger render.)
+const _tileImgScrollRootCache = new WeakMap(); // ancestor element → its own scroll rootEl
+
+function _tileImgScrollRoot(el) {
+    for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+        // Sibling tiles share every ancestor from the grid container upward,
+        // so this hits on the second tile onward in a grid that scrolls
+        // internally.
+        if (_tileImgScrollRootCache.has(node)) return _tileImgScrollRootCache.get(node);
+
+        const oy = getComputedStyle(node).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && node.scrollHeight > node.clientHeight) {
+            _tileImgScrollRootCache.set(node, node);
+            return node;
+        }
+    }
+    return null;
+}
+
+// Drop parked tiles whose grid has since been torn down — their imgs are no
+// longer in the document, so they'll never intersect and would otherwise sit
+// in their observer (and this map) forever. Cheap, and runs exactly when it
+// matters: each new queue call means a fresh grid is being built.
+//
+// Only entries that have already been handed to an observer are considered:
+// a tile parked earlier in the *current* build loop (observer still null)
+// isn't connected yet either — its grid is built detached and appended in
+// one go (My Decks does this for a whole section at a time) — but it's not
+// stale, just not attached yet. Its own _attachParked microtask does the
+// real connected check.
+function _sweepParkedTiles() {
+    for (const [img, parked] of _tileImgParked) {
+        if (parked.observer && !img.isConnected) {
+            parked.observer.unobserve(img);
+            _tileImgParked.delete(img);
+        }
+    }
+}
 
 // Queues `img` to load `src` once a slot is free, rather than setting
 // img.src directly (which starts the fetch immediately, uncontrolled).
 // Callers build their tile markup with no src at all (or a bare <img> with
 // its URL kept only in a JS variable) and call this right after inserting
-// the tile into the DOM. priority:true jumps the front of the queue instead
-// of the back — for a surface the user is actively looking at right now
-// (the drawer's edition thumbnails) rather than an off-screen result grid
-// still working through a big batch in the background; otherwise the
-// drawer's own images would just wait their turn behind whatever the grid
-// queued first.
+// the tile into the DOM.
+//
+// priority:true skips the viewport gate and jumps the front of the queue —
+// for a small surface the user is looking at right now (the drawer's edition
+// thumbnails), not an off-screen result grid working through a big batch;
+// otherwise the drawer's own images would just wait their turn behind
+// whatever the grid queued first.
 function queueTileImageLoad(img, src, {priority = false} = {}) {
-    if (priority) {
-        _tileImgQueue.unshift({img, src});
-    } else {
-        _tileImgQueue.push({img, src});
+    if (priority || !_tileImgSupported) {
+        // No observer support → fall back to the old "queue everything now"
+        // behaviour (still concurrency-capped).
+        if (priority) {
+            _tileImgQueue.unshift({img, src});
+        } else {
+            _tileImgQueue.push({img, src});
+        }
+
+        // Deferred a tick rather than pumped synchronously — this runs from
+        // inside a tile-builder function (buildCardTile etc.) whose own
+        // caller appends the returned tile right after, so `img` isn't
+        // connected to the DOM yet at this exact point. A microtask runs
+        // once that build loop (and its appendChild calls) has finished, so
+        // _pumpTileImgQueue's isConnected check sees where things landed
+        // instead of "nothing is connected yet" — which would skip every
+        // tile and leave every spinner stuck forever.
+        queueMicrotask(_pumpTileImgQueue);
+        return;
     }
 
-    // Deferred a tick rather than pumped synchronously here — this runs from
-    // inside a tile-builder function (buildCardTile etc.) whose own caller
-    // appends the returned tile right after, so `img` isn't connected to the
-    // DOM yet at this exact point, and neither are any sibling tiles still
-    // to come later in that same synchronous build loop. A microtask runs
-    // once that whole loop (and its appendChild calls) has finished, so the
-    // isConnected check below sees where things actually landed instead of
-    // "nothing is connected yet" — which would otherwise skip every tile,
-    // load nothing, and leave every spinner stuck forever.
-    queueMicrotask(_pumpTileImgQueue);
+    _sweepParkedTiles();
+    _tileImgParked.set(img, {src, observer: null});
+
+    // Hold the loading spinner still while parked — a long list can park
+    // hundreds of tiles at once, and nothing is actually in flight for them
+    // yet. _pumpTileImgQueue starts it spinning when the load really begins.
+    _tileSpinnerFor(img)?.classList.add('tile-img-spinner--parked');
+
+    // Deferred a tick before observe() for the same reason the fallback path
+    // defers its pump: the tile isn't connected yet here, and we need it laid
+    // out in the DOM both to find its scroll container and for the observer
+    // to report a real position. The observer's own first callback is async
+    // anyway, so this costs nothing.
+    queueMicrotask(() => _attachParked(img));
+}
+
+function _attachParked(img) {
+    const parked = _tileImgParked.get(img);
+    if (!parked || parked.observer) return;
+
+    if (!img.isConnected) {
+        _tileImgParked.delete(img);
+        return;
+    }
+
+    parked.observer = _tileImgObserverFor(_tileImgScrollRoot(img));
+    parked.observer.observe(img);
+}
+
+// The tile's loading spinner (previous sibling of its <img>), or null — some
+// callers render no spinner (e.g. a deck tile with no resolved edition yet).
+function _tileSpinnerFor(img) {
+    const s = img.previousElementSibling;
+    return s && s.classList.contains('tile-img-spinner') ? s : null;
 }
 
 function _pumpTileImgQueue() {
@@ -110,6 +257,10 @@ function _pumpTileImgQueue() {
         // replaced the whole grid) before its turn came up — skip it rather
         // than spending a slot loading art nobody will ever see.
         if (!img.isConnected) continue;
+
+        // Load is actually starting now — let the spinner spin (no-op if it
+        // was never parked).
+        _tileSpinnerFor(img)?.classList.remove('tile-img-spinner--parked');
 
         _tileImgActive++;
 

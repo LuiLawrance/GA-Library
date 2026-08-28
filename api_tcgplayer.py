@@ -6,6 +6,7 @@ from playwright.sync_api import sync_playwright
 from sqlalchemy import or_, select
 from util_file import new_json
 
+import db_cache
 import json
 import re
 import requests
@@ -93,6 +94,10 @@ def get_all_ids() -> dict:
     get_product_id()/get_last_sales()/get_last_listings() do when called
     individually in a loop."""
     if is_db_mode():
+        cached = db_cache.peek("tcg_ids")
+        if cached is not None:
+            return cached
+
         with get_session() as session:
             editions = session.execute(
                 select(Edition).where(or_(
@@ -124,6 +129,7 @@ def get_all_ids() -> dict:
                 entry["last_listings"] = override.last_listings.isoformat()
             result.setdefault(override.edition_id, {}).setdefault("foils", {})[override.foil_id] = entry
 
+        db_cache.put("tcg_ids", result)
         return result
 
     ids_file = new_json(JSON_IDS)

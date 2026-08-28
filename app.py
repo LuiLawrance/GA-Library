@@ -1,11 +1,11 @@
 from api_ga import _api_search, _build_collector_map, _download_card_image, _download_set_image, \
     _format_search, _group_slug, _sort_collector_number, _update_slug, API_HOST, API_IMAGE, card_reset, \
-    DIR_SETS, JSON_SET_SEARCHES, load_all_set_collector_data, load_editions_data, load_featured_sets_data, \
-    load_info_data, load_set_collector_data, load_set_names, load_slugs_data, load_thema_data, load_update_data, \
-    set_search, sync_featured_sets, UPDATE_THRESHOLD
+    DIR_SETS, JSON_SET_SEARCHES, load_all_set_collector_data, load_card_detail_data, load_editions_data, \
+    load_featured_sets_data, load_info_data, load_set_collector_data, load_set_names, load_slugs_data, \
+    load_thema_for_editions, load_update_data, set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
     import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
-    get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
+    get_last_listings, get_last_sales, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection
 from db.session import get_session
@@ -18,7 +18,7 @@ from jose import JWTError, jwt
 from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     clear_product_ids_for_set, delete_entry, find_product_ids_by_editions, import_listings, \
     import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, import_sales, load_listings_data, \
-    load_sales_data, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
+    load_price_data_for_card, load_sales_data, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
@@ -29,6 +29,7 @@ from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
 import asyncio
+import db_cache
 import json
 import os
 import random
@@ -357,10 +358,11 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
         if card_data:
             # Re-read to pick up what _api_search_variants (via
             # _api_search) just synced. In DB mode this re-read still comes
-            # from Postgres — see the Stage 5 scope note on load_info_data —
-            # so a genuinely new card won't show up here until the next
-            # migrate_json_to_pg.py run, even though the JSON files
-            # themselves were just updated by the sync above.
+            # from Postgres (and, now, from the db_cache read cache) — see the
+            # Stage 5 scope note on load_info_data — so a genuinely new card
+            # won't show up here until the next migrate_json_to_pg.py run
+            # anyway, even though the JSON files themselves were just updated
+            # by the sync above.
             slug_data = load_slugs_data()
             info_data = load_info_data()
 
@@ -529,43 +531,33 @@ async def api_cards_suggest(q: str):
 
 @app.get("/api/cards/{card_id}")
 async def api_card_detail(card_id: str):
-    info_data = load_info_data()
-    thema_data = load_thema_data()
-    slug_data = load_slugs_data()
-    listings_data = load_listings_data()
-    sales_data = load_sales_data()
-
-    card_info = info_data.get(card_id)
+    # One card, not the whole catalog: load_card_detail_data / the *_for_card
+    # / *_for_editions readers below each hit only this card's rows in DB
+    # mode, instead of hydrating every table just to throw all but one card
+    # away. See the drawer perf note — this handler is the hot path behind it.
+    card_info = load_card_detail_data(card_id)
 
     if not card_info:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    # INFO.json entries don't carry a name — SLUGS.json is keyed by slug, not
-    # card_id, so this is a scan rather than a direct lookup. Fine here since
-    # it's one detail-page fetch, not a hot path like search. Needed so
-    # callers that only have a card_id (e.g. restoring a selection from a
-    # bookmarked ?card_id= URL, see the Prices page) can still show a name
-    # without a separate search round-trip.
-    card_info["name"] = next(
-        (data["name"] for data in slug_data.values() if data.get("card_id") == card_id),
-        None
-    )
+    # load_card_detail_data already resolves `name` (from the DB row in DB
+    # mode, from a SLUGS.json scan in JSON mode) and each edition's
+    # `collector_number` — needed so callers that only have a card_id (e.g.
+    # restoring a bookmarked ?card_id= URL, see the Prices page) can show a
+    # name without a separate search round-trip.
+
+    edition_ids = list(card_info.get("editions", {}).keys())
+    thema_data = load_thema_for_editions(edition_ids)
+    sales_data, listings_data = load_price_data_for_card(card_id)
+    # All TCGPlayer product IDs (edition-level and per-foil-variant) in one
+    # read instead of two calls per edition — the drawer's pricing tab uses
+    # them to link each graph's "View on TCGPlayer" button.
+    tcg_ids = get_all_ids()
 
     card_listings = listings_data.get(card_id, {})
     card_sales = sales_data.get(card_id, {})
 
     for edition_id, edition_info in card_info.get("editions", {}).items():
-        set_prefix = edition_info.get("set_prefix", "")
-        set_file_name = set_prefix.lower().replace(" ", "_")
-        set_data = load_set_collector_data(set_file_name)
-
-        collector_number = next(
-            (num for num, eids in set_data.items()
-             if edition_id in (eids if isinstance(eids, list) else [eids])),
-            "?"
-        )
-
-        edition_info["collector_number"] = collector_number
         edition_info["thema"] = thema_data.get(edition_id, {})
         edition_info["last_price"] = _last_sale_price(
             sales_data, card_id, edition_id, edition_info.get("foils", {})
@@ -576,10 +568,10 @@ async def api_card_detail(card_id: str):
 
         # Regular nonfoil/foil printings share the edition's own TCGPlayer
         # product; a Curio Foil (or other variant) may have its own separate
-        # product page instead — see get_foil_overrides — used by the drawer's
-        # pricing tab to link each graph's "View on TCGPlayer" button.
-        edition_info["product_id"] = get_product_id(edition_id)
-        foil_overrides = get_foil_overrides(edition_id)
+        # product page instead.
+        edition_ids_entry = tcg_ids.get(edition_id, {})
+        edition_info["product_id"] = edition_ids_entry.get("product_id")
+        foil_overrides = edition_ids_entry.get("foils", {})
         for foil_info in edition_info.get("foils", {}).values():
             for variant_id, variant_info in foil_info.get("variants", {}).items():
                 variant_info["product_id"] = foil_overrides.get(variant_id, {}).get("product_id")
@@ -983,6 +975,12 @@ def _run_sync_job(job_id: str) -> None:
     from scripts.migrate_json_to_pg import run_migration
 
     result = run_migration()
+
+    # The sync just replaced every catalog/pricing row — drop the DB-mode
+    # read cache so the next request reflects it instead of serving stale
+    # rows for up to the cache TTL (see db_cache.py).
+    if result["ok"]:
+        db_cache.bust()
 
     with _sync_jobs_lock:
         job = _sync_jobs.get(job_id)
