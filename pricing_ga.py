@@ -1,4 +1,8 @@
 from datetime import date, datetime
+from db.models import Edition, PriceListing, PriceSale
+from db.session import get_session
+from db_mode import is_db_mode
+from sqlalchemy import select
 from util_file import new_json
 
 import api_tcgplayer
@@ -43,6 +47,43 @@ TCGCSV_RARITY_CODE = {
     "Collector Ultra Rare": 8,
     "Collector Prime Rare": 9
 }
+
+
+# ── Readers — Postgres in DB mode, JSON otherwise ──────────────────────────
+#
+# Scope note (Stage 6): reads only, same as api_tcgplayer.py's getters above
+# it in the migration plan — every writer below (scraping, add_manual_entry,
+# import_sales/import_listings, delete_entry, ...) always writes JSON.
+
+def _load_price_data(model, json_path: str) -> dict:
+    if not is_db_mode():
+        with new_json(json_path).open("r", encoding="utf-8") as f:
+            return json.load(f)
+
+    with get_session() as session:
+        rows = session.execute(
+            select(Edition.card_id, model).join(Edition, Edition.edition_id == model.edition_id)
+        ).all()
+
+    result: dict[str, dict] = {}
+    for card_id, row in rows:
+        entry = {
+            "date": row.date.isoformat(),
+            "marketplace": row.marketplace,
+            "price": float(row.price) if row.price is not None else None,
+            "quantity": row.quantity,
+            "condition": row.condition,
+        }
+        result.setdefault(card_id, {}).setdefault(row.edition_id, {}).setdefault(row.foil_id, []).append(entry)
+    return result
+
+
+def load_sales_data() -> dict:
+    return _load_price_data(PriceSale, JSON_SALES)
+
+
+def load_listings_data() -> dict:
+    return _load_price_data(PriceListing, JSON_LISTINGS)
 
 
 def _add_listing(edition_id: str, foil_id: str, marketplace: str, price: float, condition: str, debug: bool = False) -> None:

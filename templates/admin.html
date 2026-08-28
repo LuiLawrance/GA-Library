@@ -29,6 +29,16 @@
                     </div>
                 </div>
                 <div class="admin-system-option-row">
+                    <span class="admin-system-option-name">Use JSON</span>
+                    <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
+                        <span class="pill-indicator"></span>
+                        <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                onclick="updateAdminSystemSetting('use_json', false)">Off</button>
+                        <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                onclick="updateAdminSystemSetting('use_json', true)">On</button>
+                    </div>
+                </div>
+                <div class="admin-system-option-row hidden" id="admin-system-local-database-row">
                     <span class="admin-system-option-name">Local Database</span>
                     <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_database">
                         <span class="pill-indicator"></span>

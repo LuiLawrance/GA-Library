@@ -229,9 +229,10 @@ async function loadAdminSystemSettings() {
 
         adminSystemLoaded = true;
 
-        for (const key of ['store_images_locally', 'local_database']) {
+        for (const key of ['store_images_locally', 'use_json', 'local_database']) {
             renderAdminSystemToggle(key, !!data[key]);
         }
+        renderLocalDatabaseVisibility(!!data.use_json);
     } catch (err) {
         // Leave the toggles at their last-known state rather than blanking
         // the whole panel — same as the other admin sections' load failures.
@@ -251,9 +252,44 @@ function renderAdminSystemToggle(key, value) {
     positionPillIndicator(toggle);
 }
 
+// Use JSON is the master switch — On hides Local Database entirely (and
+// forces JSON storage server-side regardless of Local Database's own saved
+// value); Off reveals it so it can be turned on. Sets the row's visibility
+// instantly, no animation — used when first loading the panel, matching
+// renderAdminSystemToggle's own unanimated state-setting for the same
+// reason (nothing should animate in on page load, only in response to an
+// actual toggle click — see animateLocalDatabaseVisibility for that).
+function renderLocalDatabaseVisibility(useJson) {
+    const row = document.getElementById('admin-system-local-database-row');
+    if (row) row.classList.toggle('hidden', useJson);
+}
+
+// Click-triggered counterpart to renderLocalDatabaseVisibility — animates
+// the settings card (#admin-system-settings, the bordered box holding every
+// row) reshaping around Local Database appearing/disappearing, via the
+// shared animateBoxResize (see modal-anim.js), same technique
+// dgaSwitchImportExportTab uses for its own panel swap.
+function animateLocalDatabaseVisibility(useJson) {
+    const box = document.getElementById('admin-system-settings');
+    const row = document.getElementById('admin-system-local-database-row');
+    if (!box || !row) return;
+
+    animateBoxResize(box, () => {
+        row.classList.toggle('hidden', useJson);
+    });
+
+    if (!useJson) {
+        // Row just became visible — its own Off/On pill indicator couldn't
+        // be measured while display:none (offsetWidth reads 0 then), so
+        // position it now that layout has it visible.
+        positionPillIndicator(row.querySelector('.admin-system-option-toggle'));
+    }
+}
+
 async function updateAdminSystemSetting(key, value) {
     const prevValue = document.querySelector(`.admin-system-option-toggle[data-setting="${key}"] .active`)?.dataset.value === 'true';
     renderAdminSystemToggle(key, value);
+    if (key === 'use_json') animateLocalDatabaseVisibility(value);
 
     try {
         const res = await fetch('/api/admin/settings', {
@@ -266,10 +302,12 @@ async function updateAdminSystemSetting(key, value) {
             const data = await res.json().catch(() => ({}));
             alert(data.detail || 'Failed to update setting.');
             renderAdminSystemToggle(key, prevValue);
+            if (key === 'use_json') animateLocalDatabaseVisibility(prevValue);
         }
     } catch (err) {
         alert('Failed to update setting.');
         renderAdminSystemToggle(key, prevValue);
+        if (key === 'use_json') animateLocalDatabaseVisibility(prevValue);
     }
 }
 

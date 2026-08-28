@@ -1,6 +1,10 @@
 from datetime import date, datetime
+from db.models import Card, CardSlug, Edition, FeaturedSetGroup, Foil, Set, ThemaScore
+from db.session import get_session
+from db_mode import is_db_mode
 from pricing_ga import _sync_info
 from settings import load_settings
+from sqlalchemy import select
 from tqdm import tqdm
 from util_file import new_dir, new_json
 
@@ -271,6 +275,13 @@ def _sort_collector_number(collector_number: str, debug: bool = False) -> tuple:
 
 def _build_collector_map() -> dict:
     """edition_id → collector_number, across all set files."""
+    if is_db_mode():
+        with get_session() as session:
+            rows = session.execute(
+                select(Edition.edition_id, Edition.collector_number).where(Edition.collector_number.isnot(None))
+            ).all()
+            return {row.edition_id: row.collector_number for row in rows}
+
     result = {}
     if os.path.exists(DIR_SETS):
         for f in os.scandir(DIR_SETS):
@@ -283,6 +294,233 @@ def _build_collector_map() -> dict:
                     eids = [eids]
                 for eid in eids:
                     result[eid] = num
+    return result
+
+
+# ── Catalog readers — Postgres in DB mode, JSON otherwise ──────────────────────
+#
+# Each of these returns the exact same shape as json.load()-ing the matching
+# JSON_* file, so every read call site across the app can swap a 2-3 line
+# `with new_json(JSON_X).open(...) as f: data = json.load(f)` for one line
+# (`data = load_x_data()`) with no other changes needed downstream.
+#
+# Scope note (see the Stage 5 migration plan): this covers READS only. The
+# live-sync writers below (_update_info, _update_edition, _update_slug,
+# _update_thema, _update_rule, _update_sets, _api_search, set_search,
+# card_reset, sync_featured_sets, ...) are unchanged and always write JSON,
+# regardless of local_database — so a card_id/edition_id searched for the
+# first time while DB mode is on won't appear in these readers until
+# scripts/migrate_json_to_pg.py is re-run.
+
+def _json_load(path: str) -> dict:
+    with new_json(path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_info_data() -> dict:
+    if not is_db_mode():
+        return _json_load(JSON_INFO)
+
+    with get_session() as session:
+        cards = session.execute(select(Card)).scalars().all()
+        editions = session.execute(
+            select(Edition, Set.name, Set.prefix).outerjoin(Set, Set.slug == Edition.set_slug)
+        ).all()
+        foils = session.execute(select(Foil)).scalars().all()
+
+    editions_by_card: dict[str, list] = {}
+    for edition, set_name, set_prefix in editions:
+        editions_by_card.setdefault(edition.card_id, []).append((edition, set_name, set_prefix))
+
+    foils_by_edition: dict[str, list] = {}
+    for f in foils:
+        foils_by_edition.setdefault(f.edition_id, []).append(f)
+
+    def foil_shape(f) -> dict:
+        return {"kind": f.kind, "population": f.population, "printing": f.printing}
+
+    result = {}
+    for card in cards:
+        editions_dict = {}
+        for edition, set_name, set_prefix in editions_by_card.get(card.card_id, []):
+            edition_foils = foils_by_edition.get(edition.edition_id, [])
+            variants_by_parent: dict[str, dict] = {}
+            for f in edition_foils:
+                if f.parent_foil_id is not None:
+                    variants_by_parent.setdefault(f.parent_foil_id, {})[f.foil_id] = foil_shape(f)
+
+            foils_dict = {
+                f.foil_id: {**foil_shape(f), "variants": variants_by_parent.get(f.foil_id, {})}
+                for f in edition_foils if f.parent_foil_id is None
+            }
+
+            editions_dict[edition.edition_id] = {
+                "date_created": edition.date_created.isoformat() if edition.date_created else None,
+                "date_release": edition.date_release.isoformat() if edition.date_release else None,
+                "date_update": edition.date_update.isoformat() if edition.date_update else None,
+                "flavor": edition.flavor,
+                "illustrator": edition.illustrator,
+                "rarity": edition.rarity,
+                "set_name": set_name or edition.set_slug,
+                "set_prefix": set_prefix or edition.set_slug,
+                "foils": foils_dict,
+            }
+
+        result[card.card_id] = {
+            "effect": card.effect,
+            "effect_html": card.effect_html,
+            "effect_raw": card.effect_raw,
+            "element": card.element,
+            "legality": {
+                "draft": card.legality_draft, "pantheon": card.legality_pantheon, "standard": card.legality_standard,
+            },
+            "stats": {
+                "cost_memory": card.cost_memory, "cost_reserve": card.cost_reserve, "durability": card.durability,
+                "level": card.level, "life": card.life, "power": card.power,
+                # See Card.speed_fast's comment — a boolean "Fast" keyword some
+                # cards carry instead of a numeric Speed stat.
+                "speed": card.speed if card.speed_fast is None else card.speed_fast,
+            },
+            "types": card.types or [],
+            "editions": editions_dict,
+        }
+
+    return result
+
+
+def load_editions_data() -> dict:
+    if not is_db_mode():
+        return _json_load(JSON_EDITIONS)
+
+    with get_session() as session:
+        rows = session.execute(select(Edition.edition_id, Edition.card_id)).all()
+        return {row.edition_id: {"card_id": row.card_id} for row in rows}
+
+
+def load_slugs_data() -> dict:
+    if not is_db_mode():
+        return _json_load(JSON_SLUGS)
+
+    with get_session() as session:
+        rows = session.execute(select(CardSlug)).scalars().all()
+        return {row.slug: {"name": row.name, "card_id": row.card_id} for row in rows}
+
+
+def load_thema_data() -> dict:
+    if not is_db_mode():
+        return _json_load(JSON_THEMA)
+
+    with get_session() as session:
+        rows = session.execute(select(ThemaScore)).scalars().all()
+
+    result: dict[str, dict] = {}
+    for row in rows:
+        result.setdefault(row.edition_id, {})[row.foil_type] = {
+            "charm": row.charm, "ferocity": row.ferocity, "grace": row.grace,
+            "mystique": row.mystique, "valor": row.valor, "dynamic": row.dynamic,
+        }
+    return result
+
+
+def load_update_data() -> dict:
+    if not is_db_mode():
+        return _json_load(JSON_UPDATE)
+
+    with get_session() as session:
+        rows = session.execute(
+            select(Card.card_id, Card.last_synced).where(Card.last_synced.isnot(None))
+        ).all()
+        return {row.card_id: row.last_synced.isoformat() for row in rows}
+
+
+def load_featured_sets_data() -> dict:
+    if not is_db_mode():
+        return _json_load(JSON_FEATURED_SETS)
+
+    with get_session() as session:
+        groups = session.execute(select(FeaturedSetGroup)).scalars().all()
+        sets = session.execute(
+            select(Set).where(Set.featured_group.isnot(None))
+            .order_by(Set.featured_group, Set.featured_position)
+        ).scalars().all()
+
+    sets_by_group: dict[str, list] = {}
+    for s in sets:
+        sets_by_group.setdefault(s.featured_group, []).append({"prefix": s.prefix, "slug": s.slug})
+
+    return {
+        group.group_name: {"sets": sets_by_group.get(group.group_name, []), "image_path": group.image_path}
+        for group in groups
+    }
+
+
+def load_set_names() -> list[str]:
+    """Sorted list of set prefixes with at least one synced card, e.g. for
+    the /api/sets route. DB mode deliberately excludes sets.rows that exist
+    only as FEATURED_SETS.json membership metadata for a not-yet-searched
+    set (see migrate_json_to_pg.py's migrate_sets) — those aren't
+    searchable yet, matching JSON mode only ever listing sets that have a
+    real DATA_GA/SETS_GA/{slug}.json file."""
+    if not is_db_mode():
+        if not os.path.exists(DIR_SETS):
+            return []
+        return sorted([
+            os.path.splitext(f.name)[0].upper().replace("_", " ")
+            for f in os.scandir(DIR_SETS) if f.name.endswith(".json")
+        ])
+
+    with get_session() as session:
+        rows = session.execute(
+            select(Set.prefix).where(Set.slug.in_(select(Edition.set_slug).distinct()))
+        ).scalars().all()
+        return sorted(rows)
+
+
+def load_set_collector_data(set_slug: str) -> dict:
+    """collector_number → [edition_id, ...] for ONE set — mirrors a single
+    DATA_GA/SETS_GA/{slug}.json file's shape. Result order matches
+    _sort_collector_number, same as the JSON file's own on-disk order
+    (_update_sets re-sorts it after every write) — callers that just
+    iterate the dict (rather than re-sorting themselves) depend on that."""
+    if not is_db_mode():
+        path = f"{DIR_SETS}/{set_slug}.json"
+        return _json_load(path) if os.path.exists(path) else {}
+
+    with get_session() as session:
+        rows = session.execute(
+            select(Edition.edition_id, Edition.collector_number)
+            .where(Edition.set_slug == set_slug, Edition.collector_number.isnot(None))
+        ).all()
+
+    result: dict[str, list] = {}
+    for row in sorted(rows, key=lambda r: _sort_collector_number(r.collector_number)):
+        result.setdefault(row.collector_number, []).append(row.edition_id)
+    return result
+
+
+def load_all_set_collector_data() -> dict:
+    """set_prefix → {collector_number → [edition_id, ...]} across every set,
+    each set's inner dict ordered the same way as load_set_collector_data."""
+    if not is_db_mode():
+        result = {}
+        if os.path.exists(DIR_SETS):
+            for f in os.scandir(DIR_SETS):
+                if not f.name.endswith(".json"):
+                    continue
+                prefix = f.name[:-5].upper().replace("_", " ")
+                result[prefix] = _json_load(f.path)
+        return result
+
+    with get_session() as session:
+        rows = session.execute(
+            select(Set.prefix, Edition.edition_id, Edition.collector_number)
+            .join(Edition, Edition.set_slug == Set.slug)
+            .where(Edition.collector_number.isnot(None))
+        ).all()
+
+    result: dict[str, dict] = {}
+    for prefix, edition_id, collector_number in sorted(rows, key=lambda r: _sort_collector_number(r[2])):
+        result.setdefault(prefix, {}).setdefault(collector_number, []).append(edition_id)
     return result
 
 

@@ -1,0 +1,20 @@
+# Local dev only — reproduces the ga-postgres container this project already
+# uses, for anyone re-cloning the repo. `docker start ga-postgres` still works
+# fine if that container already exists on your machine; `docker compose up -d`
+# is the from-scratch path, and attaches to the SAME named volume so no data
+# is duplicated or lost either way.
+services:
+  postgres:
+    image: postgres:16
+    container_name: ga-postgres
+    environment:
+      POSTGRES_DB: ga_library
+      POSTGRES_PASSWORD: devpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ga-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  ga-postgres-data:
+    external: true

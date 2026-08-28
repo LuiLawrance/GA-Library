@@ -1,24 +1,30 @@
 from api_ga import _api_search, _build_collector_map, _download_card_image, _download_set_image, \
     _format_search, _group_slug, _sort_collector_number, _update_slug, API_HOST, API_IMAGE, card_reset, \
-    DIR_SETS, JSON_EDITIONS, JSON_FEATURED_SETS, JSON_INFO, JSON_SET_SEARCHES, JSON_SLUGS, JSON_THEMA, \
-    JSON_UPDATE, set_search, sync_featured_sets, UPDATE_THRESHOLD
+    DIR_SETS, JSON_SET_SEARCHES, load_all_set_collector_data, load_editions_data, load_featured_sets_data, \
+    load_info_data, load_set_collector_data, load_set_names, load_slugs_data, load_thema_data, load_update_data, \
+    set_search, sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
     import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, get_product_id, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
+from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection
+from db.session import get_session
+from db_mode import is_db_mode
 from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
-from pricing_ga import JSON_LISTINGS, JSON_SALES, RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
+from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     clear_product_ids_for_set, delete_entry, find_product_ids_by_editions, import_listings, \
-    import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, import_sales, \
-    scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, scrape_sales_and_listings_tcg_by_edition, \
-    scrape_sales_tcg_by_edition
+    import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, import_sales, load_listings_data, \
+    load_sales_data, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
+    scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
-from user import JSON_USERS, RANK_ORDER, user_create, user_delete, user_login
+from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from user import RANK_ORDER, user_create, user_delete, user_get_auth_type, user_list, user_login, user_set_role
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
@@ -111,12 +117,7 @@ def get_current_user(request: Request) -> str | None:
 
 
 def get_user_auth_type(username: str) -> str | None:
-    users_file = new_json(JSON_USERS)
-
-    with users_file.open("r", encoding="utf-8") as f:
-        users_data = json.load(f)
-
-    return users_data.get(username, {}).get("auth_type")
+    return user_get_auth_type(username)
 
 
 # Ranks that can reach the admin console at all. Finer-grained permissions
@@ -277,20 +278,10 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
     set_params = request.query_params.getlist("set")
     set_filters = [s.strip().lower().replace(" ", "_") for s in set_params]
 
-    slug_file = new_json(JSON_SLUGS)
-    info_file = new_json(JSON_INFO)
-
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    with new_json(JSON_SALES).open(encoding="utf-8") as f:
-        sales_data = json.load(f)
-
-    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
-        listings_data = json.load(f)
+    slug_data = load_slugs_data()
+    info_data = load_info_data()
+    sales_data = load_sales_data()
+    listings_data = load_listings_data()
 
     def enrich(cards):
         set_file_cache = {}
@@ -302,8 +293,7 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
             card["set_prefix"] = set_prefix
             key = set_prefix.lower().replace(" ", "_")
             if key not in set_file_cache:
-                path = f"DATA_GA/SETS_GA/{key}.json"
-                set_file_cache[key] = json.load(open(path)) if os.path.exists(path) else {}
+                set_file_cache[key] = load_set_collector_data(key)
             set_data = set_file_cache[key]
             card["collector_number"] = next(
                 (num for num, eids in set_data.items()
@@ -360,11 +350,14 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
         card_data = _api_search_variants(q)
 
         if card_data:
-            with slug_file.open("r", encoding="utf-8") as f:
-                slug_data = json.load(f)
-
-            with info_file.open("r", encoding="utf-8") as f:
-                info_data = json.load(f)
+            # Re-read to pick up what _api_search_variants (via
+            # _api_search) just synced. In DB mode this re-read still comes
+            # from Postgres — see the Stage 5 scope note on load_info_data —
+            # so a genuinely new card won't show up here until the next
+            # migrate_json_to_pg.py run, even though the JSON files
+            # themselves were just updated by the sync above.
+            slug_data = load_slugs_data()
+            info_data = load_info_data()
 
             slug = _format_search(q)
 
@@ -457,16 +450,13 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
         if set_filters and cards:
             collector_order = {}
             for set_filter in set_filters:
-                set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
-                if os.path.exists(set_file_path):
-                    with open(set_file_path, "r", encoding="utf-8") as f:
-                        set_data = json.load(f)
-                    for num, eids in set_data.items():
-                        if isinstance(eids, list):
-                            for eid in eids:
-                                collector_order[eid] = (set_filter, num)
-                        else:
-                            collector_order[eids] = (set_filter, num)
+                set_data = load_set_collector_data(set_filter)
+                for num, eids in set_data.items():
+                    if isinstance(eids, list):
+                        for eid in eids:
+                            collector_order[eid] = (set_filter, num)
+                    else:
+                        collector_order[eids] = (set_filter, num)
 
             cards.sort(key=lambda c: (
                 collector_order.get(c["edition_id"], ("zzz", "ZZZ"))[0],
@@ -517,10 +507,7 @@ async def api_cards_search(request: Request, q: str = "", all_prints: bool = Fal
 
 @app.get("/api/cards/suggest")
 async def api_cards_suggest(q: str):
-    slug_file = new_json(JSON_SLUGS)
-
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    slug_data = load_slugs_data()
 
     query = q.strip().lower()
 
@@ -537,26 +524,11 @@ async def api_cards_suggest(q: str):
 
 @app.get("/api/cards/{card_id}")
 async def api_card_detail(card_id: str):
-    info_file = new_json(JSON_INFO)
-    thema_file = new_json(JSON_THEMA)
-    listings_file = new_json(JSON_LISTINGS)
-    sales_file = new_json(JSON_SALES)
-    slug_file = new_json(JSON_SLUGS)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    with thema_file.open("r", encoding="utf-8") as f:
-        thema_data = json.load(f)
-
-    with listings_file.open("r", encoding="utf-8") as f:
-        listings_data = json.load(f)
-
-    with sales_file.open("r", encoding="utf-8") as f:
-        sales_data = json.load(f)
-
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    info_data = load_info_data()
+    thema_data = load_thema_data()
+    slug_data = load_slugs_data()
+    listings_data = load_listings_data()
+    sales_data = load_sales_data()
 
     card_info = info_data.get(card_id)
 
@@ -580,19 +552,13 @@ async def api_card_detail(card_id: str):
     for edition_id, edition_info in card_info.get("editions", {}).items():
         set_prefix = edition_info.get("set_prefix", "")
         set_file_name = set_prefix.lower().replace(" ", "_")
-        set_path = f"DATA_GA/SETS_GA/{set_file_name}.json"
+        set_data = load_set_collector_data(set_file_name)
 
-        collector_number = "?"
-
-        if os.path.exists(set_path):
-            with open(set_path, "r", encoding="utf-8") as f:
-                set_data = json.load(f)
-
-            collector_number = next(
-                (num for num, eids in set_data.items()
-                 if edition_id in (eids if isinstance(eids, list) else [eids])),
-                "?"
-            )
+        collector_number = next(
+            (num for num, eids in set_data.items()
+             if edition_id in (eids if isinstance(eids, list) else [eids])),
+            "?"
+        )
 
         edition_info["collector_number"] = collector_number
         edition_info["thema"] = thema_data.get(edition_id, {})
@@ -644,18 +610,7 @@ async def api_me(request: Request):
 
 @app.get("/api/sets")
 async def api_sets():
-    sets_dir = "DATA_GA/SETS_GA"
-
-    if not os.path.exists(sets_dir):
-        return JSONResponse({"sets": []})
-
-    sets = sorted([
-        os.path.splitext(f.name)[0].upper().replace("_", " ")
-        for f in os.scandir(sets_dir)
-        if f.name.endswith(".json")
-    ])
-
-    return JSONResponse({"sets": sets})
+    return JSONResponse({"sets": load_set_names()})
 
 
 # Public counterpart to /api/admin/featured-sets — feeds the Cards page's
@@ -675,8 +630,7 @@ async def api_sets():
 # so this endpoint doesn't need to know which mode is active.
 @app.get("/api/sets/featured")
 async def api_sets_featured():
-    with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
-        featured = json.load(f)
+    featured = load_featured_sets_data()
 
     groups = [
         {
@@ -969,8 +923,7 @@ async def api_find_product_ids_start(request: Request):
 
     if not edition_ids:
         # No specific editions given — default to every edition currently missing one
-        with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-            editions_data = json.load(f)
+        editions_data = load_editions_data()
         ids_data = get_all_ids()
         edition_ids = [eid for eid in editions_data if not ids_data.get(eid, {}).get("product_id")]
 
@@ -1056,16 +1009,6 @@ def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
     return curio_foil_id if has_regular_printing else None
 
 
-def _load_users_data() -> dict:
-    with new_json(JSON_USERS).open(encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _save_users_data(data: dict) -> None:
-    with new_json(JSON_USERS).open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-
 @app.get("/api/admin/settings")
 async def api_admin_get_settings(request: Request):
     require_admin(request)
@@ -1092,12 +1035,7 @@ async def api_admin_set_settings(request: Request):
 async def api_admin_users(request: Request):
     require_admin(request)
 
-    users_data = _load_users_data()
-
-    results = [
-        {"username": username, "auth_type": info.get("auth_type")}
-        for username, info in users_data.items()
-    ]
+    results = user_list()
     results.sort(key=lambda r: r["username"].lower())
 
     return JSONResponse({"users": results})
@@ -1116,13 +1054,13 @@ async def api_admin_set_user_role(username: str, request: Request):
     if username == admin:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
 
-    users_data = _load_users_data()
+    target_auth_type = user_get_auth_type(username)
 
-    if username not in users_data:
+    if target_auth_type is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    admin_rank = RANK_ORDER.index(users_data[admin]["auth_type"])
-    target_rank = RANK_ORDER.index(users_data[username]["auth_type"])
+    admin_rank = RANK_ORDER.index(user_get_auth_type(admin))
+    target_rank = RANK_ORDER.index(target_auth_type)
     new_rank = RANK_ORDER.index(auth_type)
 
     # A lower index means higher privilege — you can only act on someone
@@ -1133,8 +1071,7 @@ async def api_admin_set_user_role(username: str, request: Request):
     if new_rank <= admin_rank:
         raise HTTPException(status_code=400, detail="Cannot grant a rank at or above your own")
 
-    users_data[username]["auth_type"] = auth_type
-    _save_users_data(users_data)
+    user_set_role(username, auth_type)
 
     return JSONResponse({"username": username, "auth_type": auth_type})
 
@@ -1143,16 +1080,16 @@ async def api_admin_set_user_role(username: str, request: Request):
 async def api_admin_delete_user(username: str, request: Request):
     admin = require_admin(request)
 
-    users_data = _load_users_data()
+    target_auth_type = user_get_auth_type(username)
 
-    if username not in users_data:
+    if target_auth_type is None:
         raise HTTPException(status_code=404, detail="User not found")
 
     if username == admin:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
-    admin_rank = RANK_ORDER.index(users_data[admin]["auth_type"])
-    target_rank = RANK_ORDER.index(users_data[username]["auth_type"])
+    admin_rank = RANK_ORDER.index(user_get_auth_type(admin))
+    target_rank = RANK_ORDER.index(target_auth_type)
 
     if target_rank <= admin_rank:
         raise HTTPException(status_code=400, detail="Cannot delete a user at or above your own rank")
@@ -1163,9 +1100,7 @@ async def api_admin_delete_user(username: str, request: Request):
 
 
 def _require_existing_user(username: str) -> None:
-    users_data = _load_users_data()
-
-    if username not in users_data:
+    if user_get_auth_type(username) is None:
         raise HTTPException(status_code=404, detail="User not found")
 
 
@@ -1228,21 +1163,15 @@ async def api_admin_user_decks(username: str, request: Request):
 async def api_admin_pricing_product_ids(request: Request):
     require_admin(request)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
-
-    with new_json(JSON_INFO).open(encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
-        slugs_data = json.load(f)
+    editions_data = load_editions_data()
+    info_data = load_info_data()
+    slugs_data = load_slugs_data()
 
     # card_id -> ISO date this app last pulled fresh data for that card from
     # the Grand Archive API (see _update_update/_check_local in api_ga.py) —
     # distinct from an edition's own date_update below (that's the API's
     # metadata about the EDITION itself, not when WE last synced it).
-    with new_json(JSON_UPDATE).open(encoding="utf-8") as f:
-        system_update_data = json.load(f)
+    system_update_data = load_update_data()
 
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
     collector_map = _build_collector_map()
@@ -1321,8 +1250,7 @@ async def api_admin_pricing_product_ids(request: Request):
 async def api_admin_featured_sets(request: Request):
     require_admin(request)
 
-    with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
-        featured = json.load(f)
+    featured = load_featured_sets_data()
 
     return JSONResponse({"featured": featured})
 
@@ -1448,8 +1376,7 @@ async def api_admin_set_product_id(request: Request):
     if product_id and product_id != NO_LISTINGS_SENTINEL and not product_id.isdigit():
         raise HTTPException(status_code=400, detail=f'Product ID must be numeric, or "{NO_LISTINGS_SENTINEL}" for no listings')
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
@@ -1480,8 +1407,7 @@ async def api_admin_clear_last_updated(request: Request):
     if field not in ("sales", "listings"):
         raise HTTPException(status_code=400, detail="field must be 'sales' or 'listings'")
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
@@ -1551,16 +1477,14 @@ async def api_admin_pricing_import_listings_json(request: Request):
 async def api_admin_pricing_history(edition_id: str, request: Request):
     require_admin(request)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
 
     card_id = editions_data[edition_id]["card_id"]
 
-    with new_json(JSON_INFO).open(encoding="utf-8") as f:
-        info_data = json.load(f)
+    info_data = load_info_data()
 
     foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
     foil_kind_by_id = {}
@@ -1571,10 +1495,7 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
         for variant_id, variant_info in foil_info.get("variants", {}).items():
             foil_kind_by_id[variant_id] = variant_info.get("kind")
 
-    def _flatten(json_path):
-        with open(json_path, encoding="utf-8") as f:
-            store = json.load(f)
-
+    def _flatten(store):
         by_foil = store.get(card_id, {}).get(edition_id, {})
         entries = []
 
@@ -1594,8 +1515,8 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
     curio_foil_id = _curio_foil_id_for_edition(edition_info)
 
     return JSONResponse({
-        "sales": _flatten(JSON_SALES),
-        "listings": _flatten(JSON_LISTINGS),
+        "sales": _flatten(load_sales_data()),
+        "listings": _flatten(load_listings_data()),
         "last_sales": get_last_sales(edition_id),
         "last_listings": get_last_listings(edition_id),
         "curio_last_sales": get_foil_last_sales(edition_id, curio_foil_id) if curio_foil_id else None,
@@ -1615,16 +1536,14 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
 async def api_admin_refresh_card(edition_id: str, request: Request):
     require_admin(request)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
 
     card_id = editions_data[edition_id]["card_id"]
 
-    with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
-        slugs_data = json.load(f)
+    slugs_data = load_slugs_data()
 
     card_name = next((entry["name"] for entry in slugs_data.values() if entry["card_id"] == card_id), None)
 
@@ -1643,16 +1562,14 @@ async def api_admin_refresh_card(edition_id: str, request: Request):
 async def api_admin_pricing_foils(edition_id: str, request: Request):
     require_admin(request)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
 
     card_id = editions_data[edition_id]["card_id"]
 
-    with new_json(JSON_INFO).open(encoding="utf-8") as f:
-        info_data = json.load(f)
+    info_data = load_info_data()
 
     foils = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("foils", {})
     overrides = get_foil_overrides(edition_id)
@@ -1697,8 +1614,7 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
 async def api_admin_pricing_add_entry(edition_id: str, request: Request):
     require_admin(request)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
@@ -1777,8 +1693,7 @@ async def api_admin_pricing_delete_entry(edition_id: str, request: Request):
 async def api_admin_pricing_import_sales(edition_id: str, request: Request):
     require_admin(request)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
@@ -1801,29 +1716,15 @@ async def api_admin_pricing_import_sales(edition_id: str, request: Request):
 @app.get("/api/sets/search")
 async def api_sets_search(prefix: str):
     set_filter = prefix.strip().lower().replace(" ", "_")
-    set_file_path = f"DATA_GA/SETS_GA/{set_filter}.json"
+    set_data = load_set_collector_data(set_filter)
 
-    if not os.path.exists(set_file_path):
+    if not set_data:
         return JSONResponse({"cards": []})
 
-    with open(set_file_path, "r", encoding="utf-8") as f:
-        set_data = json.load(f)
-
-    slug_file = new_json(JSON_SLUGS)
-    edition_file = new_json("DATA_GA/CARDS_GA/EDITIONS.json")
-    info_file = new_json(JSON_INFO)
-
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-
-    with edition_file.open("r", encoding="utf-8") as f:
-        edition_data = json.load(f)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    with new_json(JSON_SALES).open(encoding="utf-8") as f:
-        sales_data = json.load(f)
+    slug_data = load_slugs_data()
+    edition_data = load_editions_data()
+    info_data = load_info_data()
+    sales_data = load_sales_data()
 
     cards = []
 
@@ -1950,8 +1851,7 @@ async def get_image(edition_id: str):
 # whether that lookup ends up feeding a redirect or a download.
 @app.get("/set-images/{filename}")
 async def get_set_image(filename: str):
-    with new_json(JSON_FEATURED_SETS).open(encoding="utf-8") as f:
-        featured = json.load(f)
+    featured = load_featured_sets_data()
 
     image_path = next(
         (
@@ -2106,20 +2006,12 @@ async def api_watchlist_list(request: Request):
 
     rows = watchlist_list(user)
 
-    with new_json(JSON_EDITIONS).open(encoding="utf-8") as f:
-        editions_data = json.load(f)
+    editions_data = load_editions_data()
+    info_data = load_info_data()
+    slugs_data = load_slugs_data()
 
-    with new_json(JSON_INFO).open(encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    with new_json(JSON_SLUGS).open(encoding="utf-8") as f:
-        slugs_data = json.load(f)
-
-    with new_json(JSON_SALES).open(encoding="utf-8") as f:
-        sales_data = json.load(f)
-
-    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
-        listings_data = json.load(f)
+    sales_data = load_sales_data()
+    listings_data = load_listings_data()
 
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
     collector_map = _build_collector_map()
@@ -2202,23 +2094,28 @@ async def api_watchlist_delete(request: Request):
 DEFAULT_BIN = "Inventory"
 
 
+def _inv_default_structure() -> dict:
+    return {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "sections": {}}}
+
+
 def _inv_load(username: str) -> dict:
+    if is_db_mode():
+        return _inv_load_db(username)
+
     inv_file = new_json(f"DATA_GA/INV_GA/{username}.json")
     with inv_file.open("r", encoding="utf-8") as f:
         raw = json.load(f)
 
     # Empty file → init default structure
     if not raw:
-        data = {
-            DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "sections": {}}}
+        data = _inv_default_structure()
         _inv_save(username, data)
         return data
 
     # Old flat UUID-keyed structure → migrate to default bin
     first_val = next(iter(raw.values()), {})
     if isinstance(first_val, dict) and "card_id" in first_val:
-        data = {
-            DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "sections": {}}}
+        data = _inv_default_structure()
         _inv_save(username, data)
         return data
 
@@ -2233,9 +2130,106 @@ def _inv_load(username: str) -> dict:
 
 
 def _inv_save(username: str, data: dict) -> None:
+    if is_db_mode():
+        _inv_save_db(username, data)
+        return
+
     inv_file = new_json(f"DATA_GA/INV_GA/{username}.json")
     with inv_file.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+# DB-mode _inv_load/_inv_save reconstruct/persist the EXACT same nested dict
+# shape as the JSON branch ({bin_name: {..., sections: {section_name:
+# {card_id: {edition_id: {foil_id: quantity}}}}}}), so every inventory route
+# below can keep mutating that plain dict and calling _inv_save — none of
+# them need to know which backend is active. _inv_save_db does a full
+# delete-and-reinsert of this user's bins on every call rather than diffing,
+# mirroring the JSON branch's own "rewrite the whole file every save"
+# behavior — bins/sections/cards cascade-delete together (see the FKs in
+# db/models.py) so this is one DELETE plus a handful of INSERTs, not N
+# separate deletes.
+#
+# Note: inserting a card here requires that card_id/edition_id/foil_id
+# already exist in Postgres's cards/editions/foils tables — which are only
+# as fresh as the last scripts/migrate_json_to_pg.py run, since the card
+# catalog itself isn't DB-wired yet (a later stage). Adding a card that was
+# only just synced into INFO.json via a live API search won't have a row in
+# Postgres yet and will fail with a foreign key error until that stage lands
+# or the import script is re-run.
+def _inv_load_db(username: str) -> dict:
+    with get_session() as session:
+        bins = session.execute(
+            select(InventoryBin).where(InventoryBin.username == username)
+        ).scalars().all()
+
+        if not bins:
+            data = _inv_default_structure()
+            _inv_save_db(username, data)
+            return data
+
+        result = {}
+        for bin_row in bins:
+            sections = session.execute(
+                select(InventorySection).where(InventorySection.bin_id == bin_row.id)
+                .order_by(InventorySection.position)
+            ).scalars().all()
+
+            sections_data = {}
+            for section_row in sections:
+                cards_data = {}
+                inv_cards = session.execute(
+                    select(InventoryCard).where(InventoryCard.section_id == section_row.id)
+                ).scalars().all()
+                for c in inv_cards:
+                    cards_data.setdefault(c.card_id, {}).setdefault(c.edition_id, {})[c.foil_id] = c.quantity
+                sections_data[section_row.name] = cards_data
+
+            result[bin_row.name] = {
+                "banner": bin_row.banner,
+                "default": bin_row.is_default,
+                "desc": bin_row.desc or "",
+                "symbol": bin_row.symbol,
+                "tags": bin_row.tags,
+                "sections": sections_data,
+            }
+
+    return result
+
+
+def _inv_save_db(username: str, data: dict) -> None:
+    with get_session() as session:
+        session.execute(delete(InventoryBin).where(InventoryBin.username == username))
+        session.flush()
+
+        for bin_name, bin_data in data.items():
+            bin_row = InventoryBin(
+                username=username,
+                name=bin_name,
+                desc=bin_data.get("desc", ""),
+                banner=bin_data.get("banner"),
+                symbol=bin_data.get("symbol"),
+                tags=bin_data.get("tags"),
+                is_default=bool(bin_data.get("default")),
+            )
+            session.add(bin_row)
+            session.flush()
+
+            for position, (section_name, cards) in enumerate(bin_data.get("sections", {}).items()):
+                section_row = InventorySection(bin_id=bin_row.id, name=section_name, position=position)
+                session.add(section_row)
+                session.flush()
+
+                for card_id, editions in cards.items():
+                    for edition_id, foils in editions.items():
+                        for foil_id, quantity in foils.items():
+                            session.add(InventoryCard(
+                                section_id=section_row.id,
+                                card_id=card_id,
+                                edition_id=edition_id,
+                                foil_id=foil_id,
+                                quantity=quantity,
+                            ))
 
 
 @app.get("/api/inventory")
@@ -2256,11 +2250,8 @@ async def api_bin_value(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    with new_json(JSON_SALES).open(encoding="utf-8") as f:
-        sales_data = json.load(f)
-
-    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
-        listings_data = json.load(f)
+    sales_data = load_sales_data()
+    listings_data = load_listings_data()
 
     total = 0.0
     sale_quantity = 0
@@ -2313,11 +2304,8 @@ async def api_bin_prices(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    with new_json(JSON_SALES).open(encoding="utf-8") as f:
-        sales_data = json.load(f)
-
-    with new_json(JSON_LISTINGS).open(encoding="utf-8") as f:
-        listings_data = json.load(f)
+    sales_data = load_sales_data()
+    listings_data = load_listings_data()
 
     prices: dict = {}
 
@@ -2342,16 +2330,12 @@ async def api_bin_prices(bin_name: str, request: Request):
 
 @app.get("/api/inv/info")
 async def api_inv_info():
-    info_file = new_json(JSON_INFO)
-    with info_file.open("r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
+    return JSONResponse(load_info_data())
 
 
 @app.get("/api/inv/slugs")
 async def api_inv_slugs():
-    slug_file = new_json(JSON_SLUGS)
-    with slug_file.open("r", encoding="utf-8") as f:
-        return JSONResponse(json.load(f))
+    return JSONResponse(load_slugs_data())
 
 
 def _api_search_variants(card_name: str):
@@ -2394,13 +2378,8 @@ async def api_bin_export(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    info_file = new_json(JSON_INFO)
-    slug_file = new_json(JSON_SLUGS)
-
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    info_data = load_info_data()
+    slug_data = load_slugs_data()
 
     # Build edition_id → collector_number map
     collector_map = _build_collector_map()
@@ -2461,21 +2440,7 @@ _BIN_IMPORT_LINE_RE = re.compile(
 
 def _bin_import_build_set_collector_map() -> dict:
     """set_prefix → { collector_number → [edition_id] }"""
-    sets_dir = "DATA_GA/SETS_GA"
-    set_collector_map = {}
-    if os.path.exists(sets_dir):
-        for f in os.scandir(sets_dir):
-            if not f.name.endswith(".json"):
-                continue
-            prefix = f.name[:-5].upper().replace("_", " ")
-            with open(f.path, "r", encoding="utf-8") as fh:
-                set_data = json.load(fh)
-            set_collector_map[prefix] = {}
-            for num, eids in set_data.items():
-                if isinstance(eids, str):
-                    eids = [eids]
-                set_collector_map[prefix][num] = eids
-    return set_collector_map
+    return load_all_set_collector_data()
 
 
 def _bin_import_resolve_line(raw_line: str, info_data: dict, slug_data: dict, set_collector_map: dict) -> dict:
@@ -2590,12 +2555,8 @@ async def api_bin_import_parse(bin_name: str, request: Request):
     if bin_name not in inv:
         raise HTTPException(status_code=404, detail="Bin not found")
 
-    info_file = new_json(JSON_INFO)
-    slug_file = new_json(JSON_SLUGS)
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    info_data = load_info_data()
+    slug_data = load_slugs_data()
 
     set_collector_map = _bin_import_build_set_collector_map()
 
@@ -2680,12 +2641,8 @@ async def api_bin_import_resolve(bin_name: str, request: Request):
     lookup_name = line_match.group(2).strip() if line_match else slug
     api_result = _api_search_variants(lookup_name)
 
-    info_file = new_json(JSON_INFO)
-    slug_file = new_json(JSON_SLUGS)
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    info_data = load_info_data()
+    slug_data = load_slugs_data()
 
     if not api_result or slug not in slug_data:
         return JSONResponse({"ok": False, "found": False, "line": raw_line, "error": f"Card not found: {raw_line}"})
@@ -2993,6 +2950,9 @@ DEFAULT_SECTIONS = ["Material Deck", "Main Deck"]
 
 
 def _deck_index_load(username: str) -> dict:
+    if is_db_mode():
+        return _deck_index_load_db(username)
+
     path = f"{DIR_DECK_INDEX}/{username}.json"
     if not os.path.exists(path):
         return {}
@@ -3001,12 +2961,19 @@ def _deck_index_load(username: str) -> dict:
 
 
 def _deck_index_save(username: str, data: dict) -> None:
+    if is_db_mode():
+        _deck_index_save_db(username, data)
+        return
+
     os.makedirs(DIR_DECK_INDEX, exist_ok=True)
     with open(f"{DIR_DECK_INDEX}/{username}.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
 def _deck_load(username: str, deck_name: str) -> dict | None:
+    if is_db_mode():
+        return _deck_load_db(username, deck_name)
+
     path = f"{DIR_DECKS_GA}/{username}/{deck_name}.json"
     if not os.path.exists(path):
         return None
@@ -3015,6 +2982,10 @@ def _deck_load(username: str, deck_name: str) -> dict | None:
 
 
 def _deck_save(username: str, deck_name: str, data: dict) -> None:
+    if is_db_mode():
+        _deck_save_db(username, deck_name, data)
+        return
+
     os.makedirs(f"{DIR_DECKS_GA}/{username}", exist_ok=True)
     with open(f"{DIR_DECKS_GA}/{username}/{deck_name}.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
@@ -3024,6 +2995,112 @@ def _deck_save(username: str, deck_name: str, data: dict) -> None:
     if deck_name in index:
         index[deck_name]["modified"] = date.today().isoformat()
         _deck_index_save(username, index)
+
+
+# DB-mode deck storage. A JSON "deck" is really two documents (a per-user
+# index entry — banner/symbol/tags/created/modified — plus a per-deck
+# content file — desc/format/sections) that both fold onto ONE `decks` row
+# here; deck_sections/deck_cards hold the content. _deck_index_load/_save
+# and _deck_load/_save return/accept the exact same dict shapes as the JSON
+# branch, so every deck route below stays unchanged — EXCEPT api_deck_patch,
+# which needs one explicit DB-mode branch for renaming (see its comment):
+# the generic index-save below treats "old name gone, new name present" as
+# delete-old-create-new, which would drop the deck's sections/cards — same
+# reason the JSON branch doesn't let a generic save handle renaming either,
+# and instead calls os.rename() on the file directly.
+def _deck_index_load_db(username: str) -> dict:
+    with get_session() as session:
+        rows = session.execute(select(Deck).where(Deck.username == username)).scalars().all()
+        return {
+            row.name: {
+                "banner": row.banner,
+                "symbol": row.symbol,
+                "tags": row.tags,
+                "created": row.created_at.isoformat() if row.created_at else None,
+                "modified": row.modified_at.isoformat() if row.modified_at else None,
+            }
+            for row in rows
+        }
+
+
+def _deck_index_save_db(username: str, data: dict) -> None:
+    with get_session() as session:
+        # Decks removed from the index (deck_delete) — cascades to their
+        # sections/cards. A rename never reaches here as a deletion; see
+        # api_deck_patch's explicit rename-in-place branch.
+        keep_names = list(data.keys())
+        session.execute(delete(Deck).where(Deck.username == username, Deck.name.notin_(keep_names)))
+
+        for name, entry in data.items():
+            created = date.fromisoformat(entry["created"]) if entry.get("created") else None
+            modified = date.fromisoformat(entry["modified"]) if entry.get("modified") else None
+            index_fields = {
+                "banner": entry.get("banner"), "symbol": entry.get("symbol"), "tags": entry.get("tags"),
+                "created_at": created, "modified_at": modified,
+            }
+            stmt = pg_insert(Deck).values(username=username, name=name, **index_fields).on_conflict_do_update(
+                index_elements=["username", "name"], set_=index_fields,
+            )
+            session.execute(stmt)
+
+
+def _deck_load_db(username: str, deck_name: str) -> dict | None:
+    with get_session() as session:
+        deck_row = session.execute(
+            select(Deck).where(Deck.username == username, Deck.name == deck_name)
+        ).scalar_one_or_none()
+
+        if deck_row is None:
+            return None
+
+        sections = session.execute(
+            select(DeckSection).where(DeckSection.deck_id == deck_row.id).order_by(DeckSection.position)
+        ).scalars().all()
+
+        sections_data = {}
+        for section_row in sections:
+            cards = session.execute(
+                select(DeckCard).where(DeckCard.section_id == section_row.id).order_by(DeckCard.position)
+            ).scalars().all()
+            sections_data[section_row.name] = {c.card_id: c.quantity for c in cards}
+
+        return {"desc": deck_row.desc or "", "format": deck_row.format or "", "sections": sections_data}
+
+
+def _deck_save_db(username: str, deck_name: str, data: dict) -> None:
+    with get_session() as session:
+        deck_row = session.execute(
+            select(Deck).where(Deck.username == username, Deck.name == deck_name)
+        ).scalar_one_or_none()
+
+        today = date.today()
+
+        if deck_row is None:
+            # Defensive fallback mirroring the JSON branch's own "deck file
+            # missing — rebuild it" case (see api_deck_patch) — every real
+            # path creates the index row first, so this shouldn't normally
+            # fire.
+            deck_row = Deck(username=username, name=deck_name, created_at=today)
+            session.add(deck_row)
+            session.flush()
+
+        deck_row.desc = data.get("desc", "")
+        deck_row.format = data.get("format", "")
+        deck_row.modified_at = today
+        session.flush()
+
+        session.execute(delete(DeckSection).where(DeckSection.deck_id == deck_row.id))
+        session.flush()
+
+        for position, (section_name, cards) in enumerate(data.get("sections", {}).items()):
+            section_row = DeckSection(deck_id=deck_row.id, name=section_name, position=position)
+            session.add(section_row)
+            session.flush()
+
+            for card_position, (card_id, quantity) in enumerate(cards.items()):
+                session.add(DeckCard(
+                    section_id=section_row.id, card_id=card_id, quantity=quantity, position=card_position,
+                ))
 
 
 def _deck_card_count(sections: dict) -> int:
@@ -3111,9 +3188,7 @@ async def api_deck_export(deck_name: str, request: Request):
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-    slug_file = new_json(JSON_SLUGS)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    slug_data = load_slugs_data()
     name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
     lines = []
     for section_name, cards in deck_data["sections"].items():
@@ -3138,9 +3213,7 @@ async def api_deck_import_parse(deck_name: str, request: Request):
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
 
-    slug_file = new_json(JSON_SLUGS)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    slug_data = load_slugs_data()
 
     resolved = []  # {card_id, name, qty, section}
     unresolved = []  # {name, qty, section}
@@ -3218,9 +3291,7 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
 
-    slug_file = new_json(JSON_SLUGS)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
+    slug_data = load_slugs_data()
 
     slug = _format_search(card_name)
     card_id = slug_data[slug]["card_id"] if slug in slug_data else None
@@ -3228,8 +3299,9 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
     if not card_id:
         api_result = _api_search_variants(card_name)
         if api_result:
-            with slug_file.open("r", encoding="utf-8") as f:
-                slug_data = json.load(f)
+            # Re-read to pick up what _api_search_variants just synced —
+            # see load_info_data's Stage 5 scope note re: DB mode.
+            slug_data = load_slugs_data()
             card_id = slug_data[slug]["card_id"] if slug in slug_data else None
 
     if card_id:
@@ -3250,12 +3322,8 @@ async def api_deck_get(deck_name: str, request: Request):
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-    slug_file = new_json(JSON_SLUGS)
-    info_file = new_json(JSON_INFO)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
+    slug_data = load_slugs_data()
+    info_data = load_info_data()
     name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
     edition_map = {}
     for cards in deck_data["sections"].values():
@@ -3281,10 +3349,22 @@ async def api_deck_patch(deck_name: str, request: Request):
         if new_name in index:
             raise HTTPException(status_code=400, detail="Deck name already taken")
         index[new_name] = index.pop(deck_name)
-        old_path = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
-        new_path = f"{DIR_DECKS_GA}/{user}/{new_name}.json"
-        if os.path.exists(old_path):
-            os.rename(old_path, new_path)
+        if is_db_mode():
+            # Rename in place, preserving the row's id (and therefore its
+            # sections/cards) — the DB-mode equivalent of the os.rename()
+            # below. The generic _deck_index_save further down can't do
+            # this itself: from its point of view the old name just
+            # vanished and a new one appeared, which it can only read as
+            # "delete the old deck, create an empty new one."
+            with get_session() as session:
+                session.execute(
+                    update(Deck).where(Deck.username == user, Deck.name == deck_name).values(name=new_name)
+                )
+        else:
+            old_path = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
+            new_path = f"{DIR_DECKS_GA}/{user}/{new_name}.json"
+            if os.path.exists(old_path):
+                os.rename(old_path, new_path)
         deck_name = new_name
     if "banner" in body:
         banner = body["banner"]

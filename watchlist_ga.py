@@ -1,4 +1,8 @@
 from datetime import date
+from db.models import Edition, WatchlistEntry
+from db.session import get_session
+from db_mode import is_db_mode
+from sqlalchemy import delete as sa_delete, select
 from util_file import new_json
 
 import json
@@ -24,6 +28,19 @@ def _save_watchlist(username: str, data: dict) -> None:
 
 def watchlist_list(username: str) -> list[tuple[str, str, str, str]]:
     """Flat list of (card_id, edition_id, foil_id, added_date)."""
+    if is_db_mode():
+        with get_session() as session:
+            rows = session.execute(
+                select(Edition.card_id, WatchlistEntry.edition_id, WatchlistEntry.foil_id, WatchlistEntry.added_date)
+                .join(Edition, Edition.edition_id == WatchlistEntry.edition_id)
+                .where(WatchlistEntry.username == username)
+            ).all()
+
+            return [
+                (row.card_id, row.edition_id, row.foil_id, row.added_date.isoformat() if row.added_date else None)
+                for row in rows
+            ]
+
     data = _load_watchlist(username)
     rows = []
 
@@ -37,6 +54,31 @@ def watchlist_list(username: str) -> list[tuple[str, str, str, str]]:
 
 def watchlist_add(username: str, card_id: str, edition_id: str, foil_id: str, debug: bool = False) -> bool:
     """Returns False if this printing is already watched (no-op), True if newly added."""
+    if is_db_mode():
+        with get_session() as session:
+            existing = session.execute(
+                select(WatchlistEntry).where(
+                    WatchlistEntry.username == username,
+                    WatchlistEntry.edition_id == edition_id,
+                    WatchlistEntry.foil_id == foil_id,
+                )
+            ).scalar_one_or_none()
+
+            if existing:
+                return False
+
+            session.add(WatchlistEntry(
+                username=username, edition_id=edition_id, foil_id=foil_id, added_date=date.today(),
+            ))
+
+        if debug:
+            print(
+                f"Added to watchlist (DB) | "
+                f"user={username} | card_id={card_id} | edition_id={edition_id} | foil_id={foil_id}"
+            )
+
+        return True
+
     data = _load_watchlist(username)
     existing = data.get(card_id, {}).get(edition_id, {}).get(foil_id)
 
@@ -60,6 +102,25 @@ def watchlist_add(username: str, card_id: str, edition_id: str, foil_id: str, de
 
 def watchlist_remove(username: str, card_id: str, edition_id: str, foil_id: str, debug: bool = False) -> bool:
     """Returns False if the printing wasn't being watched (no-op), True if removed."""
+    if is_db_mode():
+        with get_session() as session:
+            result = session.execute(
+                sa_delete(WatchlistEntry).where(
+                    WatchlistEntry.username == username,
+                    WatchlistEntry.edition_id == edition_id,
+                    WatchlistEntry.foil_id == foil_id,
+                )
+            )
+            removed = result.rowcount > 0
+
+        if debug and removed:
+            print(
+                f"Removed from watchlist (DB) | "
+                f"user={username} | card_id={card_id} | edition_id={edition_id} | foil_id={foil_id}"
+            )
+
+        return removed
+
     data = _load_watchlist(username)
     foils = data.get(card_id, {}).get(edition_id, {})
 

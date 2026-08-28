@@ -1,5 +1,9 @@
 from datetime import date
+from db.models import Edition, FoilTcgOverride
+from db.session import get_session
+from db_mode import is_db_mode
 from playwright.sync_api import sync_playwright
+from sqlalchemy import or_, select
 from util_file import new_json
 
 import json
@@ -46,7 +50,34 @@ def _build_url(product_id: str, page: int = 1) -> str:
     return f"{BASE_URL}{product_id}?page={page}"
 
 
+# Scope note (Stage 6 of the migration plan): only these READS branch on
+# local_database — get_all_ids/get_product_id/get_last_sales/etc. and their
+# foil-scoped counterparts below. Every WRITE in this file (_set_ids_field,
+# import_ids, set_product_id, clear_last_sales, ...) always writes JSON,
+# same as the card-catalog sync functions in api_ga.py. That means a getter
+# in DB mode can read a value slightly staler than what a write just put in
+# JSON (e.g. the 7-day listings-refresh gate, which reads via
+# get_last_listings/get_foil_last_listings, might under-throttle until the
+# next scripts/migrate_json_to_pg.py run) — the same staleness trade-off
+# already accepted for the card catalog, not a new one.
+
 def _get_ids_field(edition_id: str, field: str) -> str | None:
+    if is_db_mode():
+        with get_session() as session:
+            edition = session.get(Edition, edition_id)
+
+            if edition is None:
+                return None
+
+            if field == "product_id":
+                return NO_LISTINGS_SENTINEL if edition.tcg_is_no_listings else edition.tcg_product_id
+            if field == "last_sales":
+                return edition.tcg_last_sales.isoformat() if edition.tcg_last_sales else None
+            if field == "last_listings":
+                return edition.tcg_last_listings.isoformat() if edition.tcg_last_listings else None
+
+            return None
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
@@ -61,6 +92,40 @@ def get_all_ids() -> dict:
     re-opening and re-parsing the file once per edition per field the way
     get_product_id()/get_last_sales()/get_last_listings() do when called
     individually in a loop."""
+    if is_db_mode():
+        with get_session() as session:
+            editions = session.execute(
+                select(Edition).where(or_(
+                    Edition.tcg_product_id.isnot(None), Edition.tcg_is_no_listings,
+                    Edition.tcg_last_sales.isnot(None), Edition.tcg_last_listings.isnot(None),
+                ))
+            ).scalars().all()
+            overrides = session.execute(select(FoilTcgOverride)).scalars().all()
+
+        result = {}
+
+        for edition in editions:
+            entry = {
+                "product_id": NO_LISTINGS_SENTINEL if edition.tcg_is_no_listings else edition.tcg_product_id,
+            }
+            if edition.tcg_last_sales:
+                entry["last_sales"] = edition.tcg_last_sales.isoformat()
+            if edition.tcg_last_listings:
+                entry["last_listings"] = edition.tcg_last_listings.isoformat()
+            result[edition.edition_id] = entry
+
+        for override in overrides:
+            entry = {
+                "product_id": NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id,
+            }
+            if override.last_sales:
+                entry["last_sales"] = override.last_sales.isoformat()
+            if override.last_listings:
+                entry["last_listings"] = override.last_listings.isoformat()
+            result.setdefault(override.edition_id, {}).setdefault("foils", {})[override.foil_id] = entry
+
+        return result
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
@@ -210,6 +275,22 @@ def clear_product_id(edition_id: str, debug: bool = False) -> None:
 # variant.
 
 def _get_foil_ids_field(edition_id: str, foil_id: str, field: str) -> str | None:
+    if is_db_mode():
+        with get_session() as session:
+            override = session.get(FoilTcgOverride, (edition_id, foil_id))
+
+            if override is None:
+                return None
+
+            if field == "product_id":
+                return NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id
+            if field == "last_sales":
+                return override.last_sales.isoformat() if override.last_sales else None
+            if field == "last_listings":
+                return override.last_listings.isoformat() if override.last_listings else None
+
+            return None
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
@@ -241,6 +322,22 @@ def _set_foil_ids_field(edition_id: str, foil_id: str, field: str, value: str, d
 def get_foil_overrides(edition_id: str) -> dict:
     """edition_id's foil-level overrides ({foil_id: {product_id, last_sales,
     last_listings}}), or {} if it has none."""
+    if is_db_mode():
+        with get_session() as session:
+            overrides = session.execute(
+                select(FoilTcgOverride).where(FoilTcgOverride.edition_id == edition_id)
+            ).scalars().all()
+
+        result = {}
+        for override in overrides:
+            entry = {"product_id": NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id}
+            if override.last_sales:
+                entry["last_sales"] = override.last_sales.isoformat()
+            if override.last_listings:
+                entry["last_listings"] = override.last_listings.isoformat()
+            result[override.foil_id] = entry
+        return result
+
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
