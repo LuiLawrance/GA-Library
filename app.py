@@ -1582,12 +1582,15 @@ async def api_admin_pricing_product_ids(request: Request):
 
     # Drives whether the Pricing page shows its live TCGPlayer controls
     # (Refresh Sales/Listings/Selected and the per-row 🔍 auto product-ID
-    # buttons) — those only apply when Postgres is the backing store, gated
-    # client-side (see updateAdminPidRefreshButton / adminPidProductIdFieldHtml
-    # in admin.js).
+    # buttons) — those only apply when Postgres is the backing store AND this
+    # instance is running locally (local_db), since the scrapers need a
+    # headless Chromium that hosted boxes like Railway can't provide. Both are
+    # gated client-side (see updateAdminPidRefreshButton /
+    # adminPidProductIdFieldHtml in admin.js).
     return JSONResponse({
         "editions": results,
         "database_mode": is_db_mode(),
+        "local_db": bool(load_settings().get("local_db", False)),
     })
 
 

@@ -84,6 +84,23 @@
                         On &mdash; store everything in flat JSON files. Off &mdash; use the Postgres database
                         at the Database Connection settings.
                     </p>
+                    <!-- Only meaningful while Use JSON is off; shown/hidden by
+                         renderLocalDbRowVisibility in admin.js. -->
+                    <div class="admin-system-option-row hidden" id="admin-system-local-db-row">
+                        <span class="admin-system-option-name">Local DB</span>
+                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_db">
+                            <span class="pill-indicator"></span>
+                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                    onclick="updateAdminSystemSetting('local_db', false)">Off</button>
+                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                    onclick="updateAdminSystemSetting('local_db', true)">On</button>
+                        </div>
+                    </div>
+                    <p class="admin-system-option-note hidden" id="admin-system-local-db-note">
+                        On &mdash; this instance runs on your local machine. Off &mdash; it's hosted (e.g. Railway),
+                        which can't launch the TCGPlayer scraper, so the Cards page hides its
+                        &#128269; auto product-ID finder and Refresh Sales/Listings/Selected buttons.
+                    </p>
                 </div>
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
                     <span class="admin-system-sync-title">Database Connection</span>
