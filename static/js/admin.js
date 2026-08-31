@@ -24,16 +24,14 @@ let adminPidFindingIds = new Set();
 // Whether Postgres is the backing store right now (Use JSON off — mirrors
 // is_db_mode() server-side), refreshed from GET /api/admin/pricing/product-ids
 // and kept live when the toggle is flipped (see updateAdminSystemSetting).
-// The live TCGPlayer controls on the Pricing page — Refresh Sales/Listings/
-// Selected and the per-row 🔍 auto product-ID buttons — are shown only when
-// this is on AND adminLocalDbOn is on.
 let adminDbModeOn = false;
 // Whether this instance is running on a local machine (System page's Local DB
-// toggle — only meaningful while Use JSON is off). Hosted deployments like
+// toggle) — independent of adminDbModeOn / Use JSON. Hosted deployments like
 // Railway can't spawn the headless-Chromium TCGPlayer scrapers, so the live
-// TCGPlayer controls (per-row 🔍 auto product-ID finder, Refresh Sales/
-// Listings/Selected) are hidden and inert unless this is on. Mirrors
-// settings.local_db, refreshed from the same two endpoints as adminDbModeOn.
+// TCGPlayer controls on the Pricing page (the per-row 🔍 auto product-ID
+// finder and Refresh Sales/Listings/Selected) are hidden and inert unless
+// this is on, in every storage mode. Mirrors settings.local_db, refreshed
+// from the same two endpoints as adminDbModeOn.
 let adminLocalDbOn = false;
 // Edition IDs currently toggled to show/edit their Curio Foil's own product
 // ID (see e.curio, from GET /api/admin/pricing/product-ids) instead of the
@@ -245,11 +243,11 @@ async function loadAdminSystemSettings() {
         adminDbModeOn = !data.use_json;
         adminLocalDbOn = !!data.local_db;
 
-        // Reveal the Local DB row BEFORE rendering its toggle — renderAdminSystemToggle
-        // measures the active button to place .pill-indicator, and a display:none row
-        // measures as 0, leaving the pill stuck at the origin until the next click.
         renderSyncPanelVisibility(!!data.use_json);
-        renderLocalDbRowVisibility(!!data.use_json);
+        // Reveal the Local DB card BEFORE rendering its toggle — renderAdminSystemToggle
+        // measures the active button to place .pill-indicator, and a display:none card
+        // measures as 0, leaving the pill stuck at the origin until the next click.
+        renderLocalDbCardVisibility(!!data.use_json);
 
         for (const key of ['store_images_locally', 'use_json', 'local_db']) {
             renderAdminSystemToggle(key, !!data[key]);
@@ -286,16 +284,73 @@ function renderSyncPanelVisibility(useJson) {
     if (panel) panel.classList.toggle('hidden', useJson);
 }
 
-// The Local DB toggle (and its explainer note) only appear once Use JSON is
-// off — it does nothing while everything is still in flat JSON. Same raw
-// use_json value / hide-when-true convention as renderSyncPanelVisibility.
-// Instant, unanimated — the row just sits inside the settings card.
-function renderLocalDbRowVisibility(useJson) {
-    for (const id of ['admin-system-local-db-row', 'admin-system-local-db-note']) {
-        const el = document.getElementById(id);
-        if (el) el.classList.toggle('hidden', useJson);
-    }
+// The Local DB card is hidden while Use JSON is on — JSON mode is the initial
+// bootstrap store and always runs on a local machine, so local_db just stays
+// at its "On" default and the card would only be noise. It surfaces once Use
+// JSON is off (the app is on Postgres, e.g. deployed to Railway) so an admin
+// can turn the Chromium-backed TCGPlayer controls off there. Note: local_db's
+// VALUE is honoured in every mode (see adminLocalDbOn's usage) — only the
+// card's visibility is gated here. Same raw use_json value / hide-when-true
+// convention as renderSyncPanelVisibility.
+function renderLocalDbCardVisibility(useJson) {
+    const card = document.getElementById('admin-system-local-db-card');
+    if (card) card.classList.toggle('hidden', useJson);
 }
+
+// ── System settings ⓘ tooltips ─────────────────────────────────────────────
+// Each .admin-system-info button carries its explainer text in data-tip; on
+// hover/focus it's shown as a single floating bubble appended to <body> (so
+// it escapes .admin-system-panels / .admin-system-options' overflow:hidden).
+// The bubble sits above the icon, flipping below when there's no room.
+let _adminSystemTipEl = null;
+
+function _showAdminSystemTip(trigger) {
+    _hideAdminSystemTip();
+
+    const text = trigger.dataset.tip;
+    if (!text) return;
+
+    const tip = document.createElement('div');
+    tip.className = 'admin-system-tip';
+    tip.textContent = text;
+    document.body.appendChild(tip);
+    _adminSystemTipEl = tip;
+
+    const anchor = trigger.getBoundingClientRect();
+    const bubble = tip.getBoundingClientRect();
+    const margin = 8;
+
+    let left = anchor.left + anchor.width / 2 - bubble.width / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - bubble.width - margin));
+
+    let top = anchor.top - bubble.height - margin;
+    if (top < margin) top = anchor.bottom + margin; // flip below when clipped at the top
+
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+    void tip.offsetWidth; // reflow at opacity:0 so the fade-in transition runs
+    tip.classList.add('visible');
+}
+
+function _hideAdminSystemTip() {
+    _adminSystemTipEl?.remove();
+    _adminSystemTipEl = null;
+}
+
+document.addEventListener('pointerover', e => {
+    const trigger = e.target.closest?.('.admin-system-info');
+    if (trigger) _showAdminSystemTip(trigger);
+});
+document.addEventListener('pointerout', e => {
+    if (e.target.closest?.('.admin-system-info')) _hideAdminSystemTip();
+});
+document.addEventListener('focusin', e => {
+    const trigger = e.target.closest?.('.admin-system-info');
+    if (trigger) _showAdminSystemTip(trigger);
+});
+document.addEventListener('focusout', e => {
+    if (e.target.closest?.('.admin-system-info')) _hideAdminSystemTip();
+});
 
 // Phase 2's vertical reveal of the sync panel — a height "wipe" (0 <-> its
 // natural height, overflow clipped), NOT a fade or a scale/zoom. Same 300ms
@@ -397,7 +452,8 @@ function _adminSyncPanelCleanupAfterHide() {
 // again, then play the resulting visual jump back down to zero so it reads
 // as a slide instead of a snap.
 function _slideSettingsCard(mutate) {
-    const card = document.getElementById('admin-system-settings');
+    const card = document.getElementById('admin-system-options-col')
+        || document.getElementById('admin-system-settings');
     if (!card) { mutate(); return Promise.resolve(); }
 
     const before = card.getBoundingClientRect().left;
@@ -483,7 +539,7 @@ async function updateAdminSystemSetting(key, value) {
 
     if (key === 'use_json') {
         animateSystemPanelsForUseJson(value);
-        renderLocalDbRowVisibility(value);
+        renderLocalDbCardVisibility(value);
     }
 
     try {
@@ -499,19 +555,19 @@ async function updateAdminSystemSetting(key, value) {
             renderAdminSystemToggle(key, prevValue);
             if (key === 'use_json') {
                 animateSystemPanelsForUseJson(prevValue);
-                renderLocalDbRowVisibility(prevValue);
+                renderLocalDbCardVisibility(prevValue);
             }
             return;
         }
 
-        // Use JSON and Local DB together gate the Pricing page's live
-        // TCGPlayer controls (they only apply when Postgres is the store and
-        // this instance is local) — reflect a flip there right away, even
-        // though that section is a different (currently hidden) tab, so it's
-        // already correct when the admin navigates back to it
-        // (switchAdminSection doesn't re-render it). The use_json path here
-        // only fires for Off → On (On → Off goes through the staged confirm,
-        // which reloads).
+        // Local DB gates the Pricing page's live TCGPlayer controls (the 🔍
+        // auto product-ID finder and the Refresh Sales/Listings/Selected
+        // buttons); adminDbModeOn tracks the storage mode for the rest of that
+        // UI. Reflect a flip there right away, even though that section is a
+        // different (currently hidden) tab, so it's already correct when the
+        // admin navigates back to it (switchAdminSection doesn't re-render
+        // it). The use_json path here only fires for Off → On (On → Off goes
+        // through the staged confirm, which reloads).
         if (key === 'use_json' || key === 'local_db') {
             if (key === 'use_json') adminDbModeOn = !value;
             if (key === 'local_db') adminLocalDbOn = value;
@@ -524,7 +580,7 @@ async function updateAdminSystemSetting(key, value) {
         renderAdminSystemToggle(key, prevValue);
         if (key === 'use_json') {
             animateSystemPanelsForUseJson(prevValue);
-            renderLocalDbRowVisibility(prevValue);
+            renderLocalDbCardVisibility(prevValue);
         }
     }
 }
@@ -2411,16 +2467,15 @@ function syncAdminPidHeaderScrollbarOffset() {
 // graying out the (inert either way) find button instead keeps the layout
 // completely static across a toggle click.
 //
-// The find button IS fully hidden (findBtnHidden) unless Use JSON is off AND
-// Local DB is on — auto-detect writes TCGPlayer product IDs (only meaningful
-// against the Postgres-backed store) by driving a headless Chromium scraper
-// that hosted deployments like Railway can't run. That's a mode-level state,
-// not a per-toggle one, so it doesn't reintroduce the resize-on-toggle
+// The find button IS fully hidden (findBtnHidden) unless Local DB is on —
+// auto-detect drives a headless Chromium scraper that hosted deployments like
+// Railway can't run (independent of the storage mode). That's a mode-level
+// state, not a per-toggle one, so it doesn't reintroduce the resize-on-toggle
 // problem above.
 function adminPidProductIdFieldHtml(e) {
     const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
     const finding = adminPidFindingIds.has(e.edition_id);
-    const findAvailable = adminDbModeOn && adminLocalDbOn;
+    const findAvailable = adminLocalDbOn;
     const findBtnHidden = findAvailable ? '' : 'hidden';
 
     const toggleHtml = e.curio ? `
@@ -2817,11 +2872,11 @@ function updateAdminPidRefreshButton() {
     const bothBtn = document.getElementById('admin-pid-refresh-btn-both');
     if (!salesBtn || !listingsBtn || !bothBtn) return;
 
-    // The live TCGPlayer refresh controls only apply when Postgres is the
-    // backing store AND this instance is local (they drive a headless
-    // Chromium scraper hosted boxes like Railway can't run) — hide the whole
+    // The live TCGPlayer refresh controls drive a headless Chromium scraper
+    // hosted boxes like Railway can't run — shown only when this instance is
+    // local (Local DB on), independent of the storage mode. Hide the whole
     // group (and keep it inert) otherwise.
-    const refreshAvailable = adminDbModeOn && adminLocalDbOn;
+    const refreshAvailable = adminLocalDbOn;
     const group = salesBtn.closest('.admin-pid-refresh-group');
     if (group) group.classList.toggle('hidden', !refreshAvailable);
 
@@ -3132,10 +3187,10 @@ async function runProductIdJob(editionIds, onResult) {
 }
 
 async function findAdminProductId(editionId) {
-    // Belt-and-suspenders — the 🔍 button is hidden and disabled unless both
-    // are on (see adminPidProductIdFieldHtml), but never run the scraper job
-    // otherwise.
-    if (!adminDbModeOn || !adminLocalDbOn) return;
+    // Belt-and-suspenders — the 🔍 button is hidden and disabled unless Local
+    // DB is on (see adminPidProductIdFieldHtml), but never run the scraper
+    // job otherwise.
+    if (!adminLocalDbOn) return;
     if (adminPidFindingIds.has(editionId)) return;
 
     adminPidFindingIds.add(editionId);
@@ -3157,9 +3212,9 @@ async function findAdminProductId(editionId) {
 }
 
 async function refreshSelectedAdminPricing(target) {
-    // The Refresh buttons are hidden and disabled unless both are on (see
+    // The Refresh buttons are hidden and disabled unless Local DB is on (see
     // updateAdminPidRefreshButton) — never start the scrape otherwise.
-    if (!adminDbModeOn || !adminLocalDbOn) return;
+    if (!adminLocalDbOn) return;
 
     const requestedIds = getAdminPidRefreshTargets();
     if (adminPidRefreshing || requestedIds.length === 0) return;

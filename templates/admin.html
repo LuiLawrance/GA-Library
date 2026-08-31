@@ -59,48 +59,52 @@
             </div>
 
             <div class="admin-system-panels" id="admin-system-panels">
-                <div class="admin-system-options" id="admin-system-settings">
-                    <div class="admin-system-option-row">
-                        <span class="admin-system-option-name">Store Images Locally</span>
-                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="store_images_locally">
-                            <span class="pill-indicator"></span>
-                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                    onclick="updateAdminSystemSetting('store_images_locally', false)">Off</button>
-                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                    onclick="updateAdminSystemSetting('store_images_locally', true)">On</button>
+                <div class="admin-system-options-col" id="admin-system-options-col">
+                    <div class="admin-system-options" id="admin-system-settings">
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">Store Images Locally</span>
+                            <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="store_images_locally">
+                                <span class="pill-indicator"></span>
+                                <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                        onclick="updateAdminSystemSetting('store_images_locally', false)">Off</button>
+                                <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                        onclick="updateAdminSystemSetting('store_images_locally', true)">On</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Use JSON
+                                <button type="button" class="admin-system-info" aria-label="About Use JSON"
+                                        data-tip="On — store everything in flat JSON files. Off — use the Postgres database at the Database Connection settings.">i</button>
+                            </span>
+                            <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
+                                <span class="pill-indicator"></span>
+                                <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                        onclick="beginUseJsonStaging()">Off</button>
+                                <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                        onclick="updateAdminSystemSetting('use_json', true)">On</button>
+                            </div>
                         </div>
                     </div>
-                    <div class="admin-system-option-row">
-                        <span class="admin-system-option-name">Use JSON</span>
-                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
-                            <span class="pill-indicator"></span>
-                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                    onclick="beginUseJsonStaging()">Off</button>
-                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                    onclick="updateAdminSystemSetting('use_json', true)">On</button>
+                    <!-- Its own card, hidden while Use JSON is on (JSON mode always runs
+                         locally, so local_db just stays at its "On" default); revealed
+                         once Use JSON is off by renderLocalDbCardVisibility in admin.js. -->
+                    <div class="admin-system-options admin-system-local-db-card hidden" id="admin-system-local-db-card">
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Local DB
+                                <button type="button" class="admin-system-info" aria-label="About Local DB"
+                                        data-tip="On — this instance can launch the TCGPlayer scraper, so the Cards page shows its 🔍 auto product-ID finder and Refresh Sales/Listings/Selected buttons. Off — it's hosted (e.g. Railway), which can't, so those buttons are hidden.">i</button>
+                            </span>
+                            <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_db">
+                                <span class="pill-indicator"></span>
+                                <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                        onclick="updateAdminSystemSetting('local_db', false)">Off</button>
+                                <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                        onclick="updateAdminSystemSetting('local_db', true)">On</button>
+                            </div>
                         </div>
                     </div>
-                    <p class="admin-system-option-note">
-                        On &mdash; store everything in flat JSON files. Off &mdash; use the Postgres database
-                        at the Database Connection settings.
-                    </p>
-                    <!-- Only meaningful while Use JSON is off; shown/hidden by
-                         renderLocalDbRowVisibility in admin.js. -->
-                    <div class="admin-system-option-row hidden" id="admin-system-local-db-row">
-                        <span class="admin-system-option-name">Local DB</span>
-                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_db">
-                            <span class="pill-indicator"></span>
-                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                    onclick="updateAdminSystemSetting('local_db', false)">Off</button>
-                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                    onclick="updateAdminSystemSetting('local_db', true)">On</button>
-                        </div>
-                    </div>
-                    <p class="admin-system-option-note hidden" id="admin-system-local-db-note">
-                        On &mdash; this instance runs on your local machine. Off &mdash; it's hosted (e.g. Railway),
-                        which can't launch the TCGPlayer scraper, so the Cards page hides its
-                        &#128269; auto product-ID finder and Refresh Sales/Listings/Selected buttons.
-                    </p>
                 </div>
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
                     <span class="admin-system-sync-title">Database Connection</span>

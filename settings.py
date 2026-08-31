@@ -21,14 +21,13 @@ SETTINGS_DEFAULTS = {
     # and, once use_json is already on disk, this default never actually
     # applies (the "missing keys" fill-in below skips keys already present).
     "use_json": True,
-    # Only meaningful when use_json is off. Marks this deployment as running
-    # on a local machine (True) vs a hosted box such as Railway (False), which
-    # can't spawn the headless-Chromium TCGPlayer scrapers. Gates the Cards
-    # page's live TCGPlayer controls client-side — the per-row 🔍 auto
-    # product-ID finder and the Refresh Sales/Listings/Selected buttons (see
-    # adminPidProductIdFieldHtml / updateAdminPidRefreshButton in admin.js).
-    # Defaults off so a fresh hosted deployment never shows controls it can't
-    # run; flip it on from the System page when running locally.
+    # Marks this deployment as running on a local machine (True) vs a hosted
+    # box such as Railway (False), which can't spawn the headless-Chromium
+    # TCGPlayer scrapers. Independent of use_json — it gates the Cards page's
+    # live TCGPlayer controls (the per-row 🔍 auto product-ID finder and the
+    # Refresh Sales/Listings/Selected buttons — see adminPidProductIdFieldHtml
+    # / updateAdminPidRefreshButton in admin.js) in every storage mode. Turn
+    # it off on a hosted deployment so it never shows controls it can't run.
     "local_db": True,
 }
 

@@ -1580,17 +1580,17 @@ async def api_admin_pricing_product_ids(request: Request):
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
 
-    # Drives whether the Pricing page shows its live TCGPlayer controls
-    # (Refresh Sales/Listings/Selected and the per-row 🔍 auto product-ID
-    # buttons) — those only apply when Postgres is the backing store AND this
-    # instance is running locally (local_db), since the scrapers need a
-    # headless Chromium that hosted boxes like Railway can't provide. Both are
-    # gated client-side (see updateAdminPidRefreshButton /
-    # adminPidProductIdFieldHtml in admin.js).
+    # local_db drives whether the Pricing page shows its live TCGPlayer
+    # controls (Refresh Sales/Listings/Selected and the per-row 🔍 auto
+    # product-ID buttons) — those need a headless Chromium that hosted boxes
+    # like Railway can't provide, independent of the storage mode. Gated
+    # client-side (see updateAdminPidRefreshButton / adminPidProductIdFieldHtml
+    # in admin.js). database_mode is still sent for the other mode-dependent
+    # bits of the Pricing UI.
     return JSONResponse({
         "editions": results,
         "database_mode": is_db_mode(),
-        "local_db": bool(load_settings().get("local_db", False)),
+        "local_db": bool(load_settings().get("local_db", True)),
     })
 
 
