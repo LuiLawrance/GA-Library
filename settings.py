@@ -29,7 +29,7 @@ SETTINGS_DEFAULTS = {
     # adminPidProductIdFieldHtml / updateAdminPidRefreshButton in admin.js).
     # Defaults off so a fresh hosted deployment never shows controls it can't
     # run; flip it on from the System page when running locally.
-    "local_db": False,
+    "local_db": True,
 }
 
 
