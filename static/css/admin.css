@@ -248,10 +248,48 @@
 }
 
 .admin-system-db-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
     font-size: 0.72rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--text-muted);
+}
+
+/* Per-field auto-save state dot (see _setAdminDbPip in admin.js). Invisible
+   when clean; amber while an edit is pending / in flight, green on save,
+   red on failure. */
+.admin-system-db-pip {
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: transparent;
+    transition: background-color 0.2s ease;
+}
+
+.admin-system-db-pip[data-state="dirty"],
+.admin-system-db-pip[data-state="saving"] {
+    background: #d9a441;
+}
+
+.admin-system-db-pip[data-state="saving"] {
+    animation: adminDbPipPulse 1s ease-in-out infinite;
+}
+
+.admin-system-db-pip[data-state="saved"] {
+    background: #3ba55d;
+}
+
+.admin-system-db-pip[data-state="error"] {
+    background: var(--error);
+}
+
+@keyframes adminDbPipPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }
 
 .admin-system-db-input {

@@ -739,10 +739,13 @@ async function portOwnerToDatabase() {
 
 // ── Database Connection panel ───────────────────────────────────────────
 // Reads/writes the pieces of DATABASE_URL via /api/admin/system/database-url
-// (see app.py). A save writes .env + os.environ and resets the engine
-// server-side — no page reload needed, but the panel refetches so the
-// fields show exactly what got parsed back out.
+// (see app.py). There is no Save button — an edit to any field auto-saves
+// (debounced): the POST writes .env + os.environ and resets the engine
+// server-side, no reload needed. Each field carries a pip
+// (.admin-system-db-pip) showing that edit's save state — amber pending,
+// green saved, red failed.
 const ADMIN_DB_FIELDS = ['host', 'port', 'database', 'username', 'password', 'sslmode'];
+const ADMIN_DB_AUTOSAVE_MS = 800;
 
 function _adminDbInput(name) {
     return document.getElementById(`admin-system-db-${name}`);
@@ -763,6 +766,138 @@ function _setAdminDbStatus(text, kind) {
     el.classList.toggle('hidden', !text);
     el.classList.toggle('admin-system-db-status-error', kind === 'error');
     el.classList.toggle('admin-system-db-status-ok', kind === 'ok');
+}
+
+// Per-field save-state dot in the field's label. state: '' (clean) | 'dirty'
+// | 'saving' | 'saved' | 'error'.
+function _setAdminDbPip(field, state) {
+    const pip = document.querySelector(`.admin-system-db-pip[data-field="${field}"]`);
+    if (pip) pip.dataset.state = state || '';
+}
+
+function _setAdminDbPips(fields, state) {
+    for (const f of fields) _setAdminDbPip(f, state);
+}
+
+function _clearAllAdminDbPips() {
+    document.querySelectorAll('.admin-system-db-pip').forEach(p => { p.dataset.state = ''; });
+}
+
+// ── Auto-save ──────────────────────────────────────────────────────────
+// Fields edited since the last successful save. The save is atomic (the
+// whole DATABASE_URL is recomposed from every field each time), so on
+// success every field in this set flips to 'saved' together, then fades
+// back to clean.
+let _adminDbDirty = new Set();
+let _adminDbAutosaveTimer = null;
+let _adminDbSaveInFlight = false;
+let _adminDbSaveQueued = false;
+let _adminDbSavedFadeTimer = null;
+
+// oninput on a field — mark it pending and (re)arm the debounce.
+function scheduleAdminDbAutosave(field) {
+    if (field) {
+        _adminDbDirty.add(field);
+        _setAdminDbPip(field, 'dirty');
+    }
+    clearTimeout(_adminDbAutosaveTimer);
+    _adminDbAutosaveTimer = setTimeout(_runAdminDbAutosave, ADMIN_DB_AUTOSAVE_MS);
+}
+
+// onchange (blur) / dropdown pick — commit now instead of waiting out the
+// debounce.
+function flushAdminDbAutosave() {
+    if (!_adminDbDirty.size) return;
+    clearTimeout(_adminDbAutosaveTimer);
+    _runAdminDbAutosave();
+}
+
+// SSL dropdown option click — the shared selectAdminPidDropdownOption writes
+// the hidden #admin-system-db-sslmode value; wrap it so a pick also triggers
+// the same auto-save as a text-field edit.
+function selectAdminDbSsl(value, label) {
+    selectAdminPidDropdownOption('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn',
+        'admin-system-db-sslmode', 'admin-system-db-ssl-label', value, label);
+    _adminDbDirty.add('sslmode');
+    _setAdminDbPip('sslmode', 'dirty');
+    flushAdminDbAutosave();
+}
+
+async function _runAdminDbAutosave() {
+    if (!_adminDbDirty.size) return;
+    if (_adminDbSaveInFlight) { _adminDbSaveQueued = true; return; }
+
+    const fields = _readAdminDbFields();
+
+    // compose_database_url (app.py) needs both host and database — don't POST
+    // an un-composable URL (it would 400 on every keystroke while a fresh
+    // connection is still half-entered). Hold the pending state and wait for
+    // more input.
+    const missing = [];
+    if (!fields.host.trim()) missing.push('Host');
+    if (!fields.database.trim()) missing.push('Database');
+    if (missing.length) {
+        _setAdminDbStatus(`Enter ${missing.join(' and ')} to save.`, null);
+        return;
+    }
+
+    const saving = new Set(_adminDbDirty);
+    _adminDbSaveInFlight = true;
+    clearTimeout(_adminDbSavedFadeTimer);
+    _setAdminDbPips(saving, 'saving');
+    _setAdminDbStatus('Saving…', null);
+
+    try {
+        const res = await fetch('/api/admin/system/database-url', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(fields),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            _setAdminDbStatus(data.detail || 'Failed to save connection.', 'error');
+            _setAdminDbPips(saving, 'error');
+            return; // leave them in _adminDbDirty so a later edit retries
+        }
+
+        // Reflect exactly what got parsed back out — but never clobber a field
+        // the user has kept editing (still dirty) or is focused in right now.
+        for (const name of ADMIN_DB_FIELDS) {
+            const input = _adminDbInput(name);
+            if (input && !_adminDbDirty.has(name) && document.activeElement !== input) {
+                input.value = data[name] ?? '';
+            }
+        }
+        _syncAdminDbSslDropdown();
+
+        for (const f of saving) _adminDbDirty.delete(f);
+        _setAdminDbPips(saving, 'saved');
+        _setAdminDbStatus('Saved.', 'ok');
+        // One shared fade timer — each save pushes it out, then it clears
+        // EVERY still-showing 'saved' pip at once (not just this save's set,
+        // or an earlier save's green dot would never fade).
+        _adminDbSavedFadeTimer = setTimeout(() => {
+            document.querySelectorAll('.admin-system-db-pip[data-state="saved"]').forEach(p => {
+                if (!_adminDbDirty.has(p.dataset.field)) p.dataset.state = '';
+            });
+            _setAdminDbStatus('', null);
+        }, 1600);
+
+        // In the staged switch flow, the checklist tracks the saved connection.
+        if (adminUseJsonStaging) refreshDbModePrecheck();
+    } catch (err) {
+        _setAdminDbStatus('Failed to save connection.', 'error');
+        _setAdminDbPips(saving, 'error');
+    } finally {
+        _adminDbSaveInFlight = false;
+        // A field edited while the request was in flight (queued flag, or
+        // still-dirty entries) — run again.
+        if (_adminDbSaveQueued || _adminDbDirty.size) {
+            _adminDbSaveQueued = false;
+            scheduleAdminDbAutosave();
+        }
+    }
 }
 
 // The SSL field is an .admin-pid-dropdown widget (rotating arrow +
@@ -787,6 +922,15 @@ function _syncAdminDbSslDropdown() {
     label.textContent = matched ? matched.textContent.trim() : (value || 'default');
 }
 
+function _resetAdminDbAutosaveState() {
+    clearTimeout(_adminDbAutosaveTimer);
+    clearTimeout(_adminDbSavedFadeTimer);
+    _adminDbDirty.clear();
+    _adminDbSaveQueued = false;
+    _clearAllAdminDbPips();
+    _setAdminDbStatus('', null);
+}
+
 async function loadAdminSystemDatabaseSettings() {
     if (!document.getElementById('admin-system-db-host')) return;
 
@@ -795,46 +939,16 @@ async function loadAdminSystemDatabaseSettings() {
         if (!res.ok) throw new Error('Failed to load connection');
         const data = await res.json();
 
+        // Direct .value assignment doesn't fire oninput, so this never trips
+        // the auto-save — but clear any stale pending state anyway.
         for (const name of ADMIN_DB_FIELDS) {
             const input = _adminDbInput(name);
             if (input) input.value = data[name] ?? '';
         }
         _syncAdminDbSslDropdown();
-        _setAdminDbStatus('', null);
+        _resetAdminDbAutosaveState();
     } catch (err) {
         // Leave fields as-is, same as the toggle-load failure path.
-    }
-}
-
-async function saveAdminSystemDatabaseSettings() {
-    const btn = document.getElementById('admin-system-db-save-btn');
-    if (btn) btn.disabled = true;
-    _setAdminDbStatus('Saving…', null);
-
-    try {
-        const res = await fetch('/api/admin/system/database-url', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(_readAdminDbFields()),
-        });
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-            _setAdminDbStatus(data.detail || 'Failed to save connection.', 'error');
-            return;
-        }
-
-        for (const name of ADMIN_DB_FIELDS) {
-            const input = _adminDbInput(name);
-            if (input) input.value = data[name] ?? '';
-        }
-        _syncAdminDbSslDropdown();
-        _setAdminDbStatus('Saved — connection updated.', 'ok');
-    } catch (err) {
-        _setAdminDbStatus('Failed to save connection.', 'error');
-    } finally {
-        if (btn) btn.disabled = false;
-        if (adminUseJsonStaging) refreshDbModePrecheck();
     }
 }
 
@@ -4140,6 +4254,7 @@ function initAdmin() {
     adminPidAddEntryPending = false;
     adminPidBulkPasteOpen = false;
     adminPidBulkPastePending = false;
+    _resetAdminDbAutosaveState();
 
     // Renders the deep-linked section/sub-view directly — no fade/resize
     // animation here, since this is the page settling into its starting
