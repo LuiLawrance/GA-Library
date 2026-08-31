@@ -17,6 +17,43 @@
     <div class="admin-content">
         <div class="admin-section hidden" id="admin-section-system">
             <span class="admin-section-title">System</span>
+
+            <!-- Staged confirmation shown while Use JSON is being switched off.
+                 Nothing is written until Confirm — see beginUseJsonStaging in
+                 admin.js and _db_mode_switch_blocker in app.py. The -wrap is
+                 the height-wipe clipper (see _playStagingBarWipe); the -bar
+                 inside keeps its natural layout. -->
+            <div class="admin-system-staging-wrap hidden" id="admin-system-staging-wrap">
+              <div class="admin-system-staging-bar" id="admin-system-staging-bar">
+                <div class="admin-system-staging-main">
+                    <span class="admin-system-staging-title">Switch to database mode?</span>
+                    <p class="admin-system-staging-msg">
+                        Use JSON is still <b>on</b>. Set up and test the database connection below, copy the
+                        owner account across, then confirm to finish the switch. Cancelling keeps everything on JSON.
+                    </p>
+                    <ul class="admin-system-staging-checklist" id="admin-system-staging-checklist">
+                        <li data-check="connection">
+                            <span class="admin-system-staging-mark"></span>
+                            <span class="admin-system-staging-check-label">Database connection</span>
+                        </li>
+                        <li data-check="owner">
+                            <span class="admin-system-staging-mark"></span>
+                            <span class="admin-system-staging-check-label">Owner account in database</span>
+                        </li>
+                    </ul>
+                    <p class="admin-system-staging-error hidden" id="admin-system-staging-error"></p>
+                </div>
+                <div class="admin-system-staging-actions">
+                    <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                            onclick="cancelUseJsonStaging()">Cancel</button>
+                    <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
+                            id="admin-system-staging-confirm-btn" onclick="confirmUseJsonStaging()" disabled>
+                        Confirm &mdash; turn off Use JSON
+                    </button>
+                </div>
+              </div>
+            </div>
+
             <div class="admin-system-panels" id="admin-system-panels">
                 <div class="admin-system-options" id="admin-system-settings">
                     <div class="admin-system-option-row">
@@ -34,21 +71,15 @@
                         <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
                             <span class="pill-indicator"></span>
                             <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                    onclick="updateAdminSystemSetting('use_json', false)">Off</button>
+                                    onclick="beginUseJsonStaging()">Off</button>
                             <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
                                     onclick="updateAdminSystemSetting('use_json', true)">On</button>
                         </div>
                     </div>
-                    <div class="admin-system-option-row hidden" id="admin-system-local-database-row">
-                        <span class="admin-system-option-name">Local Database</span>
-                        <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_database">
-                            <span class="pill-indicator"></span>
-                            <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
-                                    onclick="updateAdminSystemSetting('local_database', false)">Off</button>
-                            <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
-                                    onclick="updateAdminSystemSetting('local_database', true)">On</button>
-                        </div>
-                    </div>
+                    <p class="admin-system-option-note">
+                        On &mdash; store everything in flat JSON files. Off &mdash; use the Postgres database
+                        at the Database Connection settings.
+                    </p>
                 </div>
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
                     <span class="admin-system-sync-title">Database Connection</span>
@@ -114,6 +145,14 @@
                                 id="admin-system-db-save-btn" onclick="saveAdminSystemDatabaseSettings()">Save</button>
                     </div>
                     <p class="admin-system-db-status hidden" id="admin-system-db-status"></p>
+
+                    <div class="admin-system-db-actions">
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                id="admin-system-db-port-owner-btn" onclick="portOwnerToDatabase()">
+                            Port Owner &rarr; Database
+                        </button>
+                    </div>
+                    <p class="admin-system-db-status hidden" id="admin-system-db-port-owner-status"></p>
 
                     <div class="admin-system-wipe-divider"></div>
                     <span class="admin-system-sync-title">Sync JSON &rarr; Database</span>

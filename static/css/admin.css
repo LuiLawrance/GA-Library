@@ -86,7 +86,7 @@
 /* Centered like a standalone options menu, rather than left-anchored like
    the Cards/Users sections' full-width working areas — System has no list
    or grid to fill the space, just a short stack of settings rows (plus,
-   once Local Database is on, the Sync panel beside it — see
+   once Use JSON is off, the Sync panel beside it — see
    .admin-system-sync-panel below). justify-content:center keeps the pair
    centered as a unit the same way the settings card alone used to center
    itself via margin:auto; align-items:flex-start so the shorter panel
@@ -134,6 +134,17 @@
     color: var(--text);
 }
 
+/* Explainer line under a toggle, inside the same bordered options card —
+   sits flush like a row (matching padding) but reads as secondary. The row
+   above keeps its own border-bottom as the divider; the note adds none. */
+.admin-system-option-note {
+    margin: 0;
+    padding: 12px 16px;
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
 /* Reuses .admin-pid-source-toggle/-btn (the Cards section's Regular/Discord
    pill) as-is for the sliding On/Off look — .admin-system-option-toggle only
    adds the data-setting hook loadAdminSystemSettings/updateAdminSystemSetting
@@ -142,13 +153,11 @@
     flex-shrink: 0;
 }
 
-/* Appears beside .admin-system-options once Use JSON is off — same trigger
-   as the Local Database row itself (see animateSyncPanelVisibility in
-   admin.js) — and stays visible regardless of Local Database's own on/off
-   state, since syncing is also useful to pre-populate Postgres before
-   switching Local Database on, not just after. Holds the Database
-   Connection editor plus the Sync / Wipe actions. Same bordered-card look
-   as the settings options card. */
+/* Appears beside .admin-system-options once Use JSON is off (see
+   renderSyncPanelVisibility / animateSystemPanelsForUseJson in admin.js),
+   and also while a switch is being staged so the connection can be set up
+   first. Holds the Database Connection editor plus the Sync / Wipe actions.
+   Same bordered-card look as the settings options card. */
 .admin-system-sync-panel {
     display: flex;
     flex-direction: column;
@@ -310,6 +319,139 @@
 
 .admin-system-db-status.admin-system-db-status-ok {
     color: var(--accent);
+}
+
+/* ── Use JSON → database-mode staged confirmation ────────────────────────
+   Shown above .admin-system-panels while the Off switch is pending (see
+   beginUseJsonStaging in admin.js) — nothing is written until Confirm. Same
+   bordered-card language as the panels below it, with an --accent left edge
+   so it reads as an active blocking step rather than a passive notice. */
+
+/* Height-wipe clipper for the bar's open/close animation (_playStagingBarWipe
+   in admin.js animates this element's height 0 ↔ natural). overflow:hidden so
+   the bar is revealed/hidden as a vertical wipe; flex-shrink:0 because
+   #admin-section-system is a definite-height flex column and its
+   .admin-system-panels child can make total content overflow — without this,
+   an overflow:hidden flex item's automatic minimum size is 0 and the bar
+   would collapse under that shrink pressure instead of holding its height. */
+.admin-system-staging-wrap {
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.admin-system-staging-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px 24px;
+    width: 100%;
+    max-width: 760px;
+    margin: 24px auto 0;
+    padding: 16px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-sm);
+}
+
+.admin-system-staging-main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1 1 340px;
+    min-width: 0;
+}
+
+.admin-system-staging-title {
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.admin-system-staging-msg {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+.admin-system-staging-checklist {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.admin-system-staging-checklist li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.admin-system-staging-checklist li[data-state="ok"] {
+    color: var(--text);
+}
+
+.admin-system-staging-checklist li[data-state="fail"] {
+    color: var(--error);
+}
+
+.admin-system-staging-mark {
+    position: relative;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.admin-system-staging-checklist li[data-state="pending"] .admin-system-staging-mark {
+    border-style: dashed;
+}
+
+.admin-system-staging-checklist li[data-state="ok"] .admin-system-staging-mark {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.admin-system-staging-checklist li[data-state="ok"] .admin-system-staging-mark::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 3px;
+    height: 7px;
+    border: solid var(--bg);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.admin-system-staging-checklist li[data-state="fail"] .admin-system-staging-mark {
+    border-color: var(--error);
+}
+
+.admin-system-staging-error {
+    margin: 4px 0 0;
+    font-size: 0.76rem;
+    line-height: 1.4;
+    color: var(--error);
+    word-break: break-word;
+}
+
+.admin-system-staging-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.admin-system-staging-actions .admin-pid-refresh-btn {
+    white-space: nowrap;
 }
 
 /* Sits inline to the left of the card search box (in .admin-cards-header-row

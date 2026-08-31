@@ -125,6 +125,55 @@ def migrate_users() -> set[str]:
     return set(users_data.keys())
 
 
+def find_owner_username() -> str | None:
+    """The username whose auth_type is "owner" in USERS.json (the first account
+    ever created — see user.py's RANK_ORDER note), or None if there is no owner
+    account yet."""
+    users_data = _load(DIR_GENERAL / "USERS.json")
+    return next(
+        (username for username, info in users_data.items() if info.get("auth_type") == "owner"),
+        None,
+    )
+
+
+def port_owner_to_database() -> dict:
+    """Upsert just the auth_type=="owner" account from USERS.json into Postgres.
+
+    Backs the Admin -> System panel's "turn Use JSON off" confirmation: in DB
+    mode every request re-checks Postgres for the caller's account and rank
+    (get_current_user / require_admin in app.py) and USERS.json is never
+    consulted — so if the owner isn't already a row in Postgres, the admin who
+    flips the switch 403-locks themselves out of the very panel that could fix
+    it. Needs DATABASE_URL set and reachable; does NOT require is_db_mode().
+
+    Returns {"ok": bool, "owner": str | None, "error": str | None}.
+    """
+    users_data = _load(DIR_GENERAL / "USERS.json")
+    owner = next(
+        (username for username, info in users_data.items() if info.get("auth_type") == "owner"),
+        None,
+    )
+
+    if owner is None:
+        return {"ok": False, "owner": None, "error": "No owner account found in USERS.json."}
+
+    info = users_data[owner]
+    row = {
+        "username": owner,
+        "password_hash": info["password"],
+        "auth_type": "owner",
+        "notes": info.get("notes", []),
+    }
+
+    try:
+        with get_session() as session:
+            _upsert(session, User, [row], index_elements=["username"])
+    except Exception as exc:
+        return {"ok": False, "owner": owner, "error": str(exc)}
+
+    return {"ok": True, "owner": owner, "error": None}
+
+
 # Admin settings are not migrated — SETTINGS.json is the sole source of truth
 # for them in every mode (see settings.py). The app_settings table was
 # dropped in migration a1b2c3d4e5f6.

@@ -21,6 +21,13 @@ let adminPidSetFilterOpen = false;
 let adminPidRarityFilter = new Set();
 let adminPidRarityFilterOpen = false;
 let adminPidFindingIds = new Set();
+// Whether Postgres is the backing store right now (Use JSON off — mirrors
+// is_db_mode() server-side), refreshed from GET /api/admin/pricing/product-ids
+// and kept live when the toggle is flipped (see updateAdminSystemSetting).
+// The live TCGPlayer controls on the Pricing page — Refresh Sales/Listings/
+// Selected and the per-row 🔍 auto product-ID buttons — are shown only when
+// this is on (see updateAdminPidRefreshButton / adminPidProductIdFieldHtml).
+let adminDbModeOn = false;
 // Edition IDs currently toggled to show/edit their Curio Foil's own product
 // ID (see e.curio, from GET /api/admin/pricing/product-ids) instead of the
 // edition's regular one, and to filter the detail panel's Sales/Listings
@@ -228,11 +235,11 @@ async function loadAdminSystemSettings() {
         const data = await res.json();
 
         adminSystemLoaded = true;
+        adminDbModeOn = !data.use_json;
 
-        for (const key of ['store_images_locally', 'use_json', 'local_database']) {
+        for (const key of ['store_images_locally', 'use_json']) {
             renderAdminSystemToggle(key, !!data[key]);
         }
-        renderLocalDatabaseVisibility(!!data.use_json);
         renderSyncPanelVisibility(!!data.use_json);
         loadAdminSystemDatabaseSettings();
     } catch (err) {
@@ -254,81 +261,25 @@ function renderAdminSystemToggle(key, value) {
     positionPillIndicator(toggle);
 }
 
-// Use JSON is the master switch — On hides Local Database entirely (and
-// forces JSON storage server-side regardless of Local Database's own saved
-// value); Off reveals it so it can be turned on. Sets the row's visibility
-// instantly, no animation — used when first loading the panel, matching
-// renderAdminSystemToggle's own unanimated state-setting for the same
-// reason (nothing should animate in on page load, only in response to an
-// actual toggle click — see animateLocalDatabaseVisibility for that).
-function renderLocalDatabaseVisibility(useJson) {
-    const row = document.getElementById('admin-system-local-database-row');
-    if (!row) return;
-
-    row.classList.toggle('hidden', useJson);
-
-    if (!useJson) {
-        // Row just became visible. loadAdminSystemSettings already called
-        // renderAdminSystemToggle('local_database', ...) — which positions
-        // this same toggle's pill indicator — BEFORE this function runs, so
-        // that positioning happened while the row was still display:none
-        // (offsetWidth/offsetHeight read 0 then) and landed the pill at a
-        // bogus 0x0. Reposition now that layout actually has it visible —
-        // same fix animateLocalDatabaseVisibility already applies for the
-        // click-triggered path below.
-        positionPillIndicator(row.querySelector('.admin-system-option-toggle'));
-    }
-}
-
-// Reveals/hides the Local Database row — animates the settings card
-// (#admin-system-settings, the bordered box holding every row) reshaping
-// around it via the shared animateBoxResize (see modal-anim.js), same
-// technique dgaSwitchImportExportTab uses for its own panel swap. Called as
-// the "vertical" (phase 2) half of animateSystemPanelsForUseJson's
-// two-phase sequence below, alongside _playSyncPanelWipe (and returns that
-// resize's own promise so that sequence can await it), but kept as its own
-// function since nothing else here needs to know it's also doing this.
-function animateLocalDatabaseVisibility(useJson) {
-    const box = document.getElementById('admin-system-settings');
-    const row = document.getElementById('admin-system-local-database-row');
-    if (!box || !row) return Promise.resolve();
-
-    const done = animateBoxResize(box, () => {
-        row.classList.toggle('hidden', useJson);
-    });
-
-    if (!useJson) {
-        // Row just became visible — its own Off/On pill indicator couldn't
-        // be measured while display:none (offsetWidth reads 0 then), so
-        // position it now that layout has it visible.
-        positionPillIndicator(row.querySelector('.admin-system-option-toggle'));
-    }
-
-    return done;
-}
-
-// The Sync panel tracks Use JSON alone, same as the Local Database row —
-// it stays visible whether Local Database itself is on or off, since
-// syncing is also useful to pre-populate Postgres BEFORE switching Local
-// Database on, not just after. Takes the raw use_json value, same
-// hide-when-true convention as renderLocalDatabaseVisibility right above
-// (every call site already has that value on hand, not its inverse).
-// Instant, unanimated — see renderLocalDatabaseVisibility for why load-time
-// state-setting never animates. No pill indicator inside this panel to
-// reposition on reveal (unlike renderLocalDatabaseVisibility) — just text
-// and a button.
+// The Database Connection / Sync / Wipe panel is shown whenever Use JSON is
+// off (the app is on Postgres), and also stays available while a switch is
+// being staged so the connection can be set up first. Takes the raw
+// use_json value (hide-when-true — every call site has that value on hand,
+// not its inverse). Instant, unanimated — used on page load, where nothing
+// should animate in (only a live toggle click animates, via
+// animateSystemPanelsForUseJson).
 function renderSyncPanelVisibility(useJson) {
     const panel = document.getElementById('admin-system-sync-panel');
     if (panel) panel.classList.toggle('hidden', useJson);
 }
 
 // Phase 2's vertical reveal of the sync panel — a height "wipe" (0 <-> its
-// natural height, overflow clipped), NOT a fade or a scale/zoom. Same
-// technique and 300ms timing as the animateBoxResize (see modal-anim.js)
-// that grows the settings card for the Local Database row, so
-// animateSystemPanelsForUseJson can run the two together and have them wipe
-// down / collapse up in lockstep. Only the height moves here — the panel's
-// horizontal space is already claimed in phase 1 (see _slideSettingsCard).
+// natural height, overflow clipped), NOT a fade or a scale/zoom. Same 300ms
+// height-animation technique as the staging confirm bar's own wipe
+// (_playStagingBarWipe), so when a switch is being staged the bar and this
+// panel open / collapse in lockstep. Only the height moves here — the
+// panel's horizontal space is already claimed in phase 1 (see
+// _slideSettingsCard).
 const ADMIN_SYNC_PANEL_WIPE_MS = 300;
 
 // Tracks the panel's in-flight wipe (only ever one such element, so a
@@ -455,22 +406,19 @@ function _slideSettingsCard(mutate) {
 // from under the latest one (rapid double-toggling the switch).
 let _adminSystemPanelsGen = 0;
 
-// Click-triggered reveal/hide of everything that only applies once Use JSON
-// is off: the Local Database toggle row (inside the settings card) and the
-// combined Database Connection / Sync / Wipe panel beside it. Two distinct
-// phases, not everything at once — the menus settle their HORIZONTAL
-// positions first, then the new content wipes in VERTICALLY:
+// Click-triggered reveal/hide of the Database Connection / Sync / Wipe panel
+// beside the settings card, which only applies once Use JSON is off. Two
+// distinct phases, not everything at once — the menus settle their HORIZONTAL
+// positions first, then the panel wipes in VERTICALLY:
 //
 //   Showing:  1) un-hide the sync panel but pin it to zero height, so it
 //             claims only its width; the settings card slides across to its
 //             paired position around that (see _slideSettingsCard).
-//             2) THEN the Local Database row and the sync panel wipe open
-//             downward together (animateLocalDatabaseVisibility /
-//             _playSyncPanelWipe — same 300ms height animation).
+//             2) THEN the sync panel wipes open downward (_playSyncPanelWipe).
 //
-//   Hiding:   the exact reverse — 1) the row and panel collapse their
-//             height to zero, 2) THEN the panel is dropped (releasing its
-//             width) and the settings card slides back to centered.
+//   Hiding:   the exact reverse — 1) the panel collapses its height to zero,
+//             2) THEN it's dropped (releasing its width) and the settings
+//             card slides back to centered.
 async function animateSystemPanelsForUseJson(useJson) {
     const syncPanel = document.getElementById('admin-system-sync-panel');
     if (!syncPanel) return;
@@ -486,15 +434,9 @@ async function animateSystemPanelsForUseJson(useJson) {
             syncPanel.style.overflow = 'hidden';
         });
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
-        await Promise.all([
-            animateLocalDatabaseVisibility(false),
-            _playSyncPanelWipe(true),
-        ]);
+        await _playSyncPanelWipe(true);
     } else {
-        await Promise.all([
-            animateLocalDatabaseVisibility(true),
-            _playSyncPanelWipe(false),
-        ]);
+        await _playSyncPanelWipe(false);
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
         await _slideSettingsCard(() => {
             syncPanel.classList.add('hidden');
@@ -505,6 +447,13 @@ async function animateSystemPanelsForUseJson(useJson) {
 }
 
 async function updateAdminSystemSetting(key, value) {
+    // Clicking "On" while a Use JSON → database-mode switch is still staged
+    // just backs the staging out — nothing was written to undo.
+    if (key === 'use_json' && value === true && adminUseJsonStaging) {
+        cancelUseJsonStaging();
+        return;
+    }
+
     const prevValue = document.querySelector(`.admin-system-option-toggle[data-setting="${key}"] .active`)?.dataset.value === 'true';
     renderAdminSystemToggle(key, value);
 
@@ -526,6 +475,20 @@ async function updateAdminSystemSetting(key, value) {
             if (key === 'use_json') {
                 animateSystemPanelsForUseJson(prevValue);
             }
+            return;
+        }
+
+        // Use JSON gates the Pricing page's live TCGPlayer controls (they only
+        // apply when Postgres is the store) — reflect a flip there right away,
+        // even though that section is a different (currently hidden) tab, so
+        // it's already correct when the admin navigates back to it
+        // (switchAdminSection doesn't re-render it). This path only fires for
+        // Off → On (On → Off goes through the staged confirm, which reloads).
+        if (key === 'use_json') {
+            adminDbModeOn = !value;
+            if (adminPidLoaded) renderAdminPricingIds();
+            if (adminPidDetailSelected) renderAdminPricingImageCol();
+            updateAdminPidRefreshButton();
         }
     } catch (err) {
         alert('Failed to update setting.');
@@ -533,6 +496,244 @@ async function updateAdminSystemSetting(key, value) {
         if (key === 'use_json') {
             animateSystemPanelsForUseJson(prevValue);
         }
+    }
+}
+
+// ── Use JSON → database mode: staged confirmation ───────────────────────
+// Turning Use JSON off switches the whole app onto Postgres, where auth
+// reads it and never USERS.json — so doing it before the owner account
+// exists in Postgres 403-locks the admin out of the console (and out of the
+// Database Connection panel that could fix a bad URL). See
+// _db_mode_switch_blocker in app.py for the matching server guard.
+//
+// So the Off button doesn't write anything: it enters this staged state
+// instead. The Database Connection / Sync panel is revealed exactly as if
+// use_json were already off (reusing animateSystemPanelsForUseJson), a
+// confirm bar appears on top with a live checklist, and nothing is persisted
+// until Confirm. Cancel — or clicking On — backs out with no server write.
+let adminUseJsonStaging = false;
+
+// Vertical height "wipe" for the confirm bar — the same technique and 300ms
+// timing as _playSyncPanelWipe (the Database Connection panel just below it),
+// so the bar and the panels it sits above open / collapse in lockstep. Runs
+// on the #admin-system-staging-wrap clipper (overflow:hidden, flex-shrink:0 in
+// CSS) rather than the bar itself: the bar keeps its natural flex layout while
+// only the wrap's height animates 0 ↔ natural. entering: 0 → natural; leaving:
+// natural → 0 (the caller adds .hidden to the wrap afterwards, then calls
+// _stagingBarWipeCleanup). One such element ever, so a single module-level
+// handle tracks the in-flight anim — a rapid re-toggle cancels the previous.
+const ADMIN_STAGING_BAR_WIPE_MS = 300;
+let _adminStagingBarAnim = null;
+
+function _playStagingBarWipe(entering) {
+    const wrap = document.getElementById('admin-system-staging-wrap');
+    if (!wrap) return Promise.resolve();
+
+    _adminStagingBarAnim?.cancel();
+
+    // Clear any height pin a previous wipe left so the natural (open) height
+    // reads true.
+    wrap.style.height = '';
+    const openHeight = wrap.getBoundingClientRect().height;
+
+    const anim = wrap.animate(
+        entering
+            ? [{height: '0px'}, {height: openHeight + 'px'}]
+            : [{height: openHeight + 'px'}, {height: '0px'}],
+        {
+            duration: ADMIN_STAGING_BAR_WIPE_MS,
+            easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+            // backwards: hold the 0 frame from the instant this is called so an
+            // opening bar never flashes at full height first. forwards: hold the
+            // 0 frame after a closing wipe until the caller adds .hidden.
+            fill: entering ? 'backwards' : 'forwards',
+        },
+    );
+    _adminStagingBarAnim = anim;
+
+    // Timer, not anim.finished — see animateBoxResize's comment on why.
+    return sleep(ADMIN_STAGING_BAR_WIPE_MS).then(() => {
+        if (_adminStagingBarAnim !== anim) return; // superseded by a later toggle
+        if (entering) {
+            anim.cancel();
+            _adminStagingBarAnim = null;
+            wrap.style.height = '';
+        }
+        // Leaving: keep the held 0-height state until .hidden is in place —
+        // _stagingBarWipeCleanup releases it.
+    });
+}
+
+// Release a closing wipe's held 0-height state — call only once .hidden is on
+// the wrap, never before (releasing early flashes it back to full height).
+function _stagingBarWipeCleanup() {
+    _adminStagingBarAnim?.cancel();
+    _adminStagingBarAnim = null;
+    const wrap = document.getElementById('admin-system-staging-wrap');
+    if (wrap) wrap.style.height = '';
+}
+
+function beginUseJsonStaging() {
+    if (adminUseJsonStaging) return;
+    adminUseJsonStaging = true;
+
+    renderAdminSystemToggle('use_json', false);   // visual pill only — no fetch
+    animateSystemPanelsForUseJson(false);          // reveal the DB Connection panel
+
+    const wrap = document.getElementById('admin-system-staging-wrap');
+    if (wrap) {
+        wrap.classList.remove('hidden');
+        _playStagingBarWipe(true);                  // wipe down, concurrent with the panels
+    }
+    _setStagingError('');
+    refreshDbModePrecheck();
+}
+
+async function cancelUseJsonStaging() {
+    if (!adminUseJsonStaging) return;
+    adminUseJsonStaging = false;
+
+    renderAdminSystemToggle('use_json', true);
+    animateSystemPanelsForUseJson(true);
+    _setStagingError('');
+
+    const wrap = document.getElementById('admin-system-staging-wrap');
+    if (wrap) {
+        await _playStagingBarWipe(false);          // wipe up, concurrent with the panels
+        if (adminUseJsonStaging) return;           // re-opened mid-collapse — leave it shown
+        wrap.classList.add('hidden');
+        _stagingBarWipeCleanup();
+    }
+}
+
+function _setStagingError(text) {
+    const el = document.getElementById('admin-system-staging-error');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+}
+
+// state: 'ok' | 'pending' | 'fail'
+function _setStagingCheck(name, state, label) {
+    const li = document.querySelector(`#admin-system-staging-checklist li[data-check="${name}"]`);
+    if (!li) return;
+    li.dataset.state = state;
+    if (label) {
+        const labelEl = li.querySelector('.admin-system-staging-check-label');
+        if (labelEl) labelEl.textContent = label;
+    }
+}
+
+// Polls the server for whether it's safe to flip into DB mode and drives the
+// checklist + Confirm gating. Called on entry, and again after every Save /
+// Test / Port Owner so the bar tracks edits live. No-ops once staging ends.
+async function refreshDbModePrecheck() {
+    if (!adminUseJsonStaging) return;
+
+    const confirmBtn = document.getElementById('admin-system-staging-confirm-btn');
+    if (confirmBtn) confirmBtn.disabled = true;
+    _setStagingCheck('connection', 'pending');
+    _setStagingCheck('owner', 'pending');
+
+    let data;
+    try {
+        const res = await fetch('/api/admin/system/db-mode-precheck');
+        if (!res.ok) throw new Error();
+        data = await res.json();
+    } catch (err) {
+        _setStagingCheck('connection', 'fail', 'Database connection (check failed)');
+        _setStagingCheck('owner', 'fail');
+        return;
+    }
+    if (!adminUseJsonStaging) return; // cancelled while the request was in flight
+
+    _setStagingCheck(
+        'connection',
+        data.connection_ok ? 'ok' : 'fail',
+        data.connection_ok
+            ? 'Database connection'
+            : (data.database_url_set ? 'Database connection (failed)' : 'Database connection (not configured)'),
+    );
+
+    // No owner account anywhere ⇒ nothing to copy, not a blocker (first
+    // signup in DB mode becomes owner).
+    const ownerSatisfied = data.owner_in_db || !data.owner_username;
+    _setStagingCheck(
+        'owner',
+        ownerSatisfied ? 'ok' : 'fail',
+        data.owner_username
+            ? `Owner account "${data.owner_username}" in database`
+            : 'Owner account in database (none to copy)',
+    );
+
+    if (confirmBtn) confirmBtn.disabled = !(data.connection_ok && ownerSatisfied);
+}
+
+async function confirmUseJsonStaging() {
+    const confirmBtn = document.getElementById('admin-system-staging-confirm-btn');
+    if (confirmBtn) confirmBtn.disabled = true;
+    _setStagingError('');
+
+    try {
+        const res = await fetch('/api/admin/settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({use_json: false}),
+        });
+
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            _setStagingError(data.detail || 'Failed to turn off Use JSON.');
+            if (confirmBtn) confirmBtn.disabled = false;
+            return;
+        }
+
+        // DB mode is live now — reload so checkAuth() (app.js) re-runs against
+        // Postgres instead of the page carrying stale JSON-mode state.
+        window.location.reload();
+    } catch (err) {
+        _setStagingError('Failed to turn off Use JSON.');
+        if (confirmBtn) confirmBtn.disabled = false;
+    }
+}
+
+// Port Owner → Database button (inside the Database Connection panel). Copies
+// just the auth_type=="owner" account from USERS.json into Postgres via
+// /api/admin/system/port-owner-to-database. Idempotent (upsert), so it's also
+// safe to press outside the staging flow.
+async function portOwnerToDatabase() {
+    const btn = document.getElementById('admin-system-db-port-owner-btn');
+    const status = document.getElementById('admin-system-db-port-owner-status');
+
+    if (btn) btn.disabled = true;
+    if (status) {
+        status.textContent = 'Copying owner account…';
+        status.classList.remove('hidden', 'admin-system-db-status-error', 'admin-system-db-status-ok');
+    }
+
+    try {
+        const res = await fetch('/api/admin/system/port-owner-to-database', {method: 'POST'});
+        const data = await res.json().catch(() => ({}));
+
+        if (status) {
+            status.classList.remove('hidden');
+            if (!res.ok) {
+                status.textContent = data.detail || 'Failed to copy the owner account.';
+                status.classList.add('admin-system-db-status-error');
+            } else {
+                status.textContent = `Owner account "${data.owner}" copied to the database.`;
+                status.classList.add('admin-system-db-status-ok');
+            }
+        }
+    } catch (err) {
+        if (status) {
+            status.classList.remove('hidden');
+            status.textContent = 'Failed to copy the owner account.';
+            status.classList.add('admin-system-db-status-error');
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+        refreshDbModePrecheck();
     }
 }
 
@@ -633,6 +834,7 @@ async function saveAdminSystemDatabaseSettings() {
         _setAdminDbStatus('Failed to save connection.', 'error');
     } finally {
         if (btn) btn.disabled = false;
+        if (adminUseJsonStaging) refreshDbModePrecheck();
     }
 }
 
@@ -658,6 +860,7 @@ async function testAdminSystemDatabaseConnection() {
         _setAdminDbStatus('Connection failed.', 'error');
     } finally {
         if (btn) btn.disabled = false;
+        if (adminUseJsonStaging) refreshDbModePrecheck();
     }
 }
 
@@ -1170,6 +1373,7 @@ async function loadAdminPricingIds() {
         const data = await res.json();
 
         adminPidData = data.editions || [];
+        adminDbModeOn = !!data.database_mode;
         adminPidLoaded = true;
         renderAdminPricingIds();
         loadAdminFeaturedSets();
@@ -2029,9 +2233,15 @@ function syncAdminPidHeaderScrollbarOffset() {
 // way to disambiguate which TCGPlayer listing is the Curio Foil one), so
 // graying out the (inert either way) find button instead keeps the layout
 // completely static across a toggle click.
+//
+// The find button IS fully hidden (findBtnHidden) when Use JSON is on —
+// auto-detect writes TCGPlayer product IDs and only makes sense against the
+// Postgres-backed store. That's a mode-level state, not a per-toggle one, so
+// it doesn't reintroduce the resize-on-toggle problem above.
 function adminPidProductIdFieldHtml(e) {
     const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
     const finding = adminPidFindingIds.has(e.edition_id);
+    const findBtnHidden = adminDbModeOn ? '' : 'hidden';
 
     const toggleHtml = e.curio ? `
         <button type="button" class="admin-pid-curio-toggle ${curioView ? 'active' : ''}"
@@ -2055,7 +2265,7 @@ function adminPidProductIdFieldHtml(e) {
                        title="${noListings ? 'Marked as having no TCGPlayer listings' : 'Curio Foil'}"
                        onkeydown="if (event.key === 'Enter') this.blur()"
                        onblur="saveAdminFoilProductId(this)">
-                <button type="button" class="admin-pid-find-btn" disabled
+                <button type="button" class="admin-pid-find-btn ${findBtnHidden}" disabled
                         title="Curio Foils require manual entry — auto-detect disabled">🔍</button>
             </div>
         `;
@@ -2082,9 +2292,9 @@ function adminPidProductIdFieldHtml(e) {
                    ${finding ? 'disabled' : ''}
                    onkeydown="if (event.key === 'Enter') this.blur()"
                    onblur="saveAdminProductId(this)">
-            <button type="button" class="admin-pid-find-btn ${finding ? 'finding' : ''}"
+            <button type="button" class="admin-pid-find-btn ${finding ? 'finding' : ''} ${findBtnHidden}"
                     title="${noListings ? 'Marked as having no TCGPlayer listings — auto-detect disabled' : 'Auto-detect from TCGPlayer'}"
-                    ${finding || noListings ? 'disabled' : ''}
+                    ${finding || noListings || !adminDbModeOn ? 'disabled' : ''}
                     onclick="findAdminProductId('${escapeHtml(e.edition_id)}')">${finding ? '…' : noListings ? '🚫' : '🔍'}</button>
         </div>
     `;
@@ -2427,8 +2637,13 @@ function updateAdminPidRefreshButton() {
     const bothBtn = document.getElementById('admin-pid-refresh-btn-both');
     if (!salesBtn || !listingsBtn || !bothBtn) return;
 
+    // The live TCGPlayer refresh controls only apply when Postgres is the
+    // backing store — hide the whole group (and keep it inert) otherwise.
+    const group = salesBtn.closest('.admin-pid-refresh-group');
+    if (group) group.classList.toggle('hidden', !adminDbModeOn);
+
     const targets = getAdminPidRefreshTargets();
-    const disabled = targets.length === 0 || adminPidRefreshing;
+    const disabled = !adminDbModeOn || targets.length === 0 || adminPidRefreshing;
     salesBtn.disabled = disabled;
     listingsBtn.disabled = disabled;
     bothBtn.disabled = disabled;
@@ -3896,6 +4111,8 @@ function initAdmin() {
     syncAdminUrl();
 
     adminSystemLoaded = false;
+    adminUseJsonStaging = false;
+    _adminStagingBarAnim = null;
     adminUsersLoaded = false;
     adminUsersData = [];
     adminUserDetailSelected = null;
@@ -3903,6 +4120,7 @@ function initAdmin() {
     adminUserDetailDecks = null;
     adminPidLoaded = false;
     adminPidData = [];
+    adminDbModeOn = false;
     adminPidSelected = new Set();
     adminSetsSelectedSlug = null;
     adminPidRefreshStatus = {};

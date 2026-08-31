@@ -1054,6 +1054,80 @@ async def api_admin_wipe_database(request: Request):
 _DOTENV_PATH = ".env"
 
 
+def _test_database_connection(url: str | None) -> tuple[bool, str | None]:
+    """(ok, error) for a plain `SELECT 1` against `url` on a short-lived,
+    always-disposed engine — shared by the Test button, the DB-mode precheck,
+    and the settings guard so they all probe the connection the same way."""
+    if not url:
+        return False, "No connection configured."
+
+    engine = None
+    try:
+        engine = create_engine(url, connect_args={"connect_timeout": 5})
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
+def _owner_in_database(url: str, owner_username: str) -> bool:
+    """Whether a row for `owner_username` already exists in the `users` table of
+    the Postgres at `url`. Raw SQL on a throwaway engine — this has to work
+    against a database that isn't the one the app's own engine is bound to yet
+    (the switch into DB mode hasn't happened). False on any connection error."""
+    engine = None
+    try:
+        engine = create_engine(url, connect_args={"connect_timeout": 5})
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT 1 FROM users WHERE username = :u LIMIT 1"),
+                {"u": owner_username},
+            ).first()
+        return row is not None
+    except Exception:
+        return False
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
+def _db_mode_switch_blocker() -> str | None:
+    """None if it's safe to switch the app into DB mode right now, otherwise a
+    message naming what to fix. Ports the owner account into Postgres as a side
+    effect when it's reachable but missing — see port_owner_to_database and the
+    guard in api_admin_set_settings for why the owner must be there first."""
+    from scripts.migrate_json_to_pg import find_owner_username, port_owner_to_database
+
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        return "Set and save the database connection before turning Use JSON off."
+
+    ok, err = _test_database_connection(url)
+    if not ok:
+        return f"Database connection failed: {err}. Save a working connection before turning Use JSON off."
+
+    owner_username = find_owner_username()
+    if not owner_username:
+        return None  # no owner account anywhere ⇒ nobody to lock out
+
+    if _owner_in_database(url, owner_username):
+        return None
+
+    result = port_owner_to_database()
+    if not result["ok"] or not _owner_in_database(url, owner_username):
+        detail = f": {result['error']}" if result.get("error") else ""
+        return (
+            f"Could not copy the owner account '{owner_username}' into the database{detail}. "
+            f"It must exist there or you will be locked out of the admin console."
+        )
+
+    return None
+
+
 @app.get("/api/admin/system/database-url")
 async def api_admin_get_database_url(request: Request):
     require_admin(request)
@@ -1097,20 +1171,52 @@ async def api_admin_test_database_url(request: Request):
             return JSONResponse({"ok": False, "error": str(exc)})
     else:
         url = os.getenv("DATABASE_URL")
-        if not url:
-            return JSONResponse({"ok": False, "error": "No connection configured."})
 
-    engine = None
-    try:
-        engine = create_engine(url, connect_args={"connect_timeout": 5})
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return JSONResponse({"ok": True})
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)})
-    finally:
-        if engine is not None:
-            engine.dispose()
+    ok, err = _test_database_connection(url)
+    return JSONResponse({"ok": True} if ok else {"ok": False, "error": err})
+
+
+# ── DB-mode switch: precheck + owner port ────────────────────────────────
+# Turning Use JSON off flips the whole app onto Postgres — auth then
+# re-checks it every request and never reads
+# USERS.json, so the owner must already be a row there. These two endpoints
+# back the staged confirmation on the System page (see admin.js
+# beginUseJsonStaging): the precheck drives its checklist, the port button
+# copies the owner across. The real enforcement is _db_mode_switch_blocker,
+# called from api_admin_set_settings below.
+@app.get("/api/admin/system/db-mode-precheck")
+async def api_admin_db_mode_precheck(request: Request):
+    require_admin(request)
+
+    from scripts.migrate_json_to_pg import find_owner_username
+
+    url = os.getenv("DATABASE_URL")
+    owner_username = find_owner_username()
+
+    connection_ok, connection_error = _test_database_connection(url) if url else (False, None)
+    owner_in_db = bool(connection_ok and owner_username and _owner_in_database(url, owner_username))
+
+    return JSONResponse({
+        "database_url_set": bool(url),
+        "connection_ok": connection_ok,
+        "connection_error": connection_error,
+        "owner_username": owner_username,
+        "owner_in_db": owner_in_db,
+    })
+
+
+@app.post("/api/admin/system/port-owner-to-database")
+async def api_admin_port_owner_to_database(request: Request):
+    require_admin(request)
+
+    from scripts.migrate_json_to_pg import port_owner_to_database
+
+    result = port_owner_to_database()
+
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"] or "Could not port the owner account.")
+
+    return JSONResponse(result)
 
 
 def _days_since(iso_date: str | None) -> int | None:
@@ -1166,9 +1272,26 @@ async def api_admin_set_settings(request: Request):
     body = await request.json()
 
     settings_data = load_settings()
+
+    # Mirrors db_mode.is_db_mode(): the database is the backing store whenever
+    # Use JSON is off.
+    was_db_mode = not settings_data.get("use_json", True)
+
     for key in SETTINGS_DEFAULTS:
         if key in body:
             settings_data[key] = bool(body[key])
+
+    will_be_db_mode = not settings_data.get("use_json", True)
+
+    # This change would newly flip the app into DB mode — refuse unless
+    # Postgres is reachable and the owner account exists there (the blocker
+    # ports it across first when it can). Without this, an admin turning Use
+    # JSON off 403-locks themselves out: DB mode re-checks Postgres for the
+    # caller's rank every request and never falls back to USERS.json.
+    if will_be_db_mode and not was_db_mode:
+        blocker = _db_mode_switch_blocker()
+        if blocker:
+            raise HTTPException(status_code=400, detail=blocker)
 
     save_settings(settings_data)
 
@@ -1383,7 +1506,15 @@ async def api_admin_pricing_product_ids(request: Request):
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
 
-    return JSONResponse({"editions": results})
+    # Drives whether the Pricing page shows its live TCGPlayer controls
+    # (Refresh Sales/Listings/Selected and the per-row 🔍 auto product-ID
+    # buttons) — those only apply when Postgres is the backing store, gated
+    # client-side (see updateAdminPidRefreshButton / adminPidProductIdFieldHtml
+    # in admin.js).
+    return JSONResponse({
+        "editions": results,
+        "database_mode": is_db_mode(),
+    })
 
 
 # Plain read of whatever was last recorded (see the /refresh endpoint below)

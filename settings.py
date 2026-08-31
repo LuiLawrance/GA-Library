@@ -8,15 +8,14 @@ JSON_SETTINGS = "DATA_GENERAL/SETTINGS.json"
 # Admin settings are ALWAYS JSON-resident, in every mode — SETTINGS.json is
 # the single source of truth and is never mirrored into Postgres. (It
 # persists on Railway too: DATA_GENERAL is symlinked onto the DATA_GA volume
-# — see the Dockerfile.) use_json and local_database in particular *must*
-# stay in JSON since they're what decides whether to read the DB at all; the
-# rest just follow the same rule for consistency. use_json is the master
-# switch (On hides/overrides Local Database and forces JSON); its default is
-# derived from local_database the first time it's read after being
-# introduced, not a flat default here — see ensure_use_json_default.
+# — see the Dockerfile.) use_json in particular *must* stay in JSON since
+# it's what decides whether to read the DB at all; the rest just follow the
+# same rule for consistency. use_json is the single storage switch (Off →
+# the Postgres at the Database Connection settings, On → flat JSON); its
+# default is resolved by ensure_use_json_default (which also migrates the
+# old local_database key away), not the flat default here — see db_mode.py.
 SETTINGS_DEFAULTS = {
     "store_images_locally": False,
-    "local_database": False,
     # Static default here only for /api/admin/settings' key-validation loop
     # (app.py) — ensure_use_json_default always runs first in load_settings
     # and, once use_json is already on disk, this default never actually
