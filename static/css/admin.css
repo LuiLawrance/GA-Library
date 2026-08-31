@@ -339,6 +339,7 @@
 
 .admin-system-db-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-top: 2px;
 }

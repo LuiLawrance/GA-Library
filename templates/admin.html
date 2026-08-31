@@ -36,6 +36,10 @@
                             <span class="admin-system-staging-mark"></span>
                             <span class="admin-system-staging-check-label">Database connection</span>
                         </li>
+                        <li data-check="schema">
+                            <span class="admin-system-staging-mark"></span>
+                            <span class="admin-system-staging-check-label">Database schema</span>
+                        </li>
                         <li data-check="owner">
                             <span class="admin-system-staging-mark"></span>
                             <span class="admin-system-staging-check-label">Owner account in database</span>
@@ -151,11 +155,11 @@
 
                     <div class="admin-system-db-actions">
                         <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
-                                id="admin-system-db-port-owner-btn" onclick="portOwnerToDatabase()">
-                            Port Owner &rarr; Database
-                        </button>
+                                id="admin-system-db-init-schema-btn" onclick="initAdminSchema()">Set up schema</button>
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                id="admin-system-db-port-owner-btn" onclick="portOwnerToDatabase()">Port Owner</button>
                     </div>
-                    <p class="admin-system-db-status hidden" id="admin-system-db-port-owner-status"></p>
+                    <p class="admin-system-db-status hidden" id="admin-system-db-setup-status"></p>
 
                     <div class="admin-system-wipe-divider"></div>
                     <span class="admin-system-sync-title">Sync JSON &rarr; Database</span>

@@ -30,7 +30,9 @@ from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
 import asyncio
+import contextlib
 import db_cache
+import io
 import json
 import os
 import random
@@ -1078,7 +1080,8 @@ def _owner_in_database(url: str, owner_username: str) -> bool:
     """Whether a row for `owner_username` already exists in the `users` table of
     the Postgres at `url`. Raw SQL on a throwaway engine — this has to work
     against a database that isn't the one the app's own engine is bound to yet
-    (the switch into DB mode hasn't happened). False on any connection error."""
+    (the switch into DB mode hasn't happened). False on any connection error
+    OR if the `users` table doesn't exist yet (fresh, unmigrated database)."""
     engine = None
     try:
         engine = create_engine(url, connect_args={"connect_timeout": 5})
@@ -1095,6 +1098,53 @@ def _owner_in_database(url: str, owner_username: str) -> bool:
             engine.dispose()
 
 
+def _schema_ready(url: str) -> bool:
+    """Whether the Postgres at `url` has this app's schema — checked by the
+    presence of the `users` table, which every DB-mode path needs and which a
+    brand-new Railway/managed database won't have until `alembic upgrade head`
+    has run against it. False on any connection error."""
+    engine = None
+    try:
+        engine = create_engine(url, connect_args={"connect_timeout": 5})
+        with engine.connect() as conn:
+            return conn.execute(text("SELECT to_regclass('public.users')")).scalar() is not None
+    except Exception:
+        return False
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+
+def run_schema_migration() -> dict:
+    """`alembic upgrade head` against the currently-configured DATABASE_URL,
+    run in-process (alembic/env.py re-reads DATABASE_URL from the environment,
+    which api_admin_set_database_url keeps current). Creates the schema on a
+    fresh database and is a no-op when it's already at head. Blocking — call
+    from a thread. Returns {"ok", "log", "error"}."""
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        return {"ok": False, "log": "", "error": "No database connection configured."}
+
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", url)
+    # alembic/env.py runs fileConfig(config.config_file_name) when it's set,
+    # which would reconfigure this whole process's logging. The .ini's other
+    # settings (script_location etc.) are already parsed into cfg; drop the
+    # filename so only the logging step is skipped.
+    cfg.config_file_name = None
+
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            command.upgrade(cfg, "head")
+        return {"ok": True, "log": buf.getvalue().strip() or "Schema is already up to date.", "error": None}
+    except Exception as exc:
+        return {"ok": False, "log": buf.getvalue().strip(), "error": str(exc)}
+
+
 def _db_mode_switch_blocker() -> str | None:
     """None if it's safe to switch the app into DB mode right now, otherwise a
     message naming what to fix. Ports the owner account into Postgres as a side
@@ -1109,6 +1159,12 @@ def _db_mode_switch_blocker() -> str | None:
     ok, err = _test_database_connection(url)
     if not ok:
         return f"Database connection failed: {err}. Save a working connection before turning Use JSON off."
+
+    if not _schema_ready(url):
+        return (
+            "The database has no schema yet — click \"Set up schema\" in the Database Connection "
+            "panel (or run `alembic upgrade head`) before turning Use JSON off."
+        )
 
     owner_username = find_owner_username()
     if not owner_username:
@@ -1176,14 +1232,14 @@ async def api_admin_test_database_url(request: Request):
     return JSONResponse({"ok": True} if ok else {"ok": False, "error": err})
 
 
-# ── DB-mode switch: precheck + owner port ────────────────────────────────
+# ── DB-mode switch: precheck + schema + owner port ───────────────────────
 # Turning Use JSON off flips the whole app onto Postgres — auth then
-# re-checks it every request and never reads
-# USERS.json, so the owner must already be a row there. These two endpoints
-# back the staged confirmation on the System page (see admin.js
-# beginUseJsonStaging): the precheck drives its checklist, the port button
-# copies the owner across. The real enforcement is _db_mode_switch_blocker,
-# called from api_admin_set_settings below.
+# re-checks it every request and never reads USERS.json, so the schema must
+# exist and the owner must already be a row there. These endpoints back the
+# staged confirmation on the System page (see admin.js beginUseJsonStaging):
+# the precheck drives its checklist, "Set up schema" runs the migrations,
+# "Port Owner" copies the owner across. The real enforcement is
+# _db_mode_switch_blocker, called from api_admin_set_settings below.
 @app.get("/api/admin/system/db-mode-precheck")
 async def api_admin_db_mode_precheck(request: Request):
     require_admin(request)
@@ -1194,12 +1250,14 @@ async def api_admin_db_mode_precheck(request: Request):
     owner_username = find_owner_username()
 
     connection_ok, connection_error = _test_database_connection(url) if url else (False, None)
-    owner_in_db = bool(connection_ok and owner_username and _owner_in_database(url, owner_username))
+    schema_ready = bool(connection_ok and _schema_ready(url))
+    owner_in_db = bool(schema_ready and owner_username and _owner_in_database(url, owner_username))
 
     return JSONResponse({
         "database_url_set": bool(url),
         "connection_ok": connection_ok,
         "connection_error": connection_error,
+        "schema_ready": schema_ready,
         "owner_username": owner_username,
         "owner_in_db": owner_in_db,
     })
@@ -1215,6 +1273,22 @@ async def api_admin_port_owner_to_database(request: Request):
 
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"] or "Could not port the owner account.")
+
+    return JSONResponse(result)
+
+
+# "Set up schema" button — `alembic upgrade head` against the saved connection,
+# so a fresh Railway/managed database gets its tables before Port Owner / the
+# switch into DB mode need them. Idempotent. Run in a thread so the (few-second,
+# network-bound) DDL doesn't block the event loop.
+@app.post("/api/admin/system/init-schema")
+async def api_admin_init_schema(request: Request):
+    require_admin(request)
+
+    result = await asyncio.to_thread(run_schema_migration)
+
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"] or "Schema setup failed.")
 
     return JSONResponse(result)
 

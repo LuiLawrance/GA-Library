@@ -626,13 +626,15 @@ function _setStagingCheck(name, state, label) {
 
 // Polls the server for whether it's safe to flip into DB mode and drives the
 // checklist + Confirm gating. Called on entry, and again after every Save /
-// Test / Port Owner so the bar tracks edits live. No-ops once staging ends.
+// Test / Set up schema / Port Owner so the bar tracks edits live. No-ops once
+// staging ends.
 async function refreshDbModePrecheck() {
     if (!adminUseJsonStaging) return;
 
     const confirmBtn = document.getElementById('admin-system-staging-confirm-btn');
     if (confirmBtn) confirmBtn.disabled = true;
     _setStagingCheck('connection', 'pending');
+    _setStagingCheck('schema', 'pending');
     _setStagingCheck('owner', 'pending');
 
     let data;
@@ -642,6 +644,7 @@ async function refreshDbModePrecheck() {
         data = await res.json();
     } catch (err) {
         _setStagingCheck('connection', 'fail', 'Database connection (check failed)');
+        _setStagingCheck('schema', 'fail');
         _setStagingCheck('owner', 'fail');
         return;
     }
@@ -655,18 +658,26 @@ async function refreshDbModePrecheck() {
             : (data.database_url_set ? 'Database connection (failed)' : 'Database connection (not configured)'),
     );
 
-    // No owner account anywhere ⇒ nothing to copy, not a blocker (first
-    // signup in DB mode becomes owner).
+    // Schema — only meaningful once the connection is up; until then it just
+    // waits rather than reading as a failure.
+    _setStagingCheck(
+        'schema',
+        !data.connection_ok ? 'pending' : (data.schema_ready ? 'ok' : 'fail'),
+        data.schema_ready ? 'Database schema' : 'Database schema — click "Set up schema"',
+    );
+
+    // Owner — also gated on the schema existing. No owner account anywhere ⇒
+    // nothing to copy, not a blocker (first signup in DB mode becomes owner).
     const ownerSatisfied = data.owner_in_db || !data.owner_username;
     _setStagingCheck(
         'owner',
-        ownerSatisfied ? 'ok' : 'fail',
+        !data.schema_ready ? 'pending' : (ownerSatisfied ? 'ok' : 'fail'),
         data.owner_username
             ? `Owner account "${data.owner_username}" in database`
             : 'Owner account in database (none to copy)',
     );
 
-    if (confirmBtn) confirmBtn.disabled = !(data.connection_ok && ownerSatisfied);
+    if (confirmBtn) confirmBtn.disabled = !(data.connection_ok && data.schema_ready && ownerSatisfied);
 }
 
 async function confirmUseJsonStaging() {
@@ -697,40 +708,61 @@ async function confirmUseJsonStaging() {
     }
 }
 
-// Port Owner → Database button (inside the Database Connection panel). Copies
-// just the auth_type=="owner" account from USERS.json into Postgres via
-// /api/admin/system/port-owner-to-database. Idempotent (upsert), so it's also
-// safe to press outside the staging flow.
+// Shared status line under the "Set up schema" / "Port Owner" button row.
+function _setAdminDbSetupStatus(text, kind) {
+    const el = document.getElementById('admin-system-db-setup-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+    el.classList.toggle('admin-system-db-status-error', kind === 'error');
+    el.classList.toggle('admin-system-db-status-ok', kind === 'ok');
+}
+
+// "Set up schema" button — runs `alembic upgrade head` against the saved
+// connection (POST /api/admin/system/init-schema). A fresh Railway/managed
+// database has no tables until this runs; idempotent once it has.
+async function initAdminSchema() {
+    const btn = document.getElementById('admin-system-db-init-schema-btn');
+    if (btn) btn.disabled = true;
+    _setAdminDbSetupStatus('Setting up schema…', null);
+
+    try {
+        const res = await fetch('/api/admin/system/init-schema', {method: 'POST'});
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            _setAdminDbSetupStatus(data.detail || 'Schema setup failed.', 'error');
+            return;
+        }
+        _setAdminDbSetupStatus('Schema is ready.', 'ok');
+    } catch (err) {
+        _setAdminDbSetupStatus('Schema setup failed.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+        refreshDbModePrecheck();
+    }
+}
+
+// "Port Owner" button — copies just the auth_type=="owner" account from
+// USERS.json into Postgres via /api/admin/system/port-owner-to-database.
+// Idempotent (upsert); needs the schema to exist first.
 async function portOwnerToDatabase() {
     const btn = document.getElementById('admin-system-db-port-owner-btn');
-    const status = document.getElementById('admin-system-db-port-owner-status');
 
     if (btn) btn.disabled = true;
-    if (status) {
-        status.textContent = 'Copying owner account…';
-        status.classList.remove('hidden', 'admin-system-db-status-error', 'admin-system-db-status-ok');
-    }
+    _setAdminDbSetupStatus('Copying owner account…', null);
 
     try {
         const res = await fetch('/api/admin/system/port-owner-to-database', {method: 'POST'});
         const data = await res.json().catch(() => ({}));
 
-        if (status) {
-            status.classList.remove('hidden');
-            if (!res.ok) {
-                status.textContent = data.detail || 'Failed to copy the owner account.';
-                status.classList.add('admin-system-db-status-error');
-            } else {
-                status.textContent = `Owner account "${data.owner}" copied to the database.`;
-                status.classList.add('admin-system-db-status-ok');
-            }
+        if (!res.ok) {
+            _setAdminDbSetupStatus(data.detail || 'Failed to copy the owner account.', 'error');
+            return;
         }
+        _setAdminDbSetupStatus(`Owner account "${data.owner}" copied to the database.`, 'ok');
     } catch (err) {
-        if (status) {
-            status.classList.remove('hidden');
-            status.textContent = 'Failed to copy the owner account.';
-            status.classList.add('admin-system-db-status-error');
-        }
+        _setAdminDbSetupStatus('Failed to copy the owner account.', 'error');
     } finally {
         if (btn) btn.disabled = false;
         refreshDbModePrecheck();
