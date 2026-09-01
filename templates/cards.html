@@ -1,15 +1,15 @@
-<div class="cards-page" id="cards-page">
+<div class="cards-page page" id="cards-page">
     <div class="page-header cards-header">
         <div class="cards-header-left">
             <div class="default-bin-wrap hidden" id="default-bin-wrap">
-                <button class="default-bin-btn" id="default-bin-btn" onclick="openDefaultBinPicker()">
+                <button class="default-bin-btn btn btn--ghost" id="default-bin-btn" onclick="openDefaultBinPicker()">
                     <span class="default-bin-icon">📦</span>
                     <span id="default-bin-label">Default Bin</span>
                 </button>
                 <div class="default-bin-menu hidden" id="default-bin-menu"></div>
             </div>
             <div class="default-bin-wrap" id="target-section-wrap">
-                <button class="default-bin-btn" id="target-section-btn" onclick="openTargetSectionPicker()">
+                <button class="default-bin-btn btn btn--ghost" id="target-section-btn" onclick="openTargetSectionPicker()">
                     <span class="default-bin-icon">📁</span>
                     <span id="target-section-label">Unsorted</span>
                 </button>
@@ -18,11 +18,11 @@
         </div>
         <div class="search-wrap">
             <div class="set-dropdown-wrap">
-                <button class="set-dropdown-btn" onclick="toggleSetDropdown()">
+                <button class="set-dropdown-btn btn btn--ghost btn--mono" onclick="toggleSetDropdown()">
                     <span id="set-dropdown-label">Sets</span>
                     <span class="set-dropdown-arrow">&#8249;</span>
                 </button>
-                <div class="set-dropdown-menu hidden" id="set-dropdown-menu">
+                <div class="set-dropdown-menu menu hidden" id="set-dropdown-menu">
                     <div id="set-dropdown-options"></div>
                 </div>
             </div>
@@ -33,26 +33,26 @@
                        type="text">
                 <div class="autocomplete-list hidden" id="autocomplete-list"></div>
             </div>
-            <button class="btn-search" onclick="searchCards()">Search</button>
+            <button class="btn-search btn btn--primary" onclick="searchCards()">Search</button>
             <div class="cards-filter-wrap">
-                <button class="cards-filter-btn" id="cards-filter-btn" onclick="toggleCardsFilter()">
+                <button class="cards-filter-btn btn btn--ghost btn--mono" id="cards-filter-btn" onclick="toggleCardsFilter()">
                     <span id="cards-filter-label">Filter</span>
                     <span class="cards-filter-arrow">&#8249;</span>
                 </button>
-                <div class="cards-filter-menu hidden" id="cards-filter-menu">
+                <div class="cards-filter-menu menu hidden" id="cards-filter-menu">
                     <div class="cards-filter-section">
-                        <div class="cards-filter-section-label">Sort</div>
+                        <div class="cards-filter-section-label label label--muted label--sm">Sort</div>
                         <div class="cards-filter-options" id="cards-filter-sort-options"></div>
                     </div>
                     <div class="cards-filter-section">
-                        <div class="cards-filter-section-label">Element</div>
+                        <div class="cards-filter-section-label label label--muted label--sm">Element</div>
                         <div class="cards-filter-options" id="cards-filter-element-options"></div>
                     </div>
                     <div class="cards-filter-section">
-                        <div class="cards-filter-section-label">Rarity</div>
+                        <div class="cards-filter-section-label label label--muted label--sm">Rarity</div>
                         <div class="cards-filter-options" id="cards-filter-rarity-options"></div>
                     </div>
-                    <button class="cards-filter-clear-btn" onclick="clearCardsFilters()">Clear all</button>
+                    <button class="cards-filter-clear-btn btn btn--subtle btn--mono" onclick="clearCardsFilters()">Clear all</button>
                 </div>
             </div>
         </div>
@@ -82,13 +82,13 @@
     <div class="drawer-sidebar hidden" id="drawer-sidebar">
         <button class="drawer-sidebar-close" onclick="closeCardDrawer()">&#x2715;</button>
         <div class="drawer-sidebar-divider"></div>
-        <button class="drawer-sidebar-btn active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
                 title="Info">ℹ️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
                 title="Thema">🏷️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
                 title="Pricing">💵
         </button>
     </div>

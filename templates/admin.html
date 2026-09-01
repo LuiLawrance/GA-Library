@@ -1,6 +1,6 @@
-<div class="admin-page" id="admin-page">
+<div class="admin-page page" id="admin-page">
     <div class="page-header">
-        <span class="page-label">Admin Console</span>
+        <span class="page-label label label--lg">Admin Console</span>
         <nav class="admin-subnav">
             <button class="admin-subnav-btn" data-section="system" onclick="switchAdminSection('system')">
                 System
@@ -167,12 +167,12 @@
                         <div class="admin-system-db-field">
                             <span class="admin-system-db-label">SSL<span class="admin-system-db-pip" data-field="sslmode"></span></span>
                             <div class="admin-pid-dropdown-wrap admin-system-db-ssl-wrap" id="admin-system-db-ssl-wrap">
-                                <button type="button" class="admin-pid-dropdown-btn" id="admin-system-db-ssl-btn"
+                                <button type="button" class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="admin-system-db-ssl-btn"
                                         onclick="toggleAdminPidDropdown('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn')">
                                     <span id="admin-system-db-ssl-label">default</span>
                                     <span class="admin-pid-dropdown-arrow">&#8249;</span>
                                 </button>
-                                <div class="admin-pid-dropdown-menu hidden" id="admin-system-db-ssl-menu">
+                                <div class="admin-pid-dropdown-menu menu hidden" id="admin-system-db-ssl-menu">
                                     <div class="admin-pid-dropdown-option selected" data-value=""
                                          onclick="selectAdminDbSsl('', 'default')">default</div>
                                     <div class="admin-pid-dropdown-option" data-value="disable"
@@ -227,7 +227,7 @@
                             <span class="admin-user-col-delete"></span>
                         </div>
                     </div>
-                    <div class="admin-user-table-scroll">
+                    <div class="admin-user-table-scroll scroll-thin">
                         <div class="admin-user-table" id="admin-user-table"></div>
                     </div>
                 </div>
@@ -293,7 +293,7 @@
                 <div class="admin-pricing-layout">
                     <div class="admin-pricing-list" id="admin-pricing-list">
                         <div class="admin-pid-table-header" id="admin-pid-table-header"></div>
-                        <div class="admin-pid-table-scroll">
+                        <div class="admin-pid-table-scroll scroll-thin">
                             <div class="admin-pid-table" id="admin-pid-table"></div>
                         </div>
                     </div>
@@ -315,13 +315,13 @@
     <div class="drawer-sidebar hidden" id="drawer-sidebar">
         <button class="drawer-sidebar-close" onclick="closeCardDrawer()">&#x2715;</button>
         <div class="drawer-sidebar-divider"></div>
-        <button class="drawer-sidebar-btn active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
                 title="Info">ℹ️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
                 title="Thema">🏷️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
                 title="Pricing">💵
         </button>
     </div>

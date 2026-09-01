@@ -1,18 +1,18 @@
-<div class="prices-page" id="prices-page">
+<div class="prices-page page" id="prices-page">
     <div class="prices-content" id="prices-content">
-        <div class="prices-panel prices-watchlist-panel">
+        <div class="prices-panel panel prices-watchlist-panel">
             <div class="prices-panel-header">
-                <span class="prices-panel-title">Watchlist</span>
+                <span class="prices-panel-title label label--muted">Watchlist</span>
             </div>
             <div class="prices-watchlist-body">
-                <div class="prices-watchlist-grid" id="prices-table"></div>
+                <div class="prices-watchlist-grid scroll-thin" id="prices-table"></div>
             </div>
         </div>
 
-        <div class="prices-panel prices-graph-panel">
+        <div class="prices-panel panel prices-graph-panel">
             <div class="prices-panel-header">
                 <div id="price-graph-header">
-                    <span class="prices-panel-title">Price History</span>
+                    <span class="prices-panel-title label label--muted">Price History</span>
                 </div>
             </div>
             <div class="prices-graph-body" id="price-graph-body">
@@ -23,9 +23,9 @@
             </div>
         </div>
 
-        <div class="prices-panel prices-search-panel">
+        <div class="prices-panel panel prices-search-panel">
             <div class="prices-panel-header">
-                <span class="prices-panel-title">Card Search</span>
+                <span class="prices-panel-title label label--muted">Card Search</span>
             </div>
             <div class="prices-search-body">
                 <div class="inv-add-search-wrap">
@@ -37,9 +37,9 @@
                                autocomplete="off">
                         <div id="price-search-autocomplete" class="autocomplete-list hidden"></div>
                     </div>
-                    <button class="btn-search" onclick="searchPriceCards()">Search</button>
+                    <button class="btn-search btn btn--primary" onclick="searchPriceCards()">Search</button>
                 </div>
-                <div class="prices-search-results" id="price-search-results">
+                <div class="prices-search-results scroll-thin" id="price-search-results">
                     <div class="inv-search-placeholder">
                         <span class="inv-empty-icon">⬡</span>
                         <p>Search for a card to view its price history.</p>
@@ -50,8 +50,8 @@
     </div>
 
     <!-- Add to Watchlist modal -->
-    <div id="watchlist-add-modal" class="inv-modal-overlay hidden" onclick="closeWatchlistModal()">
-        <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+    <div id="watchlist-add-modal" class="inv-modal-overlay overlay hidden" onclick="closeWatchlistModal()">
+        <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
             <div class="inv-modal-header inv-add-modal-header">
                 <button class="inv-btn-back-arrow hidden" id="watchlist-back-btn" onclick="watchlistBackToSearch()">‹</button>
                 <span class="inv-modal-title">Add to Watchlist</span>
@@ -69,9 +69,9 @@
                                autocomplete="off">
                         <div id="watchlist-card-autocomplete" class="autocomplete-list hidden"></div>
                     </div>
-                    <button class="btn-search" onclick="searchWatchlistCards()">Search</button>
+                    <button class="btn-search btn btn--primary" onclick="searchWatchlistCards()">Search</button>
                 </div>
-                <div class="inv-add-results" id="watchlist-card-results">
+                <div class="inv-add-results scroll-none" id="watchlist-card-results">
                     <div class="inv-search-placeholder" style="padding:30px 0">
                         <span class="inv-empty-icon">⬡</span>
                         <p>Search for a card to watch.</p>
@@ -111,13 +111,13 @@
     <div class="drawer-sidebar hidden" id="drawer-sidebar">
         <button class="drawer-sidebar-close" onclick="closeCardDrawer()">&#x2715;</button>
         <div class="drawer-sidebar-divider"></div>
-        <button class="drawer-sidebar-btn active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info" onclick="switchDrawerTab('info', 'card-drawer')"
                 title="Info">ℹ️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
                 title="Thema">🏷️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
                 title="Pricing">💵
         </button>
     </div>

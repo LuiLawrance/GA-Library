@@ -1,17 +1,5 @@
 /* ── Page wrapper ── */
-.dga-page {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    height: 100%;
-    /* #card-drawer is now a direct child of this (see decks_ga.html), not of
-       .dga-cards-body, so it needs this to size against the full page height
-       — matching .admin-page/.prices-page, so all pages' drawers share the
-       same height instead of Decks' being scoped to just .dga-cards-body
-       (the area below the deck's own header row) and coming out shorter. */
-    position: relative;
-}
+/* Page wrapper is the shared .page (main.css) — #card-drawer sizes against it. */
 
 /* ═══════════════════════════════════════
    LIST VIEW
@@ -33,43 +21,27 @@
     height: 100%;
 }
 
-.dga-header {
-    padding: 24px 32px 20px;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-}
+/* .dga-header is the shared .list-header (main.css). */
 
+/* .dga-label is the shared .label (main.css) + block display. */
 .dga-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
     display: block;
 }
 
 .dga-subtitle {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-top: 4px;
     display: block;
 }
 
+/* Shared .btn .btn--ghost .btn--mono (components.css) + muted rest, accent hover. */
 .dga-create-btn {
-    font-family: 'DM Mono', monospace;
     font-size: 0.72rem;
     letter-spacing: 0.04em;
     color: var(--text-muted);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 8px 16px;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
 }
 
 .dga-create-btn:hover {
@@ -87,18 +59,7 @@
     align-content: start;
 }
 
-.dga-deck-grid::-webkit-scrollbar {
-    width: 8px;
-}
-
-.dga-deck-grid::-webkit-scrollbar-track {
-    background: var(--bg);
-}
-
-.dga-deck-grid::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 8px;
-}
+/* .dga-deck-grid scrollbar is the shared .scroll-thin (main.css). */
 
 /* ── Deck tile ── */
 .dga-deck-tile {
@@ -172,7 +133,7 @@
 }
 
 .dga-tile-format {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.62rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -184,7 +145,7 @@
 }
 
 .dga-tile-desc {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
     overflow-wrap: break-word;
@@ -195,7 +156,7 @@
 }
 
 .dga-tile-meta {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
     margin-top: auto;
@@ -235,7 +196,7 @@
 }
 
 .dga-create-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     letter-spacing: 0.08em;
 }
@@ -244,14 +205,7 @@
    DETAIL VIEW
 ═══════════════════════════════════════ */
 
-.dga-detail-header {
-    padding: 16px 32px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    flex-shrink: 0;
-}
+/* .dga-detail-header is the shared .detail-header (main.css). */
 
 .dga-detail-title-row {
     display: flex;
@@ -269,7 +223,7 @@
 }
 
 .dga-detail-counts {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
 }
@@ -278,7 +232,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
     cursor: pointer;
@@ -357,7 +311,7 @@
 }
 
 .dga-detail-format {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--accent);
     letter-spacing: 0.05em;
@@ -371,7 +325,7 @@
 }
 
 .dga-detail-meta {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--text-muted);
 }
@@ -406,18 +360,7 @@
     overflow-y: auto;
 }
 
-.dga-card-grid-wrap::-webkit-scrollbar {
-    width: 8px;
-}
-
-.dga-card-grid-wrap::-webkit-scrollbar-track {
-    background: var(--bg);
-}
-
-.dga-card-grid-wrap::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 8px;
-}
+/* .dga-card-grid-wrap scrollbar is the shared .scroll-thin (main.css). */
 
 .dga-card-grid {
     padding: 24px 32px;
@@ -434,7 +377,7 @@
     gap: 8px;
     padding: 48px 0;
     color: var(--text-muted);
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     text-align: center;
 }
@@ -453,9 +396,11 @@
     justify-content: center;
 }
 
+/* Not a shared .btn — this class is applied to both a <button> and the <input>
+   it swaps to (dgaBuildAddSectionButton), so it carries its own full styling. */
 .dga-add-section-btn {
     width: 100%;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     letter-spacing: 0.08em;
     color: var(--text-muted);
@@ -474,7 +419,7 @@
 }
 
 .dga-loading {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     padding: 24px 0;
@@ -503,20 +448,9 @@
    rules (tiles.css, inventory.css) — this tile carries both classes
    (buildDeckCardTile in decks_ga.js), so no separate copy is needed here. */
 
-.dga-qty-badge {
-    position: absolute;
-    bottom: 10px;
-    right: 10px;
-    background: rgba(0, 0, 0, 0.75);
-    color: #ffffff;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.75rem;
-    font-weight: 700;
-    padding: 3px 8px;
-    border-radius: 5px;
-    pointer-events: none;
-    backdrop-filter: blur(4px);
-}
+/* Card tiles reuse the shared .inv-qty-badge / .inv-card-tile-overlay /
+   .inv-card-tile-info (inventory.css) — buildDeckCardTile emits those class
+   names directly. */
 
 .dga-card-tile .edition-rarity-badge {
     bottom: 10px;
@@ -529,38 +463,14 @@
     padding-right: 4px;
 }
 
-.dga-card-tile:hover .dga-qty-badge,
+.dga-card-tile:hover .inv-qty-badge,
 .dga-card-tile:hover .edition-rarity-badge {
     opacity: 0;
     transition: opacity 0.15s;
 }
 
-.dga-card-tile-overlay {
-    position: absolute;
-    inset: 0;
-    border-radius: 14px;
-    background: transparent;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    opacity: 0;
-    transition: opacity 0.2s;
-    padding: 14px 10px;
-    pointer-events: none;
-    z-index: 1;
-}
-
-.dga-card-tile:hover .dga-card-tile-overlay {
+.dga-card-tile:hover .inv-card-tile-overlay {
     opacity: 1;
-}
-
-.dga-card-tile-info {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
 }
 
 .dga-card-tile-name {
@@ -577,7 +487,7 @@
 }
 
 .dga-card-tile-foil {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: rgba(255, 255, 255, 0.75);
     text-align: center;
@@ -588,21 +498,16 @@
     position: relative;
 }
 
+/* Shared .btn .btn--ghost .btn--mono (components.css). */
 .dga-fmt-dropdown-btn {
     width: 100%;
-    font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
-    color: var(--text);
     background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 9px 14px;
-    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    transition: border-color 0.2s;
 }
 
 .dga-fmt-dropdown-btn:hover,
@@ -623,20 +528,13 @@
     transform: rotate(90deg);
 }
 
+/* Shared .menu (components.css) — full-width under its trigger, scrolls when tall. */
 .dga-fmt-dropdown-menu {
-    position: absolute;
-    top: calc(100% + 6px);
     left: 0;
     right: 0;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    z-index: 300;
     max-height: 240px;
     overflow-y: auto;
     overflow-x: hidden;
-    animation: revealDown 0.2s ease forwards;
     scrollbar-width: thin;
     scrollbar-color: var(--border-focus) transparent;
 }
@@ -654,7 +552,7 @@
     padding: 10px 14px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     letter-spacing: 0.04em;
@@ -688,15 +586,10 @@
     align-items: center;
 }
 
+/* Shared .btn .btn--subtle (components.css). */
 .dga-section-action-btn {
     font-size: 0.78rem;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    cursor: pointer;
     padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    transition: color 0.15s, background 0.15s;
     line-height: 1;
 }
 
@@ -747,23 +640,17 @@
 }
 
 .dga-section-empty {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
     padding: 8px 0;
     opacity: 0.6;
 }
 
-.dga-section-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
-}
+/* .dga-section-label is the shared .label (main.css). */
 
 .dga-section-count {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
 }
@@ -807,19 +694,15 @@
 }
 
 .dga-section-row-name {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text);
 }
 
+/* Shared .btn .btn--subtle (components.css). */
 .dga-section-delete-btn {
     font-size: 0.72rem;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    cursor: pointer;
     padding: 2px 6px;
-    transition: color 0.15s;
 }
 
 .dga-section-delete-btn:hover {
@@ -832,17 +715,12 @@
     align-items: center;
 }
 
+/* Shared .btn .btn--ghost .btn--mono (components.css) + muted rest, accent hover. */
 .dga-section-add-btn {
-    font-family: 'DM Mono', monospace;
     font-size: 0.72rem;
     color: var(--text-muted);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 9px 14px;
-    cursor: pointer;
     flex-shrink: 0;
-    transition: border-color 0.2s, color 0.2s;
 }
 
 .dga-section-add-btn:hover {
@@ -851,17 +729,12 @@
 }
 
 /* ── Import / Export ── */
+/* Shared .btn .btn--ghost .btn--mono (components.css) + muted rest. */
 .dga-ie-btn {
-    font-family: 'DM Mono', monospace;
     font-size: 0.72rem;
     letter-spacing: 0.04em;
     color: var(--text-muted);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 7px 14px;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
 }
 
 .dga-ie-btn:hover {
@@ -876,7 +749,7 @@
 }
 
 .dga-progress-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
     margin-bottom: 6px;
@@ -942,7 +815,7 @@
 }
 
 /* While dragging, suppress all tile hover effects and overlays */
-body.dga-drag-active .dga-card-tile:hover .dga-card-tile-overlay {
+body.dga-drag-active .dga-card-tile:hover .inv-card-tile-overlay {
     opacity: 0;
     pointer-events: none;
 }
@@ -955,7 +828,7 @@ body.dga-drag-active .dga-card-tile:hover .edition-tile-wrap {
     transform: none;
 }
 
-body.dga-drag-active .dga-card-tile:hover .dga-qty-badge,
+body.dga-drag-active .dga-card-tile:hover .inv-qty-badge,
 body.dga-drag-active .dga-card-tile:hover .edition-rarity-badge {
     opacity: 1;
 }

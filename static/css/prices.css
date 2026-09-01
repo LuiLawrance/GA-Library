@@ -1,17 +1,4 @@
-.prices-page {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    height: 100%;
-    /* #card-drawer is `position: absolute; top: 0; height: 100%` (see
-       drawer.css) and needs a positioned ancestor to size against — without
-       one it falls back to the viewport as its containing block and covers
-       the topbar/navbar too. Every other page with a drawer (.cards-body,
-       .dga-cards-body, etc.) sets this on its own equivalent wrapper for the
-       same reason. */
-    position: relative;
-}
+/* Page wrapper is the shared .page (main.css) — #card-drawer sizes against it. */
 
 /* ── Content ── */
 .prices-content {
@@ -63,14 +50,12 @@
     opacity: 0.4;
 }
 
+/* Shared .panel (components.css) as a flex column. */
 .prices-panel {
     display: flex;
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
 }
 
 .prices-watchlist-panel {
@@ -96,13 +81,7 @@
     margin-bottom: 12px;
 }
 
-.prices-panel-title {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
+/* .prices-panel-title is the shared .label .label--muted (main.css). */
 
 /* ── Watchlist grid ── */
 .prices-watchlist-body {
@@ -147,22 +126,7 @@
     padding: 6px 6px 3px;
 }
 
-.prices-watchlist-grid::-webkit-scrollbar {
-    width: 8px;
-}
-
-.prices-watchlist-grid::-webkit-scrollbar-track {
-    background: var(--bg);
-}
-
-.prices-watchlist-grid::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 8px;
-}
-
-.prices-watchlist-grid::-webkit-scrollbar-thumb:hover {
-    background: var(--border-focus);
-}
+/* .prices-watchlist-grid scrollbar is the shared .scroll-thin (main.css). */
 
 .prices-watch-tile {
     display: flex;
@@ -289,7 +253,7 @@
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.8rem;
 }
 
@@ -382,7 +346,7 @@
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
     transition: opacity 0.15s;
@@ -440,7 +404,7 @@
    buildLegendMenuGroup in drawer.js) so the individual toggle labels can
    just be the condition (e.g. "Near Mint") instead of repeating the type. */
 .pricing-legend-menu-header {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.62rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -456,7 +420,7 @@
 }
 
 .prices-graph-meta {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
     margin-top: 2px;
@@ -509,22 +473,7 @@
     padding: 6px 6px 3px;
 }
 
-.prices-search-results::-webkit-scrollbar {
-    width: 8px;
-}
-
-.prices-search-results::-webkit-scrollbar-track {
-    background: var(--bg);
-}
-
-.prices-search-results::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 8px;
-}
-
-.prices-search-results::-webkit-scrollbar-thumb:hover {
-    background: var(--border-focus);
-}
+/* .prices-search-results scrollbar is the shared .scroll-thin (main.css). */
 
 /* Same reasoning as .prices-watch-tile above: less rounded than the shared
    14px card-tile default, which was sized for the larger 255px Cards-page
@@ -560,7 +509,7 @@
    instead of one randomly chosen edition. */
 .prices-tile-caption {
     margin-top: 6px;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
     text-align: center;

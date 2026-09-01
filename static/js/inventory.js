@@ -596,11 +596,11 @@ function renderBinCards(animate = true) {
             header.className = 'dga-section-header';
             header.innerHTML = `
                 <span class="dga-section-label-group">
-                    <span class="dga-section-label dga-section-label-editable" title="Click to rename">${sectionName}</span><span class="dga-section-edit-icon">✎</span>
+                    <span class="dga-section-label label dga-section-label-editable" title="Click to rename">${sectionName}</span><span class="dga-section-edit-icon">✎</span>
                 </span>
                 <span class="dga-section-count">${sectionQty} card${sectionQty !== 1 ? 's' : ''}</span>
                 <div class="dga-section-header-actions">
-                    <button class="dga-section-action-btn dga-section-action-delete" title="Delete section">✕</button>
+                    <button class="dga-section-action-btn btn btn--subtle dga-section-action-delete" title="Delete section">✕</button>
                 </div>`;
             const label = header.querySelector('.dga-section-label-editable');
             const pencil = header.querySelector('.dga-section-edit-icon');
@@ -1308,7 +1308,7 @@ function buildInvCardTile(row, index, total = 1) {
             </div>
         </div>
         <div class="inv-card-tile-qty-ctrl">
-            <button class="inv-tile-qty-btn inv-tile-qty-add" onclick="event.stopPropagation(); tileQtyChange(this, 1)">+</button>
+            <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-add" onclick="event.stopPropagation(); tileQtyChange(this, 1)">+</button>
             <input class="inv-tile-qty-input" type="number" value="${row.quantity}" min="0" max="999"
                 data-card-id="${row.card_id}"
                 data-edition-id="${row.edition_id}"
@@ -1318,7 +1318,7 @@ function buildInvCardTile(row, index, total = 1) {
                 oninput="scaleQtyFont(this)"
                 onclick="event.stopPropagation()"
                 onfocus="this.select()">
-            <button class="inv-tile-qty-btn inv-tile-qty-sub" onclick="event.stopPropagation(); tileQtyChange(this, -1)">−</button>
+            <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-sub" onclick="event.stopPropagation(); tileQtyChange(this, -1)">−</button>
         </div>
         <div class="inv-tile-qty-indicator"></div>`;
 

@@ -667,10 +667,10 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
     const ctrl = document.createElement('div');
     ctrl.className = 'inv-card-tile-qty-ctrl';
     ctrl.innerHTML = `
-        <button class="inv-tile-qty-btn inv-tile-qty-add" type="button">+</button>
+        <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-add" type="button">+</button>
         <input class="inv-tile-qty-input" type="number" value="${qty}" min="0" max="999"
             data-card-id="${cardId}" data-edition-id="${editionId}">
-        <button class="inv-tile-qty-btn inv-tile-qty-sub" type="button">−</button>`;
+        <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-sub" type="button">−</button>`;
     tile.appendChild(ctrl);
 
     // Resolve foil lazily on first hover

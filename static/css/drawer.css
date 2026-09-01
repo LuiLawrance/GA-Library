@@ -20,7 +20,7 @@
 
 .card-drawer.open {
     transform: translateX(0);
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-drawer);
 }
 
 .card-drawer::-webkit-scrollbar {
@@ -64,7 +64,7 @@
     background: none;
     border: none;
     border-radius: 9px;
-    color: #c86e6e;
+    color: var(--error);
     font-size: 0.9rem;
     font-weight: 700;
     cursor: pointer;
@@ -77,7 +77,7 @@
 
 .drawer-sidebar-close:hover {
     color: #ffffff;
-    background: #c86e6e;
+    background: var(--error);
 }
 
 .drawer-sidebar-divider {
@@ -88,20 +88,12 @@
     flex-shrink: 0;
 }
 
+/* Shared .btn .btn--icon (components.css) at 34px, dimmed until active/hover. */
 .drawer-sidebar-btn {
-    width: 34px;
-    height: 34px;
-    background: none;
-    border: 1px solid transparent;
+    --btn-size: 34px;
     border-radius: 9px;
     font-size: 1.2rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
     opacity: 0.35;
-    flex-shrink: 0;
 }
 
 .drawer-sidebar-btn:hover {
@@ -162,19 +154,8 @@
     gap: 16px;
 }
 
-.drawer-card-image.fade-out,
-.drawer-card-info.fade-out {
-    opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.drawer-card-image.fade-in,
-.drawer-card-info.fade-in {
-    opacity: 1;
-    transform: translateY(0);
-    transition: opacity 0.2s ease, transform 0.2s ease;
-}
+/* .drawer-card-image / .drawer-card-info fade via the shared .fade-out /
+   .fade-in (main.css). */
 
 .drawer-name-row {
     display: flex;
@@ -196,7 +177,7 @@
 }
 
 .drawer-set {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-top: 4px;
@@ -223,12 +204,10 @@
     margin-left: auto;
 }
 
+/* Shared .label (main.css) + drawer's tighter tracking. */
 .drawer-section-label {
-    font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
     letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
     margin-bottom: 6px;
 }
 
@@ -239,7 +218,7 @@
 }
 
 .drawer-type-tag {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--text-muted);
     background: var(--bg);
@@ -268,12 +247,9 @@
     gap: 2px;
 }
 
+/* Shared .label .label--muted .label--sm (main.css) + tighter tracking. */
 .drawer-stat-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
     letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
 }
 
 .drawer-stat-value {
@@ -297,10 +273,10 @@
 }
 
 .effect-tag {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: #ffffff;
-    background: #1a1a1a;
+    background: var(--bg);
     border: 1px solid #ffffff;
     border-radius: 4px;
     padding: 1px 3px;
@@ -322,7 +298,7 @@
 }
 
 .drawer-legal-tag {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     padding: 3px 8px;
     border-radius: 4px;
@@ -423,7 +399,7 @@
     left: 6px;
     background: rgba(0, 0, 0, 0.6);
     color: var(--text);
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.04em;
     padding: 2px 6px;
@@ -443,7 +419,7 @@
     position: absolute;
     bottom: 6px;
     left: 6px;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -521,12 +497,9 @@
     margin-bottom: 4px;
 }
 
+/* Shared .label .label--muted .label--sm (main.css) + tighter tracking. */
 .collector-section-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
     letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-muted);
     margin-bottom: 10px;
     text-align: center;
 }
@@ -552,7 +525,7 @@
 }
 
 .collector-kind {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
     white-space: nowrap;
@@ -591,7 +564,7 @@
 }
 
 .collector-pop {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text);
     min-width: 48px;
@@ -603,7 +576,7 @@
 }
 
 .collector-pct {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.63rem;
     color: var(--text-muted);
     min-width: 30px;
@@ -611,7 +584,7 @@
 }
 
 .collector-badge {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.58rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -653,7 +626,7 @@
 }
 
 .pricing-empty {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
     padding: 4px 0 10px;
@@ -680,20 +653,14 @@
 
 /* Modeled on .admin-pid-tcg-btn (see admin.css) at a smaller scale to fit
    this section header alongside its label. */
+/* Shared .btn .btn--icon (components.css) at 26px. */
 .pricing-tcg-btn {
     position: absolute;
     top: 50%;
     right: 0;
     transform: translateY(-50%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 26px;
-    height: 26px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    transition: border-color 0.15s;
+    --btn-size: 26px;
+    border-color: var(--border);
 }
 
 .pricing-tcg-btn:hover {
@@ -733,7 +700,7 @@
 }
 
 .pricing-chart-axis-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     fill: var(--text-muted);
 }
@@ -753,7 +720,7 @@
    reads as a heading for that stretch of the axis rather than another tick
    value. */
 .pricing-chart-month-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -813,7 +780,7 @@
 }
 
 .pricing-chart-end-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 600;
     fill: var(--text);
@@ -831,7 +798,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.65rem;
     color: var(--text-muted);
 }
@@ -872,7 +839,7 @@
 }
 
 .pricing-tooltip-series {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -880,14 +847,14 @@
 }
 
 .pricing-tooltip-price {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 600;
     color: var(--text);
 }
 
 .pricing-tooltip-meta {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.62rem;
     color: var(--text-muted);
     margin-top: 2px;
@@ -895,7 +862,7 @@
 }
 
 .thema-empty {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     padding: 16px 0;
@@ -919,16 +886,14 @@
     margin-bottom: 14px;
 }
 
+/* Shared .label (main.css) + tighter tracking. */
 .thema-col-label {
-    font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
     letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
 }
 
 .thema-dynamic-badge {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -947,7 +912,7 @@
 }
 
 .thema-cat {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.06em;
     text-transform: capitalize;
@@ -971,7 +936,7 @@
 }
 
 .thema-val {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text);
     text-align: right;

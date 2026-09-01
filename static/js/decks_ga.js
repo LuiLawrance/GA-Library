@@ -727,11 +727,11 @@ function renderDeckSections(deckData, animate = true) {
             header.className = 'dga-section-header';
             header.innerHTML = `
                 <span class="dga-section-label-group">
-                    <span class="dga-section-label dga-section-label-editable" title="Click to rename">${sectionName}</span><span class="dga-section-edit-icon">✎</span>
+                    <span class="dga-section-label label dga-section-label-editable" title="Click to rename">${sectionName}</span><span class="dga-section-edit-icon">✎</span>
                 </span>
                 <span class="dga-section-count">${sectionQty} card${sectionQty !== 1 ? 's' : ''}</span>
                 <div class="dga-section-header-actions">
-                    <button class="dga-section-action-btn dga-section-action-delete" title="Delete section">✕</button>
+                    <button class="dga-section-action-btn btn btn--subtle dga-section-action-delete" title="Delete section">✕</button>
                 </div>`;
 
             const label = header.querySelector('.dga-section-label-editable');
@@ -851,7 +851,7 @@ const dgaDeckEditMode = new TileEditMode('dga-qty-confirm-bar', async (changes) 
                     activeDeckData.sections[section][c.cardId] = c.quantity;
             }
             // Update badge
-            const badge = c.input.closest('.dga-card-tile')?.querySelector('.dga-qty-badge');
+            const badge = c.input.closest('.dga-card-tile')?.querySelector('.inv-qty-badge');
             if (badge) {
                 badge.textContent = `x${c.quantity}`;
                 badge.style.display = c.quantity > 0 ? '' : 'none';
@@ -927,19 +927,19 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
                 onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
         </div>
-        <span class="dga-qty-badge">x${qty}</span>
-        <div class="dga-card-tile-overlay">
-            <div class="dga-card-tile-info">
+        <span class="inv-qty-badge">x${qty}</span>
+        <div class="inv-card-tile-overlay">
+            <div class="inv-card-tile-info">
                 <div class="dga-card-tile-name">${cardName}</div>
                 <div class="dga-card-tile-foil">${sectionName}</div>
             </div>
         </div>
         <div class="inv-card-tile-qty-ctrl">
-            <button class="inv-tile-qty-btn inv-tile-qty-add" type="button">+</button>
+            <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-add" type="button">+</button>
             <input class="inv-tile-qty-input" type="number" value="${qty}" min="0" max="999"
                 data-card-id="${card_id}"
                 data-section="${sectionName}">
-            <button class="inv-tile-qty-btn inv-tile-qty-sub" type="button">−</button>
+            <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-sub" type="button">−</button>
         </div>
         <div class="inv-tile-qty-indicator"></div>`;
 
@@ -947,7 +947,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
     if (imgSrc) queueTileImageLoad(tile.querySelector('.edition-tile-wrap img'), imgSrc);
 
     const input = tile.querySelector('.inv-tile-qty-input');
-    const badge = tile.querySelector('.dga-qty-badge');
+    const badge = tile.querySelector('.inv-qty-badge');
 
     tile.addEventListener('contextmenu', e => {
         e.preventDefault();
@@ -982,7 +982,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
         // Clean drag ghost: the card itself, minus overlay and qty controls
         const rect = tile.getBoundingClientRect();
         const ghost = tile.cloneNode(true);
-        ghost.querySelector('.dga-card-tile-overlay')?.remove();
+        ghost.querySelector('.inv-card-tile-overlay')?.remove();
         ghost.querySelector('.inv-card-tile-qty-ctrl')?.remove();
         ghost.classList.remove('dga-dragging');
         ghost.style.cssText = `position: fixed; top: -9999px; left: -9999px;` +
@@ -1199,7 +1199,7 @@ function renderSectionList() {
         row.className = 'dga-section-row';
         row.innerHTML = `
             <span class="dga-section-row-name">${name}</span>
-            <button class="dga-section-delete-btn" onclick="submitDeleteSection('${name.replace(/'/g, "\\'")}')">✕</button>`;
+            <button class="dga-section-delete-btn btn btn--subtle" onclick="submitDeleteSection('${name.replace(/'/g, "\\'")}')">✕</button>`;
         container.appendChild(row);
     });
 }

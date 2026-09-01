@@ -182,7 +182,7 @@ function buildCollectorHTML(foils) {
 
     return `
         <div class="collector-section">
-            <div class="collector-section-label">Population</div>
+            <div class="collector-section-label label label--muted label--sm">Population</div>
             ${rows}
         </div>`;
 }
@@ -235,7 +235,7 @@ function buildThemaHTML(thema) {
         return `
             <div class="thema-col">
                 <div class="thema-col-header">
-                    <span class="thema-col-label">${col.label}</span>
+                    <span class="thema-col-label label">${col.label}</span>
                     ${dynamicBadge}
                 </div>
                 ${barsHTML}
@@ -259,7 +259,7 @@ function buildTabThemaPanel(edition) {
            <div class="drawer-stats collector-edition-stats">
                ${editionStats.map(s => `
                    <div class="drawer-stat">
-                       <span class="drawer-stat-label">${s.label}</span>
+                       <span class="drawer-stat-label label label--muted label--sm">${s.label}</span>
                        <span class="drawer-stat-value">${s.value}</span>
                    </div>
                `).join('')}
@@ -268,7 +268,7 @@ function buildTabThemaPanel(edition) {
 
     return buildCollectorHTML(foils)
         + `<div class="collector-thema-divider"></div>`
-        + `<div class="collector-section-label">Thema</div>`
+        + `<div class="collector-section-label label label--muted label--sm">Thema</div>`
         + buildThemaHTML(thema)
         + editionStatsHTML;
 }
@@ -916,7 +916,7 @@ function buildPricingStats(sales, listings) {
         <div class="drawer-stats pricing-stats">
             ${stats.map(([label, value]) => `
                 <div class="drawer-stat">
-                    <span class="drawer-stat-label">${label}</span>
+                    <span class="drawer-stat-label label label--muted label--sm">${label}</span>
                     <span class="drawer-stat-value">${value}</span>
                 </div>
             `).join('')}
@@ -936,7 +936,7 @@ function pricingTcgPlayerHref(productId, searchName) {
 function pricingTcgLinkHTML(productId, searchName) {
     const href = pricingTcgPlayerHref(productId, searchName);
     return `
-        <a class="pricing-tcg-btn" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="View on TCGPlayer">
+        <a class="pricing-tcg-btn btn btn--icon" href="${escapeHtml(href)}" target="_blank" rel="noopener" title="View on TCGPlayer">
             <img src="/marketplaces/TCG%20Player.png" alt="TCG Player" class="pricing-tcg-icon">
         </a>`;
 }
@@ -950,7 +950,7 @@ function buildPricingFoilSection(foilId, label, pricing, linkHTML, mergeFoilId =
     return `
         <div class="pricing-section">
             <div class="pricing-section-header">
-                <div class="collector-section-label">${label}</div>
+                <div class="collector-section-label label label--muted label--sm">${label}</div>
                 ${linkHTML}
             </div>
             ${buildPricingStats(sales, listings)}
@@ -1095,12 +1095,20 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
         incoming.innerHTML = buildTabPricingPanel(edition, cardInfo.querySelector('.drawer-name')?.textContent || '');
     }
 
+    // Capture the editions grid's position NOW, while `outgoing` is still in
+    // layout — crossFade's onBetween fires only after `outgoing` has been
+    // display:none'd, which loses the outgoing panel's height contribution and
+    // left the shrink direction (switching to a shorter panel) un-animated.
+    // crossFade calls the returned play() once `incoming` is visible again, so
+    // the FLIP spans the full old-panel → new-panel height swing either way.
+    const playGridShift = captureEditionsGridShift(drawer);
+
     // Crossfade the panels; the editions grid below rides the height change of
-    // whichever panel is now showing (FLIP captured while both are hidden).
+    // whichever panel is now showing.
     crossFade(outgoing, incoming, () => {}, {
         outShift: 'translateY(-6px)',
         inShift: 'translateY(6px)',
-        onBetween: () => captureEditionsGridShift(drawer),
+        onBetween: () => playGridShift,
     });
 }
 
@@ -1200,7 +1208,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
             .filter(([, v]) => v !== null && v !== undefined)
             .map(([label, value]) => `
                 <div class="drawer-stat">
-                    <span class="drawer-stat-label">${label}</span>
+                    <span class="drawer-stat-label label label--muted label--sm">${label}</span>
                     <span class="drawer-stat-value">${value}</span>
                 </div>
             `).join('');
@@ -1260,7 +1268,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
 
                     <div class="drawer-tab-info">
                         <div>
-                            <div class="drawer-section-label">Types</div>
+                            <div class="drawer-section-label label">Types</div>
                             <div class="drawer-types">
                                 ${(card.types || []).map(t => `<span class="drawer-type-tag">${t}</span>`).join('')}
                             </div>
@@ -1268,19 +1276,19 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
 
                         ${statsHTML ? `
                         <div>
-                            <div class="drawer-section-label">Stats</div>
+                            <div class="drawer-section-label label">Stats</div>
                             <div class="drawer-stats">${statsHTML}</div>
                         </div>` : ''}
 
                         ${card.effect ? `
                         <div>
-                            <div class="drawer-section-label">Effect</div>
+                            <div class="drawer-section-label label">Effect</div>
                             <div class="drawer-effect">${parseEffect(card.effect, cardName)}</div>
                         </div>` : ''}
 
                         ${legalityHTML ? `
                         <div>
-                            <div class="drawer-section-label">Legality</div>
+                            <div class="drawer-section-label label">Legality</div>
                             <div class="drawer-legality">${legalityHTML}</div>
                         </div>` : ''}
 
@@ -1293,7 +1301,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
             </div>
 
             <div class="drawer-editions-section">
-                <div class="drawer-section-label">Editions</div>
+                <div class="drawer-section-label label">Editions</div>
                 <div class="drawer-editions">${editionsHTML}</div>
             </div>
         `;

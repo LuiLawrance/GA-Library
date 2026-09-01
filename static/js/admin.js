@@ -1317,15 +1317,15 @@ function renderAdminUserProfileCol() {
         </div>
         <div class="drawer-stats">
             <div class="drawer-stat">
-                <span class="drawer-stat-label">Bins</span>
+                <span class="drawer-stat-label label label--muted label--sm">Bins</span>
                 <span class="drawer-stat-value">${binCount ?? '…'}</span>
             </div>
             <div class="drawer-stat">
-                <span class="drawer-stat-label">Cards</span>
+                <span class="drawer-stat-label label label--muted label--sm">Cards</span>
                 <span class="drawer-stat-value">${cardCount ?? '…'}</span>
             </div>
             <div class="drawer-stat">
-                <span class="drawer-stat-label">Decks</span>
+                <span class="drawer-stat-label label label--muted label--sm">Decks</span>
                 <span class="drawer-stat-value">${deckCount ?? '…'}</span>
             </div>
         </div>
@@ -1389,7 +1389,7 @@ function adminUserBinTilesHtml(loaded) {
         `;
     }).join('');
 
-    return `<div class="admin-user-tile-grid">${tiles}</div>`;
+    return `<div class="admin-user-tile-grid scroll-thin">${tiles}</div>`;
 }
 
 // Mirrors buildDeckTile() in decks_ga.js (static/css/decks_ga.css .dga-deck-tile*),
@@ -1415,7 +1415,7 @@ function adminUserDeckTilesHtml(loaded) {
         `;
     }).join('');
 
-    return `<div class="admin-user-tile-grid">${tiles}</div>`;
+    return `<div class="admin-user-tile-grid scroll-thin">${tiles}</div>`;
 }
 
 async function loadAdminPricingIds() {
@@ -1571,7 +1571,7 @@ function renderAdminInfoSetsPanel() {
     };
 
     const groupHtml = (label, groupRows, featured) => !groupRows.length ? '' : `
-        <div class="admin-pricing-sets-group-label ${featured ? 'admin-pricing-sets-group-label-featured' : ''}">${escapeHtml(label)}</div>
+        <div class="admin-pricing-sets-group-label label label--muted ${featured ? 'admin-pricing-sets-group-label-featured' : ''}">${escapeHtml(label)}</div>
         ${groupRows.map(rowHtml).join('')}
     `;
 
@@ -1609,7 +1609,7 @@ function renderAdminInfoSetsPanel() {
         </div>
         <div class="admin-pricing-sets-status" id="admin-pricing-sets-status"></div>
         <div class="admin-pricing-sets-progress-wrap hidden" id="admin-pricing-sets-progress-wrap"></div>
-        <div class="admin-pricing-sets-list">
+        <div class="admin-pricing-sets-list scroll-thin">
             ${rowsHtml || '<div class="admin-pid-detail-empty-small">No cards loaded.</div>'}
         </div>
     `;
@@ -1974,7 +1974,7 @@ function adminPidImportPopoverHtml(idPrefix, title, hint, placeholder, submitFnN
                     onclick="event.stopPropagation(); toggleAdminPidImportPopover('${idPrefix}')" title="${escapeHtml(title)}">📥</button>
             <div class="admin-pid-add-entry-menu admin-pid-import-menu hidden" id="${idPrefix}-menu" onclick="event.stopPropagation()">
                 <span class="admin-pid-import-hint">${escapeHtml(hint)}</span>
-                <textarea class="admin-pid-import-textarea" id="${idPrefix}-textarea"
+                <textarea class="admin-pid-import-textarea scroll-none" id="${idPrefix}-textarea"
                           placeholder='${placeholder}'></textarea>
                 <div class="admin-pid-import-actions">
                     <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
@@ -2489,12 +2489,12 @@ function adminPidSetFilterHtml() {
 
     return `
         <span class="set-dropdown-wrap">
-            <button type="button" class="set-dropdown-btn ${adminPidSetFilterOpen ? 'open' : ''}"
+            <button type="button" class="set-dropdown-btn btn btn--ghost btn--mono ${adminPidSetFilterOpen ? 'open' : ''}"
                     onclick="event.stopPropagation(); toggleAdminPidSetFilter()">
                 <span>Set</span>
                 <span class="set-dropdown-arrow">&#8249;</span>
             </button>
-            <div class="set-dropdown-menu ${adminPidSetFilterOpen ? '' : 'hidden'}">
+            <div class="set-dropdown-menu menu ${adminPidSetFilterOpen ? '' : 'hidden'}">
                 ${optionsHtml || '<div class="admin-pid-detail-empty-small">No sets</div>'}
             </div>
         </span>
@@ -2564,12 +2564,12 @@ function adminPidRarityFilterHtml() {
 
     return `
         <span class="set-dropdown-wrap">
-            <button type="button" class="set-dropdown-btn ${adminPidRarityFilterOpen ? 'open' : ''}"
+            <button type="button" class="set-dropdown-btn btn btn--ghost btn--mono ${adminPidRarityFilterOpen ? 'open' : ''}"
                     onclick="event.stopPropagation(); toggleAdminPidRarityFilter()">
                 <span>Rarity</span>
                 <span class="set-dropdown-arrow">&#8249;</span>
             </button>
-            <div class="set-dropdown-menu ${adminPidRarityFilterOpen ? '' : 'hidden'}">
+            <div class="set-dropdown-menu menu ${adminPidRarityFilterOpen ? '' : 'hidden'}">
                 ${optionsHtml || '<div class="admin-pid-detail-empty-small">No rarities</div>'}
             </div>
         </span>
@@ -3363,11 +3363,11 @@ function renderAdminPricingImageCol() {
         statsHtml = `
             <div class="drawer-stats admin-pid-scrape-stats">
                 <div class="drawer-stat">
-                    <span class="drawer-stat-label">Released</span>
+                    <span class="drawer-stat-label label label--muted label--sm">Released</span>
                     <span class="drawer-stat-value">${escapeHtml(record.release_date || 'Unknown')}</span>
                 </div>
                 <div class="drawer-stat">
-                    <span class="drawer-stat-label">Last Updated</span>
+                    <span class="drawer-stat-label label label--muted label--sm">Last Updated</span>
                     <span class="drawer-stat-value">${escapeHtml(record.last_updated || 'Unknown')}</span>
                 </div>
             </div>
@@ -3394,21 +3394,21 @@ function renderAdminPricingImageCol() {
                     <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Sales date"
                             ${lastSales === 'Never' ? 'disabled' : ''}
                             onclick="clearAdminPidLastUpdated('sales')">❌</button>
-                    <span class="drawer-stat-label">Last Sales</span>
+                    <span class="drawer-stat-label label label--muted label--sm">Last Sales</span>
                     <span class="drawer-stat-value">${escapeHtml(lastSales)}</span>
                 </div>
                 <div class="drawer-stat">
                     <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Listings date"
                             ${lastListings === 'Never' ? 'disabled' : ''}
                             onclick="clearAdminPidLastUpdated('listings')">❌</button>
-                    <span class="drawer-stat-label">Last Listings</span>
+                    <span class="drawer-stat-label label label--muted label--sm">Last Listings</span>
                     <span class="drawer-stat-value">${escapeHtml(lastListings)}</span>
                 </div>
             </div>
         `;
         pidRowHtml = `
             <div class="admin-pid-detail-pid-row">
-                <label class="admin-pid-detail-label">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
+                <label class="admin-pid-detail-label label label--muted">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
                 ${adminPidProductIdFieldHtml(record)}
             </div>
         `;
@@ -3550,7 +3550,7 @@ function renderAdminInfoIdsPanel(panel, record) {
         foilsHtml = adminPidDetailFoils.map(f => `
             <li class="admin-pid-id-tree-node">
                 <span class="admin-pid-id-tree-row">
-                    <span class="admin-pid-detail-label">${escapeHtml(f.kind)}</span>
+                    <span class="admin-pid-detail-label label label--muted">${escapeHtml(f.kind)}</span>
                     <span class="admin-pid-detail-id-value">${escapeHtml(f.foil_id)}</span>
                     ${adminInfoTreeMetaChip('Pop', f.population != null ? String(f.population) : null)}
                 </span>
@@ -3580,13 +3580,13 @@ function renderAdminInfoIdsPanel(panel, record) {
             <ul class="admin-pid-id-tree-list">
                 <li class="admin-pid-id-tree-node admin-pid-id-tree-node-root">
                     <span class="admin-pid-id-tree-row">
-                        <span class="admin-pid-detail-label">Card</span>
+                        <span class="admin-pid-detail-label label label--muted">Card</span>
                         <span class="admin-pid-detail-id-value">${escapeHtml(record.card_id)}</span>
                     </span>
                     <ul class="admin-pid-id-tree-list">
                         <li class="admin-pid-id-tree-node">
                             <span class="admin-pid-id-tree-row">
-                                <span class="admin-pid-detail-label">Edition</span>
+                                <span class="admin-pid-detail-label label label--muted">Edition</span>
                                 <span class="admin-pid-detail-id-value">${escapeHtml(record.edition_id)}</span>
                             </span>
                             ${editionMetaHtml}
@@ -3599,7 +3599,7 @@ function renderAdminInfoIdsPanel(panel, record) {
             </ul>
             <div class="admin-pid-id-tree-footer">
                 <div class="drawer-stat admin-pid-id-tree-synced-stat">
-                    <span class="drawer-stat-label">Last Synced</span>
+                    <span class="drawer-stat-label label label--muted label--sm">Last Synced</span>
                     <span class="drawer-stat-value">${escapeHtml(record.system_updated || 'Never')}</span>
                 </div>
                 <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pid-id-tree-refresh-btn"
@@ -3719,7 +3719,7 @@ function adminPidBulkPasteFormHtml() {
                 works around the ~5-row cap when scraping while logged out.
                 ${curioView ? ' Imports to the Curio Foil, not the regular product.' : ''}
             </span>
-            <textarea class="admin-pid-bulk-paste-textarea" id="admin-pid-bulk-paste-textarea"
+            <textarea class="admin-pid-bulk-paste-textarea scroll-none" id="admin-pid-bulk-paste-textarea"
                       placeholder="7/9/26&#10;NM&#10;1&#9;$0.05"></textarea>
             <div class="admin-pid-add-entry-actions">
                 <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-bulk-paste-btn"
@@ -3888,12 +3888,12 @@ function adminPidDropdownHtml({wrapId, menuId, btnId, labelId, hiddenId, label, 
 
     return `
         <div class="admin-pid-dropdown-wrap" id="${wrapId}">
-            <button type="button" class="admin-pid-dropdown-btn" id="${btnId}"
+            <button type="button" class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="${btnId}"
                     onclick="toggleAdminPidDropdown('${menuId}', '${btnId}')" ${disabled ? 'disabled' : ''}>
                 <span id="${labelId}">${escapeHtml(label || '')}</span>
                 <span class="admin-pid-dropdown-arrow">&#8249;</span>
             </button>
-            <div class="admin-pid-dropdown-menu hidden" id="${menuId}">
+            <div class="admin-pid-dropdown-menu menu hidden" id="${menuId}">
                 ${optionsHtml}
             </div>
             <input type="hidden" id="${hiddenId}" value="${escapeHtml(value || '')}">
@@ -3966,13 +3966,13 @@ function adminPidMarketplaceFieldHtml() {
 
     return `
         <div class="admin-pid-dropdown-wrap" id="admin-pid-marketplace-dropdown-wrap">
-            <div class="admin-pid-dropdown-btn" id="admin-pid-marketplace-dropdown-btn">
+            <div class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="admin-pid-marketplace-dropdown-btn">
                 <input type="text" class="admin-pid-marketplace-input" id="admin-pid-add-marketplace"
                        placeholder="Marketplace" value="TCGPlayer" onfocus="openAdminPidMarketplaceDropdown()">
                 <span class="admin-pid-dropdown-arrow"
                       onclick="toggleAdminPidDropdown('admin-pid-marketplace-dropdown-menu', 'admin-pid-marketplace-dropdown-btn')">&#8249;</span>
             </div>
-            <div class="admin-pid-dropdown-menu hidden" id="admin-pid-marketplace-dropdown-menu">
+            <div class="admin-pid-dropdown-menu menu hidden" id="admin-pid-marketplace-dropdown-menu">
                 ${optionsHtml}
             </div>
         </div>
@@ -4117,7 +4117,7 @@ function adminPidDetailHistoryTableHtml(rows, loaded, type) {
         <div class="admin-pid-detail-row admin-pid-detail-row-header">
             <span>Date</span><span>Condition</span><span>Price</span><span>Qty</span><span></span>
         </div>
-        <div class="admin-pid-detail-table-scroll">
+        <div class="admin-pid-detail-table-scroll scroll-thin">
             <div class="admin-pid-detail-table">${rowsHtml}</div>
         </div>
     `;

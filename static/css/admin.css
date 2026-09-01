@@ -1,15 +1,9 @@
+/* Layout is the shared .page (main.css); this only adds a local custom prop. */
 .admin-page {
     /* .admin-cards-mode-info .admin-pricing-layout's first track width (see
        further down) — the list item itself has no explicit width of its
        own, it just stretches to fill whatever this track resolves to. */
     --admin-pid-info-list-width: 480px;
-
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    position: relative;
-    height: 100%;
 }
 
 .admin-subnav {
@@ -19,7 +13,7 @@
 }
 
 .admin-subnav-btn {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 400;
     color: var(--text-muted);
@@ -48,17 +42,7 @@
     padding: 32px;
 }
 
-.admin-content.fade-out {
-    opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.admin-content.fade-in {
-    opacity: 1;
-    transform: translateY(0);
-    transition: opacity 0.2s ease, transform 0.2s ease;
-}
+/* .fade-out / .fade-in are shared (main.css). */
 
 .admin-section {
     display: flex;
@@ -69,7 +53,7 @@
 
 .admin-section-title {
     display: block;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 500;
     letter-spacing: 0.1em;
@@ -274,7 +258,7 @@
     overflow-y: auto;
     margin: 0;
     padding: 10px;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -333,7 +317,7 @@
 
 .admin-system-db-pip[data-state="dirty"],
 .admin-system-db-pip[data-state="saving"] {
-    background: #d9a441;
+    background: var(--warning);
 }
 
 .admin-system-db-pip[data-state="saving"] {
@@ -341,7 +325,7 @@
 }
 
 .admin-system-db-pip[data-state="saved"] {
-    background: #3ba55d;
+    background: var(--success);
 }
 
 .admin-system-db-pip[data-state="error"] {
@@ -353,19 +337,13 @@
     50% { opacity: 0.3; }
 }
 
+/* Base input styling is global (components.css); overrides only. */
 .admin-system-db-input {
-    width: 100%;
     padding: 7px 9px;
-    font-family: inherit;
     font-size: 0.82rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
 }
 
 .admin-system-db-input:focus {
-    outline: none;
     border-color: var(--accent);
 }
 
@@ -581,7 +559,7 @@
 .admin-cards-subnav-btn {
     position: relative;
     z-index: 1;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 400;
     letter-spacing: 0.04em;
@@ -790,7 +768,7 @@
 .admin-pid-source-toggle-btn {
     position: relative;
     z-index: 1;
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.82rem;
     font-weight: 500;
     color: var(--text-muted);
@@ -814,7 +792,7 @@
 .admin-pid-search {
     flex: 1;
     max-width: 320px;
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.85rem;
     color: var(--text);
     background: var(--bg-card);
@@ -1011,7 +989,7 @@
 }
 
 .admin-pid-import-hint {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.72rem;
     line-height: 1.5;
     color: var(--text-muted);
@@ -1024,7 +1002,7 @@
     width: 100%;
     height: 280px;
     resize: none;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text);
     background: var(--bg-card);
@@ -1032,13 +1010,9 @@
     border-radius: var(--radius-sm);
     padding: 8px 10px;
     overflow-y: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
 }
 
-.admin-pid-import-textarea::-webkit-scrollbar {
-    display: none;
-}
+/* Scrollbar hidden via the shared .scroll-none (main.css). */
 
 .admin-pid-import-textarea:focus {
     outline: none;
@@ -1057,7 +1031,7 @@
 }
 
 .admin-pid-refresh-btn {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.82rem;
     font-weight: 500;
     color: var(--bg);
@@ -1269,7 +1243,7 @@
 }
 
 .admin-pricing-sets-title {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -1305,7 +1279,7 @@
 }
 
 .admin-pricing-sets-progress-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
     margin-bottom: 6px;
@@ -1332,12 +1306,10 @@
 /* Splits .admin-pricing-sets-list into Featured/Other (see
    renderAdminInfoSetsPanel) — plain section headers within the same
    scrolling list rather than two separate boxes. */
+/* Shared .label .label--muted (main.css) + smaller size / tighter tracking. */
 .admin-pricing-sets-group-label {
-    font-family: 'DM Mono', monospace;
     font-size: 0.68rem;
     letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-muted);
     padding: 10px 0 4px;
 }
 
@@ -1406,7 +1378,7 @@
 }
 
 .admin-pricing-sets-prefix {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
 }
@@ -1429,7 +1401,7 @@
 .admin-pricing-sets-groupid {
     width: 72px;
     flex-shrink: 0;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text);
     background: var(--bg);
@@ -1459,7 +1431,7 @@
     flex-shrink: 0;
     width: 14px;
     text-align: center;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
 }
@@ -1476,7 +1448,7 @@
        digits each row's count happens to have. */
     min-width: 28px;
     text-align: right;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.8rem;
     color: var(--text);
 }
@@ -1530,27 +1502,7 @@
     border-color: var(--error);
 }
 
-.admin-pricing-image-col.fade-out,
-.admin-pricing-detail.fade-out,
-.admin-user-profile-col.fade-out,
-.admin-user-detail.fade-out,
-.admin-pid-table-header.fade-out,
-.admin-pid-table.fade-out {
-    opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.admin-pricing-image-col.fade-in,
-.admin-pricing-detail.fade-in,
-.admin-user-profile-col.fade-in,
-.admin-user-detail.fade-in,
-.admin-pid-table-header.fade-in,
-.admin-pid-table.fade-in {
-    opacity: 1;
-    transform: translateY(0);
-    transition: opacity 0.2s ease, transform 0.2s ease;
-}
+/* The panels above use the shared .fade-out / .fade-in (main.css). */
 
 /* Curio Foil toggle's own fade, used only on .admin-pricing-detail (see
    toggleAdminPidCurioView) — same look as .fade-out/.fade-in above, just
@@ -1589,38 +1541,7 @@
     transition: opacity 0.5s ease, transform 0.5s ease;
 }
 
-.admin-pid-table-scroll::-webkit-scrollbar,
-.admin-pid-detail-table-scroll::-webkit-scrollbar,
-.admin-user-table-scroll::-webkit-scrollbar,
-.admin-user-tile-grid::-webkit-scrollbar,
-.admin-pricing-sets-list::-webkit-scrollbar {
-    width: 8px;
-}
-
-.admin-pid-table-scroll::-webkit-scrollbar-track,
-.admin-pid-detail-table-scroll::-webkit-scrollbar-track,
-.admin-user-table-scroll::-webkit-scrollbar-track,
-.admin-user-tile-grid::-webkit-scrollbar-track,
-.admin-pricing-sets-list::-webkit-scrollbar-track {
-    background: var(--bg);
-}
-
-.admin-pid-table-scroll::-webkit-scrollbar-thumb,
-.admin-pid-detail-table-scroll::-webkit-scrollbar-thumb,
-.admin-user-table-scroll::-webkit-scrollbar-thumb,
-.admin-user-tile-grid::-webkit-scrollbar-thumb,
-.admin-pricing-sets-list::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 8px;
-}
-
-.admin-pid-table-scroll::-webkit-scrollbar-thumb:hover,
-.admin-pid-detail-table-scroll::-webkit-scrollbar-thumb:hover,
-.admin-user-table-scroll::-webkit-scrollbar-thumb:hover,
-.admin-user-tile-grid::-webkit-scrollbar-thumb:hover,
-.admin-pricing-sets-list::-webkit-scrollbar-thumb:hover {
-    background: var(--border-focus);
-}
+/* The admin table/list scroll containers use the shared .scroll-thin (main.css). */
 
 .admin-pid-table {
     display: flex;
@@ -1651,7 +1572,7 @@
 }
 
 .admin-pid-row-header {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -1681,7 +1602,7 @@
    the shared uppercase header look above — same font/size/case as the card
    names underneath it. */
 .admin-pid-row-header .admin-pid-col-name {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.85rem;
     letter-spacing: normal;
     text-transform: none;
@@ -1740,13 +1661,13 @@
 }
 
 .admin-pid-col-rarity {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
 }
 
 .admin-pid-col-set {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
 }
@@ -1764,7 +1685,7 @@
 
 .admin-pid-input {
     width: 100%;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.8rem;
     color: var(--text);
     background: var(--bg-card);
@@ -1902,7 +1823,7 @@
 
 .admin-pid-find-btn.finding {
     color: var(--accent);
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
 }
 
 .admin-pid-empty {
@@ -2006,7 +1927,7 @@
 }
 
 .admin-user-row-header {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -2037,7 +1958,7 @@
 }
 
 .admin-user-profile-role {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -2117,7 +2038,7 @@
 }
 
 .admin-user-col-role {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     text-transform: capitalize;
@@ -2132,7 +2053,7 @@
 
 .admin-pid-col-sales,
 .admin-pid-col-listings {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2219,12 +2140,9 @@
     gap: 12px;
 }
 
+/* Shared .label .label--muted (main.css) + tighter tracking. */
 .admin-pid-detail-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: var(--text-muted);
     white-space: nowrap;
 }
 
@@ -2327,7 +2245,7 @@
 }
 
 .admin-pid-id-tree-meta-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.66rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -2372,7 +2290,7 @@
    elsewhere for the one ID field that is: Product ID, in Pricing mode's own
    version of this panel). */
 .admin-pid-detail-id-value {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.8rem;
     color: var(--text);
     word-break: break-all;
@@ -2392,7 +2310,7 @@
 
 .admin-pid-detail-section-title {
     display: block;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -2424,7 +2342,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 1rem;
     font-weight: 500;
     line-height: 1;
@@ -2451,7 +2369,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-menu);
     z-index: 300;
     padding: 12px;
     display: flex;
@@ -2483,7 +2401,7 @@
 }
 
 .admin-pid-bulk-paste-hint {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.72rem;
     line-height: 1.5;
     color: var(--text-muted);
@@ -2493,7 +2411,7 @@
     width: 100%;
     height: 280px;
     resize: none;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text);
     background: var(--bg-card);
@@ -2501,13 +2419,9 @@
     border-radius: var(--radius-sm);
     padding: 8px 10px;
     overflow-y: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
 }
 
-.admin-pid-bulk-paste-textarea::-webkit-scrollbar {
-    display: none;
-}
+/* Scrollbar hidden via the shared .scroll-none (main.css). */
 
 .admin-pid-bulk-paste-textarea:focus {
     outline: none;
@@ -2519,21 +2433,16 @@
     position: relative;
 }
 
+/* Shared .btn .btn--ghost .btn--mono (components.css). */
 .admin-pid-dropdown-btn {
     width: 100%;
-    font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
-    color: var(--text);
     background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 6px 10px;
-    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    transition: border-color 0.2s;
 }
 
 .admin-pid-dropdown-btn:hover,
@@ -2559,26 +2468,20 @@
     transform: rotate(90deg);
 }
 
+/* Shared .menu (components.css) — full-width, scrolls when tall, above the drawer. */
 .admin-pid-dropdown-menu {
-    position: absolute;
-    top: calc(100% + 6px);
     left: 0;
     right: 0;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     z-index: 301;
     max-height: 200px;
     overflow-y: auto;
-    animation: revealDown 0.2s ease forwards;
 }
 
 .admin-pid-dropdown-option {
     padding: 8px 12px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     letter-spacing: 0.04em;
@@ -2683,7 +2586,7 @@
 .admin-pid-add-entry-input {
     flex: 1;
     min-width: 0;
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.8rem;
     color: var(--text);
     background: var(--bg-card);
@@ -2782,7 +2685,7 @@
 
 .admin-pid-detail-row-header {
     flex-shrink: 0;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;

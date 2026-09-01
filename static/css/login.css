@@ -24,13 +24,7 @@
     gap: 6px;
 }
 
-.login-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
-}
+/* .login-label is the shared .label (main.css). */
 
 .login-title {
     font-size: 1.5rem;
@@ -70,37 +64,17 @@
 }
 
 label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--text-muted);
 }
 
-input {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.9rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    outline: none;
-    transition: border-color 0.2s;
-    width: 100%;
-}
-
-input:focus {
-    border-color: var(--border-focus);
-}
-
-input::placeholder {
-    color: var(--text-muted);
-    opacity: 0.5;
-}
+/* The global input / textarea styling lives in components.css. */
 
 .error-msg {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--error);
     background: rgba(200, 110, 110, 0.08);
@@ -114,22 +88,11 @@ input::placeholder {
     display: block;
 }
 
+/* Shared .btn .btn--primary (components.css). */
 .btn-submit {
-    font-family: 'Sora', sans-serif;
     font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--bg);
-    background: var(--accent);
-    border: none;
-    border-radius: var(--radius-sm);
     padding: 11px 20px;
-    cursor: pointer;
-    transition: background 0.2s;
     width: 100%;
-}
-
-.btn-submit:hover {
-    background: var(--accent-dim);
 }
 
 .form-switch {
@@ -142,7 +105,7 @@ input::placeholder {
 }
 
 .btn-switch {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.82rem;
     color: var(--accent);
     background: none;

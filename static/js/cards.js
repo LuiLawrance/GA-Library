@@ -265,7 +265,19 @@ function buildFeaturedSetTile(group, index, total) {
         // time. Matches index.gatcg.com's own featured tiles, which search
         // every prefix in the release together rather than just one.
         document.getElementById('card-search').value = '';
-        selectedSets = new Set(prefixes.map(p => p.toUpperCase()));
+        // Resolve each release prefix to its canonical spelling from /api/sets
+        // before selecting it: the two sources can disagree on case (the
+        // featured data has "RDO 1st" while /api/sets reports "RDO 1st" in DB
+        // mode but "RDO 1ST" in JSON mode), and renderSetOptions matches
+        // selectedSets against the /api/sets values exactly — a blind
+        // toUpperCase() left the mixed-case "… 1st" entries unchecked. Fall
+        // back to the raw prefix when it isn't in the list yet.
+        const setContainer = document.getElementById('set-dropdown-options');
+        const knownSets = setContainer?.dataset.sets ? JSON.parse(setContainer.dataset.sets) : [];
+        selectedSets = new Set(prefixes.map(p => {
+            const lc = p.toLowerCase();
+            return knownSets.find(s => s.toLowerCase() === lc) || p;
+        }));
         updateSetDropdownLabel();
         renderSetOptions();
         searchCards();

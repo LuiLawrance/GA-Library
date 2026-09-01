@@ -125,7 +125,7 @@
 }
 
 .inv-card-tile-foil {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: rgba(255, 255, 255, 0.75);
     text-align: center;

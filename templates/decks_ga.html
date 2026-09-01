@@ -1,4 +1,4 @@
-<div class="dga-page" id="dga-page">
+<div class="dga-page page" id="dga-page">
 
     <!-- ── Deck card context menu ── -->
     <div class="inv-context-menu hidden" id="dga-card-context-menu">
@@ -25,14 +25,14 @@
     </div>
 
     <!-- ── Deck rename modal ── -->
-    <div class="inv-modal-overlay hidden" id="dga-rename-modal" onclick="dgaCloseRenameModal()">
-        <div class="inv-modal" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-rename-modal" onclick="dgaCloseRenameModal()">
+        <div class="inv-modal modal" onclick="event.stopPropagation()">
             <div class="inv-modal-header">
                 <span class="inv-modal-title">Rename Deck</span>
                 <button class="inv-modal-close" onclick="dgaCloseRenameModal()">✕</button>
             </div>
             <div class="inv-field-group">
-                <label class="inv-field-label">Name</label>
+                <label class="inv-field-label label label--muted">Name</label>
                 <input class="inv-text-input" id="dga-rename-input"
                        onkeydown="if(event.key==='Enter') dgaSubmitRename(); if(event.key==='Escape') dgaCloseRenameModal();"
                        type="text">
@@ -43,14 +43,14 @@
     </div>
 
     <!-- ── Deck edit description modal ── -->
-    <div class="inv-modal-overlay hidden" id="dga-desc-modal" onclick="dgaCloseDescModal()">
-        <div class="inv-modal" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-desc-modal" onclick="dgaCloseDescModal()">
+        <div class="inv-modal modal" onclick="event.stopPropagation()">
             <div class="inv-modal-header">
                 <span class="inv-modal-title">Edit Description</span>
                 <button class="inv-modal-close" onclick="dgaCloseDescModal()">✕</button>
             </div>
             <div class="inv-field-group">
-                <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+                <label class="inv-field-label label label--muted">Description <span class="inv-optional">(optional)</span></label>
                 <input class="inv-text-input" id="dga-desc-input" maxlength="100"
                        onkeydown="if(event.key==='Enter') dgaSubmitDesc(); if(event.key==='Escape') dgaCloseDescModal();"
                        placeholder="..."
@@ -63,19 +63,19 @@
 
     <!-- ── Deck list view ── -->
     <div class="dga-list-view" id="dga-list-view">
-        <div class="dga-header">
+        <div class="dga-header list-header">
             <div>
-                <span class="dga-label">My Decks</span>
+                <span class="dga-label label">My Decks</span>
                 <span class="dga-subtitle" id="dga-subtitle">Loading...</span>
             </div>
-            <button class="dga-create-btn" onclick="openCreateDeckModal()">+ New Deck</button>
+            <button class="dga-create-btn btn btn--ghost btn--mono" onclick="openCreateDeckModal()">+ New Deck</button>
         </div>
-        <div class="dga-deck-grid" id="dga-deck-grid"></div>
+        <div class="dga-deck-grid scroll-thin" id="dga-deck-grid"></div>
     </div>
 
     <!-- ── Deck detail view ── -->
     <div class="dga-detail-view hidden" id="dga-detail-view">
-        <div class="dga-detail-header">
+        <div class="dga-detail-header detail-header">
             <div class="dga-detail-back" onclick="closeDeckDetail()">
                 <span class="dga-back-arrow">←</span>
                 <span>My Decks</span>
@@ -100,8 +100,8 @@
                 <div class="dga-detail-header-right">
                     <div class="dga-detail-counts" id="dga-detail-counts"></div>
                     <div class="inv-detail-controls">
-                        <button class="inv-detail-add-btn" onclick="openDeckAddModal()" title="Add card">+</button>
-                        <button class="inv-settings-btn" onclick="openDeckSettingsModal()" title="Deck settings">⚙
+                        <button class="inv-detail-add-btn btn btn--ghost" onclick="openDeckAddModal()" title="Add card">+</button>
+                        <button class="inv-settings-btn btn btn--icon" onclick="openDeckSettingsModal()" title="Deck settings">⚙
                         </button>
                     </div>
                 </div>
@@ -119,36 +119,36 @@
                     </button>
                 </div>
             </div>
-            <div class="dga-card-grid-wrap">
+            <div class="dga-card-grid-wrap scroll-thin">
                 <div class="dga-card-grid" id="dga-card-grid"></div>
             </div>
         </div>
     </div>
 
     <!-- ── Create deck modal ── -->
-    <div class="inv-modal-overlay hidden" id="dga-create-modal" onclick="closeCreateDeckModal()">
-        <div class="inv-modal" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-create-modal" onclick="closeCreateDeckModal()">
+        <div class="inv-modal modal" onclick="event.stopPropagation()">
             <div class="inv-modal-header">
                 <span class="inv-modal-title">New Deck</span>
                 <button class="inv-modal-close" onclick="closeCreateDeckModal()">✕</button>
             </div>
             <div class="inv-modal-fields">
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Name</label>
+                    <label class="inv-field-label label label--muted">Name</label>
                     <input class="inv-text-input" id="dga-create-name"
                            onkeydown="if(event.key==='Enter') submitCreateDeck()" placeholder="Deck name"
                            type="text">
                 </div>
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Format</label>
+                    <label class="inv-field-label label label--muted">Format</label>
                     <div class="dga-fmt-dropdown-wrap">
-                        <button class="dga-fmt-dropdown-btn" id="dga-create-format-btn"
+                        <button class="dga-fmt-dropdown-btn btn btn--ghost btn--mono" id="dga-create-format-btn"
                                 onclick="toggleDgaFormatDropdown('create')"
                                 type="button">
                             <span id="dga-create-format-label">None</span>
                             <span class="dga-fmt-dropdown-arrow">&#8249;</span>
                         </button>
-                        <div class="dga-fmt-dropdown-menu hidden" id="dga-create-format-menu">
+                        <div class="dga-fmt-dropdown-menu menu hidden" id="dga-create-format-menu">
                             <div class="dga-fmt-dropdown-option selected" data-value="">None</div>
                             <div class="dga-fmt-dropdown-option" data-value="Standard">Standard</div>
                             <div class="dga-fmt-dropdown-option" data-value="Draft">Draft</div>
@@ -158,7 +158,7 @@
                     </div>
                 </div>
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+                    <label class="inv-field-label label label--muted">Description <span class="inv-optional">(optional)</span></label>
                     <input class="inv-text-input" id="dga-create-desc" maxlength="100" placeholder="..." type="text">
                 </div>
             </div>
@@ -168,27 +168,27 @@
     </div>
 
     <!-- ── Deck settings modal ── -->
-    <div class="inv-modal-overlay hidden" id="dga-settings-modal" onclick="closeDeckSettingsModal()">
-        <div class="inv-modal" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-settings-modal" onclick="closeDeckSettingsModal()">
+        <div class="inv-modal modal" onclick="event.stopPropagation()">
             <div class="inv-modal-header">
                 <span class="inv-modal-title">Deck Settings</span>
                 <button class="inv-modal-close" onclick="closeDeckSettingsModal()">✕</button>
             </div>
             <div class="inv-modal-fields">
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Name</label>
+                    <label class="inv-field-label label label--muted">Name</label>
                     <input class="inv-text-input" id="dga-settings-name" type="text">
                 </div>
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Format</label>
+                    <label class="inv-field-label label label--muted">Format</label>
                     <div class="dga-fmt-dropdown-wrap">
-                        <button class="dga-fmt-dropdown-btn" id="dga-settings-format-btn"
+                        <button class="dga-fmt-dropdown-btn btn btn--ghost btn--mono" id="dga-settings-format-btn"
                                 onclick="toggleDgaFormatDropdown('settings')"
                                 type="button">
                             <span id="dga-settings-format-label">None</span>
                             <span class="dga-fmt-dropdown-arrow">&#8249;</span>
                         </button>
-                        <div class="dga-fmt-dropdown-menu hidden" id="dga-settings-format-menu">
+                        <div class="dga-fmt-dropdown-menu menu hidden" id="dga-settings-format-menu">
                             <div class="dga-fmt-dropdown-option selected" data-value="">None</div>
                             <div class="dga-fmt-dropdown-option" data-value="Standard">Standard</div>
                             <div class="dga-fmt-dropdown-option" data-value="Draft">Draft</div>
@@ -198,7 +198,7 @@
                     </div>
                 </div>
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Description</label>
+                    <label class="inv-field-label label label--muted">Description</label>
                     <input class="inv-text-input" id="dga-settings-desc" maxlength="100" placeholder="..." type="text">
                 </div>
             </div>
@@ -207,15 +207,15 @@
                 <button class="inv-modal-submit" onclick="submitDeckSettings()">Save</button>
                 <button class="inv-modal-danger" onclick="submitDeleteDeck()">Delete Deck</button>
             </div>
-            <button class="inv-settings-import-export-btn"
+            <button class="inv-settings-import-export-btn btn btn--ghost btn--mono"
                     onclick="dgaTransitionSettingsToImportExport()">⇅ Import / Export
             </button>
         </div>
     </div>
 
     <!-- ── Add card modal — simplified (no foil step) ── -->
-    <div class="inv-modal-overlay hidden" id="dga-add-modal" onclick="closeDeckAddModal()">
-        <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-add-modal" onclick="closeDeckAddModal()">
+        <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
             <div class="inv-modal-header inv-add-modal-header">
                 <button class="inv-btn-back-arrow hidden" id="dga-add-back-btn" onclick="dgaBackToSearch()">‹</button>
                 <span class="inv-modal-title">Add Card</span>
@@ -233,9 +233,9 @@
                                type="text">
                         <div class="autocomplete-list hidden" id="dga-add-card-autocomplete"></div>
                     </div>
-                    <button class="btn-search" onclick="searchDgaAddCards()">Search</button>
+                    <button class="btn-search btn btn--primary" onclick="searchDgaAddCards()">Search</button>
                 </div>
-                <div class="inv-add-results" id="dga-add-card-results">
+                <div class="inv-add-results scroll-none" id="dga-add-card-results">
                     <div class="inv-search-placeholder" style="padding:30px 0">
                         <span class="inv-empty-icon">⬡</span>
                         <p>Search for a card to add it.</p>
@@ -256,25 +256,25 @@
                         </div>
                         <div class="inv-foil-step-bottom">
                             <div class="inv-modal-qty-row">
-                                <label class="inv-field-label">Section</label>
+                                <label class="inv-field-label label label--muted">Section</label>
                                 <div class="dga-fmt-dropdown-wrap">
-                                    <button class="dga-fmt-dropdown-btn" id="dga-add-section-btn"
+                                    <button class="dga-fmt-dropdown-btn btn btn--ghost btn--mono" id="dga-add-section-btn"
                                             onclick="toggleDgaAddSectionDropdown()"
                                             type="button">
                                         <span id="dga-add-section-label">Main Deck</span>
                                         <span class="dga-fmt-dropdown-arrow">&#8249;</span>
                                     </button>
-                                    <div class="dga-fmt-dropdown-menu drop-up hidden" id="dga-add-section-menu"></div>
+                                    <div class="dga-fmt-dropdown-menu menu drop-up hidden" id="dga-add-section-menu"></div>
                                     <input id="dga-add-section" type="hidden" value="Main Deck">
                                 </div>
                             </div>
                             <div class="inv-modal-qty-row">
-                                <label class="inv-field-label">Quantity</label>
+                                <label class="inv-field-label label label--muted">Quantity</label>
                                 <div class="inv-qty-wrap">
-                                    <button class="inv-qty-btn" onclick="changeDgaAddQty(-1)">−</button>
+                                    <button class="inv-qty-btn btn btn--ghost" onclick="changeDgaAddQty(-1)">−</button>
                                     <input class="inv-qty-input" id="dga-add-modal-qty" max="999" min="1" type="number"
                                            value="1">
-                                    <button class="inv-qty-btn" onclick="changeDgaAddQty(1)">+</button>
+                                    <button class="inv-qty-btn btn btn--ghost" onclick="changeDgaAddQty(1)">+</button>
                                 </div>
                             </div>
                             <button class="inv-modal-submit" id="dga-add-modal-submit" onclick="submitDgaAddCard()">
@@ -287,8 +287,8 @@
         </div>
     </div>
     <!-- ── Import / Export modal ── -->
-    <div class="inv-modal-overlay hidden" id="dga-import-export-modal" onclick="dgaCloseImportExportModal()">
-        <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-import-export-modal" onclick="dgaCloseImportExportModal()">
+        <div class="inv-modal modal inv-modal-import-export" onclick="event.stopPropagation()">
             <div class="inv-modal-header inv-add-modal-header">
                 <button class="inv-btn-back-arrow" onclick="dgaTransitionImportExportToSettings()">‹</button>
                 <div class="dga-import-export-title-wrap">
@@ -306,24 +306,24 @@
                 </button>
             </div>
             <div id="dga-import-panel">
-                <div class="inv-label" style="margin-bottom:6px;">Paste your list below</div>
+                <div class="inv-label label" style="margin-bottom:6px;">Paste your list below</div>
                 <div class="inv-import-format-hint">Format: <code># Section Name</code> then <code>1 Card Name</code>
                     per line
                 </div>
-                <div class="inv-textarea-wrap">
-                    <textarea class="inv-import-textarea" id="dga-import-textarea"
+                <div class="inv-textarea-wrap scroll-none">
+                    <textarea class="inv-import-textarea scroll-none" id="dga-import-textarea"
                               placeholder="# Material Deck&#10;1 Spirit of Fortuitous Fire&#10;# Main Deck&#10;1 Academy Guide"></textarea>
                 </div>
                 <div class="dga-import-footer">
                     <button class="inv-modal-submit" id="dga-import-submit-btn" onclick="dgaSubmitImport()">Import
                     </button>
-                    <div class="inv-import-results hidden" id="dga-import-results"></div>
+                    <div class="inv-import-results scroll-none hidden" id="dga-import-results"></div>
                 </div>
             </div>
             <div class="hidden" id="dga-export-panel">
-                <div class="inv-label" style="margin-bottom:6px;">Copy your list below</div>
-                <div class="inv-textarea-wrap">
-                    <textarea class="inv-import-textarea" id="dga-export-textarea" readonly></textarea>
+                <div class="inv-label label" style="margin-bottom:6px;">Copy your list below</div>
+                <div class="inv-textarea-wrap scroll-none">
+                    <textarea class="inv-import-textarea scroll-none" id="dga-export-textarea" readonly></textarea>
                 </div>
                 <button class="inv-modal-submit" id="dga-export-copy-btn" onclick="dgaCopyExport()">Copy to Clipboard
                 </button>
@@ -332,15 +332,15 @@
     </div>
 
     <!-- ── Add section modal ── -->
-    <div class="inv-modal-overlay hidden" id="dga-add-section-modal" onclick="closeAddSectionModal()">
-        <div class="inv-modal" onclick="event.stopPropagation()">
+    <div class="inv-modal-overlay overlay hidden" id="dga-add-section-modal" onclick="closeAddSectionModal()">
+        <div class="inv-modal modal" onclick="event.stopPropagation()">
             <div class="inv-modal-header">
                 <span class="inv-modal-title">New Section</span>
                 <button class="inv-modal-close" onclick="closeAddSectionModal()">✕</button>
             </div>
             <div class="inv-modal-fields">
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Section Name</label>
+                    <label class="inv-field-label label label--muted">Section Name</label>
                     <input class="inv-text-input" id="dga-add-section-input"
                            onkeydown="if(event.key==='Enter') submitAddSectionModal(); if(event.key==='Escape') closeAddSectionModal();"
                            placeholder="e.g. Side Deck"
@@ -366,13 +366,13 @@
     <div class="drawer-sidebar hidden" id="drawer-sidebar">
         <button class="drawer-sidebar-close" onclick="closeCardDrawer()">✕</button>
         <div class="drawer-sidebar-divider"></div>
-        <button class="drawer-sidebar-btn active" data-tab="info"
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info"
                 onclick="switchDrawerTab('info', 'card-drawer')" title="Info">ℹ️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
                 title="Thema">🏷️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
                 title="Pricing">💵
         </button>
     </div>

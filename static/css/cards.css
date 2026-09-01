@@ -1,17 +1,4 @@
-/* ── Page wrapper ──
-   Newly introduced so #card-drawer (a direct child of this, not of
-   .cards-body) has a full-page-height positioned ancestor to size against —
-   matching .admin-page/.prices-page/.dga-page/.inv-page, so all five pages'
-   drawers share the same height instead of Cards' drawer being scoped to
-   just .cards-body (the area below cards-header) and coming out shorter. */
-.cards-page {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    height: 100%;
-    position: relative;
-}
+/* Page wrapper is the shared .page (main.css) — #card-drawer sizes against it. */
 
 .search-wrap {
     display: flex;
@@ -28,24 +15,14 @@
     position: relative;
 }
 
+/* Shared .btn .btn--ghost .btn--mono (components.css). */
 .set-dropdown-btn {
-    font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 10px 14px;
-    cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
-    transition: border-color 0.2s;
     white-space: nowrap;
-}
-
-.set-dropdown-btn:hover {
-    border-color: var(--border-focus);
 }
 
 .set-dropdown-btn.open {
@@ -64,19 +41,11 @@
     transform: rotate(90deg);
 }
 
+/* Shared .menu (components.css). */
 .set-dropdown-menu {
-    position: absolute;
-    top: calc(100% + 6px);
     left: 0;
     min-width: 220px;
     max-width: 660px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    z-index: 300;
-    overflow: hidden;
-    animation: revealDown 0.2s ease forwards;
 }
 
 #set-dropdown-options {
@@ -110,7 +79,7 @@
     padding: 10px 14px;
     cursor: pointer;
     transition: background 0.15s;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     letter-spacing: 0.04em;
@@ -140,22 +109,11 @@
     border-color: var(--accent);
 }
 
+/* Shared .btn .btn--primary (components.css). */
 .btn-search {
-    font-family: 'Sora', sans-serif;
     font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--bg);
-    background: var(--accent);
-    border: none;
-    border-radius: var(--radius-sm);
     padding: 10px 20px;
-    cursor: pointer;
-    transition: background 0.2s;
     white-space: nowrap;
-}
-
-.btn-search:hover {
-    background: var(--accent-dim);
 }
 
 .cards-header {
@@ -179,20 +137,14 @@
     position: relative;
 }
 
+/* Shared .btn .btn--ghost (components.css) + muted resting colour + accent hover. */
 .default-bin-btn {
-    font-family: 'Sora', sans-serif;
     font-size: 0.8rem;
-    font-weight: 500;
     color: var(--text-muted);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 6px 12px;
     display: flex;
     align-items: center;
     gap: 7px;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
     white-space: nowrap;
 }
 
@@ -216,11 +168,11 @@
     border-radius: var(--radius-sm);
     z-index: 100;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--shadow-panel);
 }
 
 .default-bin-menu-item {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.82rem;
     color: var(--text);
     padding: 9px 14px;
@@ -331,9 +283,9 @@
    The spinner-to-image handoff is a crossfade rather than an instant swap —
    revealTileImage (cards.js) drives it via fadeSwap (animation.js), the same
    fade-out/mutate/fade-in mechanic page navigation and the drawer's edition
-   switch already use. Per fadeSwap's own convention, this defines its own
-   .fade-out/.fade-in pair scoped to .tile-img-spinner (not the .content
-   generic in main.css) rather than reusing another caller's. */
+   switch already use. This overrides the shared .fade-out/.fade-in (main.css)
+   to an opacity-only fade — `transform: none` cancels the shared rule's
+   translateY, which would jolt the spinner inside its clipped frame. */
 #card-results .edition-tile-wrap {
     position: relative;
     aspect-ratio: 5 / 7;
@@ -369,11 +321,13 @@
 
 .tile-img-spinner.fade-out {
     opacity: 0;
+    transform: none;
     transition: opacity 0.15s ease;
 }
 
 .tile-img-spinner.fade-in {
     opacity: 1;
+    transform: none;
     transition: opacity 0.2s ease;
 }
 
@@ -453,7 +407,7 @@
 }
 
 .featured-set-name {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 1.05rem;
     font-weight: 600;
     color: #ffffff;
@@ -463,7 +417,7 @@
    run long (e.g. 5 prefixes), so this truncates rather than wrapping and
    inflating the tile's fixed-aspect media area. */
 .featured-set-prefixes {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     letter-spacing: 0.02em;
     color: rgba(255, 255, 255, 0.8);
@@ -482,7 +436,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
     color: var(--text-muted);
 }
@@ -505,7 +459,7 @@
 }
 
 .autocomplete-item {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.85rem;
     color: var(--text);
     padding: 10px 14px;
@@ -523,7 +477,7 @@
     position: absolute;
     bottom: 10px;
     left: 10px;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -559,24 +513,14 @@
     position: relative;
 }
 
+/* Shared .btn .btn--ghost .btn--mono (components.css). */
 .cards-filter-btn {
-    font-family: 'DM Mono', monospace;
     font-size: 0.78rem;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     padding: 10px 14px;
-    cursor: pointer;
     display: flex;
     align-items: center;
     gap: 8px;
-    transition: border-color 0.2s, color 0.2s;
     white-space: nowrap;
-}
-
-.cards-filter-btn:hover {
-    border-color: var(--border-focus);
 }
 
 .cards-filter-btn.open {
@@ -600,18 +544,10 @@
     transform: rotate(90deg);
 }
 
+/* Shared .menu (components.css). */
 .cards-filter-menu {
-    position: absolute;
-    top: calc(100% + 6px);
     right: 0;
     min-width: 200px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    z-index: 300;
-    overflow: hidden;
-    animation: revealDown 0.2s ease forwards;
 }
 
 .cards-filter-section {
@@ -623,12 +559,8 @@
     border-bottom: none;
 }
 
+/* .cards-filter-section-label is the shared .label .label--muted .label--sm (main.css). */
 .cards-filter-section-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.65rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-muted);
     margin-bottom: 6px;
 }
 
@@ -639,19 +571,16 @@
     padding-bottom: 6px;
 }
 
+/* Shared .btn .btn--subtle .btn--mono (components.css) + full-width row style. */
 .cards-filter-clear-btn {
     display: block;
     width: 100%;
-    font-family: 'DM Mono', monospace;
     font-size: 0.7rem;
-    color: var(--text-muted);
-    background: none;
     border: none;
     border-top: 1px solid var(--border);
+    border-radius: 0;
     padding: 8px 14px;
-    cursor: pointer;
     text-align: left;
-    transition: color 0.15s;
     letter-spacing: 0.04em;
 }
 
@@ -665,7 +594,7 @@
 }
 
 .cards-set-progress-label {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-bottom: 8px;

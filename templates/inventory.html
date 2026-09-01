@@ -1,20 +1,20 @@
-<div class="inv-page" id="inv-page">
+<div class="inv-page page" id="inv-page">
 
     <!-- ── Bin grid view ── -->
     <div class="inv-bins-view" id="inv-bins-view">
-        <div class="inv-bins-header">
+        <div class="inv-bins-header list-header">
             <div>
-                <span class="inv-label">Inventory</span>
+                <span class="inv-label label">Inventory</span>
                 <span class="inv-subtitle" id="inv-bin-subtitle">Loading...</span>
             </div>
-            <button class="inv-bins-create-btn" onclick="openCreateModal()">+ New Bin</button>
+            <button class="inv-bins-create-btn btn btn--ghost btn--mono" onclick="openCreateModal()">+ New Bin</button>
         </div>
-        <div class="inv-bins-grid" id="inv-bins-grid"></div>
+        <div class="inv-bins-grid scroll-thin" id="inv-bins-grid"></div>
     </div>
 
     <!-- ── Bin detail view ── -->
     <div class="inv-detail-view hidden" id="inv-detail-view">
-        <div class="inv-detail-header">
+        <div class="inv-detail-header detail-header">
             <div class="inv-detail-back" onclick="closeBinDetail()">
                 <span class="inv-back-arrow">←</span>
                 <span>Inventory</span>
@@ -39,41 +39,41 @@
                         <span class="inv-bin-value-badge inv-bin-value-loading" id="detail-bin-value">…</span>
                     </div>
                     <div class="inv-detail-controls">
-                        <button class="inv-detail-add-btn" onclick="openAddModal()" title="Add card">+</button>
+                        <button class="inv-detail-add-btn btn btn--ghost" onclick="openAddModal()" title="Add card">+</button>
                         <input type="text" id="inv-card-filter" class="inv-detail-search"
                                placeholder="Search cards..." autocomplete="off"
                                oninput="filterBinCards(this.value)">
                         <div class="inv-filter-dropdown-wrap">
-                            <button class="inv-filter-dropdown-btn" id="inv-filter-btn"
+                            <button class="inv-filter-dropdown-btn btn btn--ghost btn--mono" id="inv-filter-btn"
                                     onclick="toggleFilterDropdown()">
                                 <span id="inv-filter-label">Filter &amp; Sort</span>
                                 <span class="inv-filter-arrow">&#8249;</span>
                             </button>
-                            <div id="inv-filter-menu" class="inv-filter-menu hidden">
+                            <div id="inv-filter-menu" class="inv-filter-menu menu hidden">
                                 <div class="inv-filter-section">
-                                    <div class="inv-filter-section-label">Sort</div>
+                                    <div class="inv-filter-section-label label label--muted label--sm">Sort</div>
                                     <div id="inv-filter-sort-options" class="inv-filter-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
-                                    <div class="inv-filter-section-label">Set</div>
+                                    <div class="inv-filter-section-label label label--muted label--sm">Set</div>
                                     <div id="inv-filter-set-options" class="inv-filter-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
-                                    <div class="inv-filter-section-label">Element</div>
+                                    <div class="inv-filter-section-label label label--muted label--sm">Element</div>
                                     <div id="inv-filter-element-options" class="inv-filter-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
-                                    <div class="inv-filter-section-label">Rarity</div>
+                                    <div class="inv-filter-section-label label label--muted label--sm">Rarity</div>
                                     <div id="inv-filter-rarity-options" class="inv-filter-options"></div>
                                 </div>
                                 <div class="inv-filter-section">
-                                    <div class="inv-filter-section-label">Foil</div>
+                                    <div class="inv-filter-section-label label label--muted label--sm">Foil</div>
                                     <div id="inv-filter-foil-options" class="inv-filter-options"></div>
                                 </div>
-                                <button class="inv-filter-clear-btn" onclick="clearBinFilters()">Clear all</button>
+                                <button class="inv-filter-clear-btn btn btn--subtle btn--mono" onclick="clearBinFilters()">Clear all</button>
                             </div>
                         </div>
-                        <button class="inv-settings-btn" onclick="openBinSettings()" title="Bin settings">⚙</button>
+                        <button class="inv-settings-btn btn btn--icon" onclick="openBinSettings()" title="Bin settings">⚙</button>
                     </div>
                 </div>
             </div>
@@ -87,7 +87,7 @@
                     </button>
                 </div>
             </div>
-            <div class="inv-card-grid-wrap">
+            <div class="inv-card-grid-wrap scroll-thin">
                 <div class="inv-card-grid" id="inv-card-grid"></div>
             </div>
         </div>
@@ -106,13 +106,13 @@
     <div id="inv-drawer-sidebar" class="drawer-sidebar hidden">
         <button class="drawer-sidebar-close" onclick="closeInvDrawer()">&#x2715;</button>
         <div class="drawer-sidebar-divider"></div>
-        <button class="drawer-sidebar-btn active" data-tab="info"
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info"
                 onclick="switchDrawerTab('info', 'inv-card-drawer')" title="Info">ℹ️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="thema"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema"
                 onclick="switchDrawerTab('thema', 'inv-card-drawer')" title="Thema">🏷️
         </button>
-        <button class="drawer-sidebar-btn" data-tab="pricing"
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing"
                 onclick="switchDrawerTab('pricing', 'inv-card-drawer')" title="Pricing">💵
         </button>
     </div>
@@ -149,29 +149,29 @@
 </div>
 
 <!-- ── Move card modal ── -->
-<div id="inv-move-modal" class="inv-modal-overlay hidden" onclick="closeMoveModal()">
-    <div class="inv-modal" onclick="event.stopPropagation()">
+<div id="inv-move-modal" class="inv-modal-overlay overlay hidden" onclick="closeMoveModal()">
+    <div class="inv-modal modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Move</span>
             <button class="inv-modal-close" onclick="closeMoveModal()">✕</button>
         </div>
         <div class="inv-move-card-info" id="move-card-info"></div>
         <div class="inv-move-qty-row">
-            <label class="inv-field-label">Quantity to move</label>
+            <label class="inv-field-label label label--muted">Quantity to move</label>
             <div class="inv-qty-wrap">
-                <button class="inv-qty-btn" onclick="changeMoveQty(-1)">−</button>
+                <button class="inv-qty-btn btn btn--ghost" onclick="changeMoveQty(-1)">−</button>
                 <input type="number" class="inv-qty-input" id="move-qty" placeholder="All" min="1">
-                <button class="inv-qty-btn" onclick="changeMoveQty(1)">+</button>
+                <button class="inv-qty-btn btn btn--ghost" onclick="changeMoveQty(1)">+</button>
             </div>
         </div>
         <div class="inv-move-bin-list" id="move-bin-list"></div>
         <div class="inv-move-section-block hidden" id="move-section-block">
-            <label class="inv-field-label">Into section</label>
+            <label class="inv-field-label label label--muted">Into section</label>
             <div class="inv-move-bin-list" id="move-section-list"></div>
         </div>
         <button class="inv-modal-submit hidden" id="move-confirm-btn" onclick="confirmMoveCard()">Move</button>
         <div class="inv-move-divider"></div>
-        <button class="inv-move-new-bin-btn" onclick="ctxMoveToNewBin()">
+        <button class="inv-move-new-bin-btn btn btn--ghost" onclick="ctxMoveToNewBin()">
             <span>+</span> Create new bin &amp; move
         </button>
         <div id="move-modal-error" class="inv-modal-error hidden"></div>
@@ -179,14 +179,14 @@
 </div>
 
 <!-- ── Rename bin modal ── -->
-<div id="inv-rename-modal" class="inv-modal-overlay hidden" onclick="closeRenameModal()">
-    <div class="inv-modal" onclick="event.stopPropagation()">
+<div id="inv-rename-modal" class="inv-modal-overlay overlay hidden" onclick="closeRenameModal()">
+    <div class="inv-modal modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Rename Bin</span>
             <button class="inv-modal-close" onclick="closeRenameModal()">✕</button>
         </div>
         <div class="inv-field-group">
-            <label class="inv-field-label">Name</label>
+            <label class="inv-field-label label label--muted">Name</label>
             <input type="text" id="rename-bin-input" class="inv-text-input"
                    onkeydown="if(event.key==='Enter') submitRenameBin()">
         </div>
@@ -196,14 +196,14 @@
 </div>
 
 <!-- ── Edit description modal ── -->
-<div id="inv-desc-modal" class="inv-modal-overlay hidden" onclick="closeDescModal()">
-    <div class="inv-modal" onclick="event.stopPropagation()">
+<div id="inv-desc-modal" class="inv-modal-overlay overlay hidden" onclick="closeDescModal()">
+    <div class="inv-modal modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Edit Description</span>
             <button class="inv-modal-close" onclick="closeDescModal()">✕</button>
         </div>
         <div class="inv-field-group">
-            <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+            <label class="inv-field-label label label--muted">Description <span class="inv-optional">(optional)</span></label>
             <input type="text" id="desc-bin-input" class="inv-text-input" maxlength="100" placeholder="..."
                    onkeydown="if(event.key==='Enter') submitDescBin()">
         </div>
@@ -213,21 +213,21 @@
 </div>
 
 <!-- ── Create bin modal ── -->
-<div id="inv-create-modal" class="inv-modal-overlay hidden" onclick="closeCreateModal()">
-    <div class="inv-modal" onclick="event.stopPropagation()">
+<div id="inv-create-modal" class="inv-modal-overlay overlay hidden" onclick="closeCreateModal()">
+    <div class="inv-modal modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">New Bin</span>
             <button class="inv-modal-close" onclick="closeCreateModal()">✕</button>
         </div>
         <div class="inv-modal-fields">
             <div class="inv-field-group">
-                <label class="inv-field-label">Name</label>
+                <label class="inv-field-label label label--muted">Name</label>
                 <input type="text" id="create-bin-name" class="inv-text-input"
                        placeholder="e.g. Trade Box, Binder 1..."
                        onkeydown="if(event.key==='Enter') submitCreateBin()">
             </div>
             <div class="inv-field-group">
-                <label class="inv-field-label">Description <span class="inv-optional">(optional)</span></label>
+                <label class="inv-field-label label label--muted">Description <span class="inv-optional">(optional)</span></label>
                 <input type="text" id="create-bin-desc" class="inv-text-input" maxlength="100" placeholder="...">
             </div>
         </div>
@@ -237,19 +237,19 @@
 </div>
 
 <!-- ── Bin settings modal ── -->
-<div id="inv-settings-modal" class="inv-modal-overlay hidden" onclick="closeBinSettings()">
-    <div class="inv-modal" onclick="event.stopPropagation()">
+<div id="inv-settings-modal" class="inv-modal-overlay overlay hidden" onclick="closeBinSettings()">
+    <div class="inv-modal modal" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <span class="inv-modal-title">Bin Settings</span>
             <button class="inv-modal-close" onclick="closeBinSettings()">✕</button>
         </div>
         <div class="inv-modal-fields">
             <div class="inv-field-group">
-                <label class="inv-field-label">Name</label>
+                <label class="inv-field-label label label--muted">Name</label>
                 <input type="text" id="settings-bin-name" class="inv-text-input">
             </div>
             <div class="inv-field-group">
-                <label class="inv-field-label">Description</label>
+                <label class="inv-field-label label label--muted">Description</label>
                 <input type="text" id="settings-bin-desc" class="inv-text-input" maxlength="100" placeholder="...">
             </div>
         </div>
@@ -260,15 +260,15 @@
             </button>
             <button class="inv-modal-danger" id="settings-delete-btn" onclick="deleteBin()">Delete Bin</button>
         </div>
-        <button class="inv-settings-import-export-btn" onclick="transitionSettingsToImportExport()">⇅ Import /
+        <button class="inv-settings-import-export-btn btn btn--ghost btn--mono" onclick="transitionSettingsToImportExport()">⇅ Import /
             Export
         </button>
     </div>
 </div>
 
 <!-- ── Add card modal ── -->
-<div id="inv-add-modal" class="inv-modal-overlay hidden" onclick="closeAddModal()">
-    <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+<div id="inv-add-modal" class="inv-modal-overlay overlay hidden" onclick="closeAddModal()">
+    <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
         <div class="inv-modal-header inv-add-modal-header">
             <button class="inv-btn-back-arrow hidden" id="add-back-btn" onclick="backToSearch()">‹</button>
             <span class="inv-modal-title">Add Card</span>
@@ -286,9 +286,9 @@
                            autocomplete="off">
                     <div id="add-card-autocomplete" class="autocomplete-list hidden"></div>
                 </div>
-                <button class="btn-search" onclick="searchAddCards()">Search</button>
+                <button class="btn-search btn btn--primary" onclick="searchAddCards()">Search</button>
             </div>
-            <div class="inv-add-results" id="add-card-results">
+            <div class="inv-add-results scroll-none" id="add-card-results">
                 <div class="inv-search-placeholder" style="padding:30px 0">
                     <span class="inv-empty-icon">⬡</span>
                     <p>Search for a card to add it.</p>
@@ -310,24 +310,24 @@
                     </div>
                     <div class="inv-foil-step-bottom">
                         <div class="inv-modal-qty-row">
-                            <label class="inv-field-label">Section</label>
+                            <label class="inv-field-label label label--muted">Section</label>
                             <div class="dga-fmt-dropdown-wrap">
-                                <button class="dga-fmt-dropdown-btn" id="inv-add-section-btn"
+                                <button class="dga-fmt-dropdown-btn btn btn--ghost btn--mono" id="inv-add-section-btn"
                                         onclick="toggleInvAddSectionDropdown()" type="button">
                                     <span id="inv-add-section-label">Unsorted</span>
                                     <span class="dga-fmt-dropdown-arrow">&#8249;</span>
                                 </button>
-                                <div class="dga-fmt-dropdown-menu drop-up hidden" id="inv-add-section-menu"></div>
+                                <div class="dga-fmt-dropdown-menu menu drop-up hidden" id="inv-add-section-menu"></div>
                                 <input id="inv-add-section" type="hidden" value="Unsorted">
                             </div>
                         </div>
                         <div class="inv-modal-qty-row">
-                            <label class="inv-field-label">Quantity</label>
+                            <label class="inv-field-label label label--muted">Quantity</label>
                             <div class="inv-qty-wrap">
-                                <button class="inv-qty-btn" onclick="changeAddQty(-1)">−</button>
+                                <button class="inv-qty-btn btn btn--ghost" onclick="changeAddQty(-1)">−</button>
                                 <input type="number" class="inv-qty-input" id="add-modal-qty" value="1" min="1"
                                        max="999">
-                                <button class="inv-qty-btn" onclick="changeAddQty(1)">+</button>
+                                <button class="inv-qty-btn btn btn--ghost" onclick="changeAddQty(1)">+</button>
                             </div>
                         </div>
                         <button class="inv-modal-submit" id="add-modal-submit" onclick="submitAddCard()" disabled>
@@ -341,8 +341,8 @@
 </div>
 
 <!-- ── Card detail modal (click on existing card) ── -->
-<div id="inv-card-modal" class="inv-modal-overlay hidden" onclick="closeCardModal()">
-    <div class="inv-modal inv-modal-wide" onclick="event.stopPropagation()">
+<div id="inv-card-modal" class="inv-modal-overlay overlay hidden" onclick="closeCardModal()">
+    <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
         <div class="inv-modal-header">
             <div>
                 <div class="inv-modal-title" id="card-modal-name"></div>
@@ -354,15 +354,15 @@
             <img class="inv-modal-img" id="card-modal-img" src="" alt="">
             <div class="inv-add-card-detail">
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Foil Type</label>
+                    <label class="inv-field-label label label--muted">Foil Type</label>
                     <div class="inv-card-modal-foil" id="card-modal-foil"></div>
                 </div>
                 <div class="inv-field-group">
-                    <label class="inv-field-label">Quantity</label>
+                    <label class="inv-field-label label label--muted">Quantity</label>
                     <div class="inv-qty-wrap">
-                        <button class="inv-qty-btn" onclick="changeCardModalQty(-1)">−</button>
+                        <button class="inv-qty-btn btn btn--ghost" onclick="changeCardModalQty(-1)">−</button>
                         <input type="number" class="inv-qty-input" id="card-modal-qty" value="1" min="0" max="999">
-                        <button class="inv-qty-btn" onclick="changeCardModalQty(1)">+</button>
+                        <button class="inv-qty-btn btn btn--ghost" onclick="changeCardModalQty(1)">+</button>
                     </div>
                 </div>
                 <div class="inv-card-modal-hint">Set quantity to 0 to remove.</div>
@@ -375,8 +375,8 @@
     </div>
 </div>
 <!-- ── Import / Export modal ── -->
-<div id="inv-import-export-modal" class="inv-modal-overlay hidden" onclick="closeImportExportModal()">
-    <div class="inv-modal inv-modal-import-export" onclick="event.stopPropagation()">
+<div id="inv-import-export-modal" class="inv-modal-overlay overlay hidden" onclick="closeImportExportModal()">
+    <div class="inv-modal modal inv-modal-import-export" onclick="event.stopPropagation()">
         <div class="inv-modal-header inv-add-modal-header">
             <button class="inv-btn-back-arrow" onclick="transitionImportExportToSettings()">‹</button>
             <div class="inv-import-export-title-wrap">
@@ -393,23 +393,23 @@
             </button>
         </div>
         <div id="import-panel">
-            <div class="inv-label" style="margin-bottom:6px;">Paste your list below</div>
+            <div class="inv-label label" style="margin-bottom:6px;">Paste your list below</div>
             <div class="inv-import-format-hint">Format: <code>4x Card Name (SET) #42 Foil Kind</code> — group into
                 sections with <code># Section Name</code> headers (headerless lines land in "Imported")
             </div>
-            <div class="inv-textarea-wrap">
-                <textarea id="import-textarea" class="inv-import-textarea"
+            <div class="inv-textarea-wrap scroll-none">
+                <textarea id="import-textarea" class="inv-import-textarea scroll-none"
                           placeholder="# Binder&#10;4x Merlin, Unbound Sage (DOA) #42 Nonfoil&#10;&#10;# Trades&#10;1x Silvie, Loved by All (DOA) #1 Foil"></textarea>
             </div>
             <div class="inv-import-footer">
                 <button class="inv-modal-submit" id="import-submit-btn" onclick="submitImport()">Import</button>
-                <div id="import-results" class="inv-import-results hidden"></div>
+                <div id="import-results" class="inv-import-results scroll-none hidden"></div>
             </div>
         </div>
         <div id="export-panel" class="hidden">
-            <div class="inv-label" style="margin-bottom:6px;">Copy your list below</div>
-            <div class="inv-textarea-wrap">
-                <textarea id="export-textarea" class="inv-import-textarea" readonly></textarea>
+            <div class="inv-label label" style="margin-bottom:6px;">Copy your list below</div>
+            <div class="inv-textarea-wrap scroll-none">
+                <textarea id="export-textarea" class="inv-import-textarea scroll-none" readonly></textarea>
             </div>
             <button class="inv-modal-submit" id="export-copy-btn" onclick="copyExport()">Copy to Clipboard</button>
         </div>

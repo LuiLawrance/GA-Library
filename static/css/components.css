@@ -1,0 +1,185 @@
+/* ═══════════════════════════════════════
+   components.css — shared UI primitives
+   ═══════════════════════════════════════
+
+   Buttons, inputs, dropdown menus, and card panels/modals. Loaded after
+   main.css (needs its tokens) and before the feature stylesheets (so a
+   feature's own `.x-btn { padding: … }` delta wins at equal specificity).
+
+   Usage is additive, matching tiles.css / animation.css: keep the existing
+   prefixed class for JS hooks and per-element deltas, and add the primitive
+   class(es) alongside — `<button class="cards-filter-btn btn btn--ghost btn--mono">`.
+*/
+
+/* ── Button ──────────────────────────────
+   .btn sets only the resting frame (font, border box, radius, cursor,
+   transition). A variant sets resting colors + a default :hover; a button
+   that hovers differently keeps its own :hover rule. Layout (display, padding,
+   font-size, width) stays on the prefixed class. */
+.btn {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s, opacity 0.15s;
+}
+
+.btn:disabled {
+    cursor: not-allowed;
+}
+
+/* Accent-filled — primary actions (Search, Sign in, Sync, Refresh). */
+.btn--primary {
+    color: var(--bg);
+    background: var(--accent);
+}
+.btn--primary:hover {
+    background: var(--accent-dim);
+}
+.btn--primary:disabled {
+    background: var(--border);
+    color: var(--text-muted);
+}
+
+/* Bordered / transparent — secondary actions, dropdown triggers, toggles. */
+.btn--ghost {
+    color: var(--text);
+    background: transparent;
+    border-color: var(--border);
+}
+.btn--ghost:hover {
+    border-color: var(--border-focus);
+    color: var(--text);
+}
+
+/* Borderless — inline row actions (✎, ⚙ small controls). */
+.btn--subtle {
+    color: var(--text-muted);
+    background: transparent;
+    font-weight: 400;
+}
+.btn--subtle:hover {
+    color: var(--text);
+}
+
+/* Monospace label — most filter / import-export / dropdown buttons. */
+.btn--mono {
+    font-family: var(--font-mono);
+    font-weight: 400;
+}
+
+/* Square icon button — a single glyph, centered, fixed size via --btn-size. */
+.btn--icon {
+    --btn-size: 30px;
+    width: var(--btn-size);
+    height: var(--btn-size);
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* Destructive hover accent — pair with any variant. */
+.btn--danger:hover {
+    background: var(--error);
+    border-color: var(--error);
+    color: var(--text);
+}
+
+/* Topbar Login/Logout — a ghost button with the accent (not border-focus) hover. */
+.btn-login {
+    font-size: 0.85rem;
+    padding: 8px 20px;
+    text-decoration: none;
+}
+.btn-login:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* ── Input ───────────────────────────────
+   Every <input> and <textarea> gets this base (previously a bare `input {}`
+   rule in login.css). The `.input` / `.textarea` classes are aliases for
+   non-native elements (contenteditable, styled wrappers). Feature stylesheets
+   override font-size / padding / width per field on their prefixed class. */
+input,
+.input,
+.textarea {
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+}
+
+input:focus,
+.input:focus,
+.textarea:focus {
+    border-color: var(--border-focus);
+}
+
+input::placeholder,
+.input::placeholder,
+.textarea::placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+}
+
+/* ── Menu ────────────────────────────────
+   Dropdown popover that opens directly below its trigger. The prefixed class
+   keeps its own horizontal anchoring (left/right), width, max-height, and any
+   z-index / scroll outliers. Add `.scroll-thin` for a scrolling one. */
+.menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-menu);
+    z-index: 300;
+    overflow: hidden;
+    animation: revealDown 0.2s ease forwards;
+}
+
+/* ── Panel / Overlay / Modal ─────────────
+   .panel: the bordered card surface. .overlay: full-viewport dim backdrop.
+   .modal: a centered dialog box (a .panel with dialog padding/scroll). */
+.panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    animation: overlayFade 0.2s ease;
+}
+
+.modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px;
+    max-height: 88vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-sizing: border-box;
+    animation: modalReveal 0.22s ease;
+}

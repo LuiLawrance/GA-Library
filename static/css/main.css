@@ -28,8 +28,18 @@
     --price-green: #22c55e;
     --price-red: #ef4444;
     --error: #c86e6e;
+    --success: #3ba55d;
+    --warning: #d9a441;
     --radius: 12px;
     --radius-sm: 8px;
+
+    --font-sans: 'Sora', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+
+    /* Elevation — dropdown/menu popovers, floating panels, the side drawer. */
+    --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-panel: 0 4px 16px rgba(0, 0, 0, 0.25);
+    --shadow-drawer: -8px 0 24px rgba(0, 0, 0, 0.4);
 }
 
 html, body {
@@ -38,7 +48,7 @@ html, body {
 }
 
 body {
-    font-family: 'Sora', sans-serif;
+    font-family: var(--font-sans);
     background: var(--bg);
     color: var(--text);
     display: flex;
@@ -56,7 +66,7 @@ body {
 }
 
 .topbar-brand {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.9rem;
     font-weight: 500;
     color: var(--accent);
@@ -77,30 +87,14 @@ body {
 }
 
 .topbar-user {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     letter-spacing: 0.05em;
 }
 
-.btn-login {
-    font-family: 'Sora', sans-serif;
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--text);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px 20px;
-    cursor: pointer;
-    text-decoration: none;
-    transition: border-color 0.2s, color 0.2s;
-}
-
-.btn-login:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
+/* .btn-login is the shared .btn .btn--ghost (components.css) — its size and
+   accent hover are defined there, after the base, so the hover wins. */
 
 /* ── Navbar ── */
 .navbar {
@@ -113,7 +107,7 @@ body {
 }
 
 .navbar a {
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 400;
     color: var(--text-muted);
@@ -147,13 +141,35 @@ body {
     min-height: 0;
 }
 
-.content.fade-out {
+/* ── Page wrapper ──
+   The root element of every routed page fragment (Cards, Prices, Inventory,
+   Decks GA, Admin). position:relative because each page's side drawer
+   (#card-drawer / #inv-card-drawer) is `position: absolute; top: 0;
+   height: 100%` and needs a positioned ancestor to size against — without one
+   it falls back to the viewport and covers the topbar/navbar. Feature files
+   add page-specific extras (e.g. .admin-page's list-width var) on top. */
+.page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+    position: relative;
+}
+
+/* ── Fade-swap transition ──
+   The class pair driven by fadeSwap() (animation.js) and a few direct
+   classList toggles (admin.js). Any element fadeSwap is handed picks these up;
+   callers needing a different pace pass their own class names (see admin.css's
+   curio-fade-*). .tile-img-spinner overrides `transform` back to none — it's an
+   opacity-only fade (cards.css). */
+.fade-out {
     opacity: 0;
     transform: translateY(8px);
     transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-.content.fade-in {
+.fade-in {
     opacity: 1;
     transform: translateY(0);
     transition: opacity 0.2s ease, transform 0.2s ease;
@@ -168,17 +184,86 @@ body {
     border-bottom: 1px solid var(--border);
 }
 
-.page-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.78rem;
+/* List-view header — the title/label row above a grid, with an action button
+   to the right (Inventory bins, Decks GA deck list). */
+.list-header {
+    padding: 24px 32px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+}
+
+/* Detail-view header — stacked back-link + title block above a detail body
+   (Inventory bin detail, Decks GA deck detail). */
+.detail-header {
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* ── Label ──
+   The monospace uppercase kicker/caption used above sections, fields, stats,
+   and page headers throughout. Base is the accent "section kicker"; --muted is
+   the dimmer field/group caption; --sm / --lg adjust size. Consumers keep only
+   structural deltas (margin, display, white-space) on their prefixed class. */
+.label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--accent);
 }
 
+.label--muted {
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+}
+
+.label--sm { font-size: 0.65rem; }
+.label--lg { font-size: 0.78rem; }
+
+/* .page-label is the shared .label .label--lg (see templates). */
+
 /* ── Utility ── */
 .hidden {
     display: none !important;
+}
+
+/* ── Scrollbars ──
+   .scroll-thin: the standard thin custom bar for scroll containers (grids,
+   lists, tables, panels). .scroll-none: hide the bar entirely (textareas that
+   scroll internally). Wide/inset variants (.card-grid-wrap, .card-drawer) and
+   popover-menu bars keep their own rules. */
+.scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--border-focus);
+}
+
+.scroll-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.scroll-none::-webkit-scrollbar {
+    display: none;
 }
 
 /* ── Footer ── */
@@ -186,7 +271,7 @@ body {
     padding: 20px 32px;
     border-top: 1px solid var(--border);
     text-align: center;
-    font-family: 'DM Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
     letter-spacing: 0.05em;

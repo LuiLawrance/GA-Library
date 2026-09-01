@@ -89,7 +89,7 @@ function renderWatchlistGuestPrompt() {
         <div class="prices-empty">
             <span class="inv-empty-icon">📈</span>
             <p>Log in to build a watchlist and track card prices.</p>
-            <a href="/login" data-link class="btn-login">Log In</a>
+            <a href="/login" data-link class="btn-login btn btn--ghost">Log In</a>
         </div>`;
 }
 

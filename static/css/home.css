@@ -9,13 +9,7 @@
     gap: 16px;
 }
 
-.hero-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
-}
+/* .hero-label is the shared .label (main.css). */
 
 .hero-title {
     font-size: 3rem;
