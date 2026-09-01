@@ -362,7 +362,7 @@
 .drawer-edition-tile {
     opacity: 0;
     transform: translateY(8px);
-    animation: cardReveal 0.3s ease forwards;
+    animation: revealUp 0.3s ease forwards;
 }
 
 .edition-tile-wrap {

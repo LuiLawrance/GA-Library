@@ -76,18 +76,7 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     z-index: 300;
     overflow: hidden;
-    animation: dropdownReveal 0.2s ease forwards;
-}
-
-@keyframes dropdownReveal {
-    from {
-        opacity: 0;
-        transform: translateY(-8px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+    animation: revealDown 0.2s ease forwards;
 }
 
 #set-dropdown-options {
@@ -307,7 +296,7 @@
 .card-tile {
     opacity: 0;
     transform: translateY(10px);
-    animation: cardReveal 0.3s ease forwards;
+    animation: revealUp 0.3s ease forwards;
     cursor: pointer;
 }
 
@@ -315,13 +304,6 @@
     animation: none;
     opacity: 1;
     transform: none;
-}
-
-@keyframes cardReveal {
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }
 
 .card-tile img {
@@ -347,7 +329,7 @@
    can be loading at once; those other surfaces show far fewer at a time.
 
    The spinner-to-image handoff is a crossfade rather than an instant swap —
-   revealTileImage (cards.js) drives it via fadeSwap (modal-anim.js), the same
+   revealTileImage (cards.js) drives it via fadeSwap (animation.js), the same
    fade-out/mutate/fade-in mechanic page navigation and the drawer's edition
    switch already use. Per fadeSwap's own convention, this defines its own
    .fade-out/.fade-in pair scoped to .tile-img-spinner (not the .content
@@ -413,12 +395,6 @@
     opacity: 0.3;
 }
 
-@keyframes tile-img-spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
 /* ── Featured sets — shown in #card-results before any search is made
    (see loadFeaturedSets in cards.js). Landscape banners rather than the
    portrait card art .card-grid's 255px tracks are sized for, so this
@@ -431,7 +407,7 @@
 .featured-set-tile {
     opacity: 0;
     transform: translateY(10px);
-    animation: cardReveal 0.3s ease forwards;
+    animation: revealUp 0.3s ease forwards;
     cursor: pointer;
     position: relative;
 }
@@ -635,7 +611,7 @@
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     z-index: 300;
     overflow: hidden;
-    animation: dropdownReveal 0.2s ease forwards;
+    animation: revealDown 0.2s ease forwards;
 }
 
 .cards-filter-section {

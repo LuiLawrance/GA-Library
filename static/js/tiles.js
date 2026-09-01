@@ -38,7 +38,7 @@ const TILE_SPINNER_SVG = `
 
 // Crossfades a tile's image in over its loading spinner once the image is
 // ready, rather than snapping from one to the other instantly — reuses
-// fadeSwap's fade-out/mutate/fade-in mechanic (modal-anim.js), the same one
+// fadeSwap's fade-out/mutate/fade-in mechanic (animation.js), the same one
 // page navigation and the drawer's edition switch already use.
 // .tile-img-spinner's own fade-out/fade-in pair (not main.css's generic
 // .content one) lives in cards.css, per fadeSwap's own convention that each

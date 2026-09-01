@@ -157,7 +157,7 @@
     gap: 6px;
     min-height: 90px;
     opacity: 0;
-    animation: tileReveal 0.3s ease forwards;
+    animation: revealUp 0.3s ease forwards;
 }
 
 /* The entrance animation above gives every tile its own stacking context, so
@@ -169,17 +169,6 @@
 .inv-bin-tile.inv-bin-tile-popup-active {
     position: relative;
     z-index: 50;
-}
-
-@keyframes tileReveal {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }
 
 .inv-bin-tile:hover {
@@ -380,7 +369,7 @@
     gap: 6px;
     color: var(--text-muted);
     opacity: 0;
-    animation: tileReveal 0.3s ease forwards;
+    animation: revealUp 0.3s ease forwards;
 }
 
 .inv-bin-create {
@@ -703,7 +692,7 @@
     position: relative;
     cursor: pointer;
     opacity: 0;
-    animation: tileReveal 0.25s ease forwards;
+    animation: revealUp 0.25s ease forwards;
 }
 
 .inv-card-tile.animated {
@@ -996,15 +985,6 @@
     animation: overlayFade 0.2s ease;
 }
 
-@keyframes overlayFade {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
 .inv-modal {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -1046,17 +1026,6 @@
 /* ── Cross-modal resize morph (e.g. Settings → Import/Export) ── */
 .inv-modal.morph-resizing {
     animation: none;
-}
-
-@keyframes modalReveal {
-    from {
-        opacity: 0;
-        transform: scale(0.96) translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1) translateY(0);
-    }
 }
 
 .inv-modal-header {
@@ -1165,7 +1134,7 @@
     position: relative;
     cursor: pointer;
     opacity: 0;
-    animation: tileReveal 0.2s ease forwards;
+    animation: revealUp 0.2s ease forwards;
 }
 
 .inv-search-tile.animated {
@@ -1574,17 +1543,6 @@
     animation: contextReveal 0.12s ease;
 }
 
-@keyframes contextReveal {
-    from {
-        opacity: 0;
-        transform: scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: scale(1);
-    }
-}
-
 .inv-context-item {
     display: flex;
     align-items: center;
@@ -1709,7 +1667,7 @@
     z-index: 300;
     overflow-y: auto;
     overflow-x: hidden;
-    animation: dropdownReveal 0.2s ease forwards;
+    animation: revealDown 0.2s ease forwards;
 }
 
 .inv-filter-menu::-webkit-scrollbar {

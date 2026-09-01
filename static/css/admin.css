@@ -91,8 +91,8 @@
    centered as a unit the same way the settings card alone used to center
    itself via margin:auto; align-items:flex-start so the shorter panel
    doesn't stretch to match the taller one's height. admin.js's
-   animateSystemPanelsForUseJson (via _slideSettingsCard / _playSyncPanelWipe)
-   animates the re-centre and the Sync panel's reveal. */
+   animateSystemPanelsForUseJson (via flipSlide / animateHeightWipe in
+   animation.js) animates the re-centre and the Sync panel's reveal. */
 .admin-system-panels {
     display: flex;
     gap: 16px;
@@ -292,8 +292,8 @@
 
 /* Database Connection lives at the top of .admin-system-sync-panel (above
    Sync / Wipe), so it wipes in with that panel's phase-2 vertical reveal
-   for free — see _playSyncPanelWipe / animateSystemPanelsForUseJson in
-   admin.js. The fields sit in a 2-up grid to keep the panel from getting
+   for free — see animateHeightWipe (animation.js) /
+   animateSystemPanelsForUseJson (admin.js). The fields sit in a 2-up grid to keep the panel from getting
    tall. */
 .admin-system-db-fields {
     display: grid;
@@ -370,7 +370,7 @@
 }
 
 /* The SSL field is an .admin-pid-dropdown widget (rotating arrow +
-   dropdownReveal menu, same look as the Cards page filters — see
+   revealDown menu, same look as the Cards page filters — see
    admin.html). Nudge its button padding to sit level with the sibling text
    inputs in this row; the menu is already left:0/right:0 so it tracks the
    narrow grid cell. */
@@ -427,8 +427,8 @@
    bordered-card language as the panels below it, with an --accent left edge
    so it reads as an active blocking step rather than a passive notice. */
 
-/* Height-wipe clipper for the bar's open/close animation (_playStagingBarWipe
-   in admin.js animates this element's height 0 ↔ natural). overflow:hidden so
+/* Height-wipe clipper for the bar's open/close animation (animateHeightWipe in
+   animation.js animates this element's height 0 ↔ natural). overflow:hidden so
    the bar is revealed/hidden as a vertical wipe; flex-shrink:0 because
    #admin-section-system is a definite-height flex column and its
    .admin-system-panels child can make total content overflow — without this,
@@ -604,7 +604,7 @@
 }
 
 /* Sliding highlight shared by both pill toggles in this section (Info/Pricing
-   and Regular/Discord) — positionPillIndicator (modal-anim.js) measures the
+   and Regular/Discord) — positionPillIndicator (animation.js) measures the
    active button and sets width/height/top and a translateX transform
    directly, so this only needs to define the visual + the transition, not
    any sizing. .pill-indicator (not admin-prefixed) is that shared helper's
@@ -2457,7 +2457,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    animation: dropdownReveal 0.2s ease forwards;
+    animation: revealDown 0.2s ease forwards;
 }
 
 .admin-pid-bulk-paste-menu {
@@ -2571,7 +2571,7 @@
     z-index: 301;
     max-height: 200px;
     overflow-y: auto;
-    animation: dropdownReveal 0.2s ease forwards;
+    animation: revealDown 0.2s ease forwards;
 }
 
 .admin-pid-dropdown-option {

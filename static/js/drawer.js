@@ -1041,44 +1041,16 @@ function buildTabPricingPanel(edition, cardName) {
 
 // The info/thema/pricing panels above the editions grid can differ in height,
 // so anything that changes which one is showing (switching tabs) or what's in
-// one of them (switching editions, when a data-driven tab is active) shifts
-// the editions grid below into a new position the instant it happens. FLIP
-// (First/Last/Invert/Play) that shift into a slide instead of letting it snap:
-// captureEditionsGridTop reads where the grid starts, playEditionsGridShift
-// (called once the height-changing DOM update is done) reads where it landed,
-// undoes the jump with an untransitioned transform back to the old spot, then
-// transitions that back to 0 so it visibly moves from A to B.
-function captureEditionsGridTop(drawer) {
-    const editionsSection = drawer?.querySelector('.drawer-editions-section');
-    return { editionsSection, beforeTop: editionsSection?.getBoundingClientRect().top };
-}
-
-function playEditionsGridShift({ editionsSection, beforeTop }) {
-    if (!editionsSection || beforeTop === undefined) return;
-
-    const delta = beforeTop - editionsSection.getBoundingClientRect().top;
-    if (!delta) return;
-
-    // getBoundingClientRect() reports positions already scaled by the
-    // page-wide zoom (main.css applies `zoom: 0.9` under 2100px), but a
-    // transform value is read in pre-zoom CSS pixels and gets scaled by zoom
-    // again on top of that — so the raw measured delta has to be un-scaled
-    // first, or this lands short of canceling the jump.
-    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-    editionsSection.style.transition = 'none';
-    editionsSection.style.transform = `translateY(${delta / zoom}px)`;
-
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            editionsSection.style.transition = 'transform 0.2s ease';
-            editionsSection.style.transform = 'translateY(0)';
-        });
+// one of them (switching editions, when a data-driven tab is active) shifts the
+// editions grid below into a new position the instant it happens. FLIP that
+// shift into a slide: call this before the height-changing DOM update, then
+// call the returned play() once it's done. compensateZoom because the drawer's
+// getBoundingClientRect deltas are page-zoom-scaled (main.css `zoom` under
+// 2100px) while a transform is not — see flipCapture in animation.js.
+function captureEditionsGridShift(drawer) {
+    return flipCapture(drawer?.querySelector('.drawer-editions-section'), {
+        axis: 'y', compensateZoom: true, duration: 200,
     });
-
-    setTimeout(() => {
-        editionsSection.style.transition = '';
-        editionsSection.style.transform = '';
-    }, 220);
 }
 
 function switchDrawerTab(tab, drawerId = 'card-drawer') {
@@ -1123,40 +1095,13 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
         incoming.innerHTML = buildTabPricingPanel(edition, cardInfo.querySelector('.drawer-name')?.textContent || '');
     }
 
-    // Fade out outgoing
-    outgoing.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
-    outgoing.style.opacity = '0';
-    outgoing.style.transform = 'translateY(-6px)';
-
-    setTimeout(() => {
-        const flip = captureEditionsGridTop(drawer);
-
-        outgoing.classList.add('hidden');
-        outgoing.style.transition = '';
-        outgoing.style.opacity = '';
-        outgoing.style.transform = '';
-
-        // Fade in incoming
-        incoming.classList.remove('hidden');
-        incoming.style.opacity = '0';
-        incoming.style.transform = 'translateY(6px)';
-        incoming.style.transition = 'opacity 0.18s ease, transform 0.18s ease';
-
-        playEditionsGridShift(flip);
-
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                incoming.style.opacity = '1';
-                incoming.style.transform = 'translateY(0)';
-            });
-        });
-
-        setTimeout(() => {
-            incoming.style.transition = '';
-            incoming.style.opacity = '';
-            incoming.style.transform = '';
-        }, 200);
-    }, 150);
+    // Crossfade the panels; the editions grid below rides the height change of
+    // whichever panel is now showing (FLIP captured while both are hidden).
+    crossFade(outgoing, incoming, () => {}, {
+        outShift: 'translateY(-6px)',
+        inShift: 'translateY(6px)',
+        onBetween: () => captureEditionsGridShift(drawer),
+    });
 }
 
 // 'card-drawer' (see DRAWER_CONFIG above) is shared across Cards, Prices,
@@ -1416,25 +1361,15 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
                 // real, detectable change the transition can animate.
                 existing.classList.remove('drawer-content-animate');
                 void existing.offsetHeight;
-                existing.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
-                existing.style.opacity = '0';
-                existing.style.transform = 'translateY(8px)';
 
-                setTimeout(() => {
-                    doInsert();
-                    inner.style.opacity = '0';
-                    inner.style.transform = 'translateY(8px)';
-                    inner.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-                    requestAnimationFrame(() => requestAnimationFrame(() => {
-                        inner.style.opacity = '1';
-                        inner.style.transform = 'translateY(0)';
-                        setTimeout(() => {
-                            inner.style.transition = '';
-                            inner.style.opacity = '';
-                            inner.style.transform = '';
-                        }, 220);
-                    }));
-                }, 150);
+                // doInsert removes `existing` and appends `inner`, so there are
+                // no .hidden toggles to make (toggleHidden:false) — crossFade
+                // just drives the out/in fade timing. See animation.js.
+                crossFade(existing, inner, doInsert, {
+                    toggleHidden: false,
+                    outShift: 'translateY(8px)',
+                    inShift: 'translateY(8px)',
+                });
             } else {
                 doInsert();
             }
@@ -1529,8 +1464,8 @@ async function selectDrawerEditionFor(drawerId, editionId) {
         // than the old one's, which would otherwise snap the editions grid into
         // its new position while it's invisible (mid fade). Captured now (info is
         // already faded out, so this is before any of that content changes) and
-        // played once it's done — see captureEditionsGridTop/playEditionsGridShift.
-        const flip = captureEditionsGridTop(drawer);
+        // played once it's done — see captureEditionsGridShift.
+        const playGridShift = captureEditionsGridShift(drawer);
 
         mainImage.src = `/images/${editionId}.jpg`;
 
@@ -1558,7 +1493,7 @@ async function selectDrawerEditionFor(drawerId, editionId) {
             if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition, cardInfo?.querySelector('.drawer-name')?.textContent || '');
         }
 
-        playEditionsGridShift(flip);
+        playGridShift();
     });
 
     drawer.querySelectorAll('.drawer-edition-tile img').forEach(img => {

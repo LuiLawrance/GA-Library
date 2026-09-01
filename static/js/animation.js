@@ -1,13 +1,15 @@
 // ═══════════════════════════════════════
-// modal-anim.js — shared modal/page resize, morph, and fade-swap animations
-// Used by: decks_ga (Deck Settings ↔ Import/Export, Import/Export tabs, Add Card),
-//          inventory (Bin Settings ↔ Import/Export, Import/Export tabs, Add Card),
-//          app.js (page-to-page navigation), admin.js (pricing/user detail panels,
-//          Cards section's Info/Pricing sub-view swap, Info/Pricing and
-//          Regular/Discord pill toggles), drawer.js (edition switch)
+// animation.js — shared resize, morph, wipe, slide, and fade animations.
+// The @keyframes half of this toolkit lives in static/css/animation.css.
+// Used by: decks_ga (Deck Settings ↔ Import/Export, Import/Export tabs, Add Card,
+//          card drag-reorder), inventory (Bin Settings ↔ Import/Export, Import/
+//          Export tabs, Add Card), app.js (page-to-page navigation), admin.js
+//          (pricing/user detail panels, Cards section's Info/Pricing sub-view
+//          swap, Info/Pricing and Regular/Discord pill toggles, Use-JSON panel
+//          slide + wipe), drawer.js (edition switch, tab switch, card switch)
 // ═══════════════════════════════════════
 //
-// Five reusable pieces:
+// Eight reusable pieces:
 //
 //   animateBoxResize(box, mutate) — smoothly resizes a single, persistent box (same
 //   overlay throughout) between two states caused by `mutate`, a synchronous DOM/class
@@ -41,6 +43,22 @@
 //   Call after toggling which child has `.active`, and again once a previously-hidden
 //   container becomes visible (offsetWidth reads 0 while display:none, so a call made
 //   while hidden has nothing to measure).
+//
+//   animateHeightWipe(el, entering) / resetHeightWipe(el) — vertical 0 ↔ natural-height
+//   clip animation (overflow hidden), for a panel/bar revealing or collapsing itself.
+//   Holds the collapsed state on the way out until the caller adds .hidden, then
+//   resetHeightWipe() releases it. Used by admin's Use-JSON DB Connection panel and
+//   staging confirm bar.
+//
+//   flipSlide(els, mutate) / flipCapture(els) — FLIP: slide elements from where they
+//   were to where `mutate` puts them, for shifts no single CSS property drives (a
+//   flex/grid container re-centering or re-flowing, tiles reordering). flipCapture is
+//   the split form for an async mutate. Used by admin's settings-card slide, drawer's
+//   editions-grid shift, decks_ga's card drag-reorder.
+//
+//   crossFade(outEl, inEl, mutate) — fades one element out, swaps, fades a DIFFERENT
+//   element in (vs. fadeSwap, which fades the same element out and back). Used by
+//   drawer's tab switch and card switch.
 //
 // animateBoxResize/morphBoxIn rely on the shared `.morph-resizing` / min-max-width-suspend
 // CSS conventions already used by the pages that call them (see inventory.css). fadeSwap
@@ -256,4 +274,223 @@ function positionPillIndicator(container) {
     indicator.style.height = active.offsetHeight + 'px';
     indicator.style.top = active.offsetTop + 'px';
     indicator.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+
+const _heightWipeAnims = new WeakMap();
+
+function _clearHeightWipeStyles(el) {
+    for (const prop of ['height', 'overflow', 'paddingTop', 'paddingBottom']) {
+        el.style[prop] = '';
+    }
+}
+
+// Vertical "wipe" — animates `el` between 0 and its natural height (overflow
+// clipped) as a reveal/collapse. NOT a fade or scale. `entering` true = 0 ->
+// open; false = open -> 0. With `collapsePadding`, vertical padding collapses
+// along with the height so the element wipes down to truly nothing rather than
+// leaving a thin band of its own padding — use when the wipe runs on the padded
+// element itself; omit it when the wipe runs on a bare overflow:hidden wrapper
+// whose inner child keeps the padding.
+//
+// Only ever one such element per caller, so a single WeakMap entry tracks the
+// in-flight wipe (unlike animateBoxResize's per-box map, but same idea) — a
+// rapid re-toggle cancels the previous rather than leaving two racing on the
+// same element and ending on whichever finishes last. On `entering` this
+// self-cleans once done; on leaving it HOLDS the collapsed state (fill:
+// 'forwards') so the element can't flash back to full height before the caller
+// adds .hidden — the caller then calls resetHeightWipe() to release it.
+// Resolves on a sleep() timer, not anim.finished — see animateBoxResize's
+// comment on why.
+function animateHeightWipe(el, entering, {duration = 300, collapsePadding = false} = {}) {
+    if (!el) return Promise.resolve();
+
+    _heightWipeAnims.get(el)?.cancel();
+
+    // Clear any pins a previous wipe left so the natural open box reads true.
+    el.style.height = '';
+    if (collapsePadding) {
+        el.style.paddingTop = '';
+        el.style.paddingBottom = '';
+    }
+    el.style.overflow = 'hidden';
+
+    const cs = getComputedStyle(el);
+    const openHeight = el.getBoundingClientRect().height;
+    const open = {height: openHeight + 'px'};
+    const shut = {height: '0px'};
+    if (collapsePadding) {
+        open.paddingTop = cs.paddingTop;
+        open.paddingBottom = cs.paddingBottom;
+        shut.paddingTop = '0px';
+        shut.paddingBottom = '0px';
+    }
+
+    const anim = el.animate(entering ? [shut, open] : [open, shut], {
+        duration,
+        easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+        // backwards: hold the 0 frame from the instant this is called (no
+        // delay) so an opening element never flashes at full height first.
+        // forwards: hold the 0 frame after a closing wipe until the caller adds
+        // .hidden (see resetHeightWipe).
+        fill: entering ? 'backwards' : 'forwards',
+    });
+    _heightWipeAnims.set(el, anim);
+
+    return sleep(duration).then(() => {
+        if (_heightWipeAnims.get(el) !== anim) return; // superseded by a later toggle
+        if (entering) {
+            anim.cancel();
+            _heightWipeAnims.delete(el);
+            _clearHeightWipeStyles(el);
+        }
+        // Leaving: keep the held 0-height state until .hidden is in place —
+        // resetHeightWipe releases it.
+    });
+}
+
+// Releases a closing wipe's held collapsed state and clears the inline styles it
+// left — call only once .hidden is actually on `el`, never before (releasing
+// early flashes it back to full height for a frame). Safe to call anytime.
+function resetHeightWipe(el) {
+    if (!el) return;
+    _heightWipeAnims.get(el)?.cancel();
+    _heightWipeAnims.delete(el);
+    _clearHeightWipeStyles(el);
+}
+
+// `el`'s on-screen position with its own current transform subtracted out, so a
+// FLIP fired while a previous one is still animating `el` measures from where it
+// visually IS, not from its transformed offset.
+function _flipVisualRect(el) {
+    const r = el.getBoundingClientRect();
+    const t = getComputedStyle(el).transform;
+    if (t && t !== 'none') {
+        const m = new DOMMatrixReadOnly(t);
+        return {left: r.left - m.m41, top: r.top - m.m42, width: r.width, height: r.height};
+    }
+    return {left: r.left, top: r.top, width: r.width, height: r.height};
+}
+
+// FLIP (First-Last-Invert-Play): capture where `els` sit now, let the caller
+// mutate the DOM, then play the resulting position jump backwards down to zero
+// so it reads as a slide instead of a snap. Doesn't touch the elements' final
+// layout — only adds a transient transform that animates itself away. Used for
+// shifts that no single CSS property drives: a flex/grid container re-centering
+// or re-flowing around content that changed size, tiles reordering, a panel
+// claiming/releasing space beside a sibling.
+//
+//   flipSlide(els, mutate, opts)         — synchronous mutate
+//   const play = flipCapture(els, opts); — split form: capture, run your own
+//   await mutate(); play();                (possibly async) mutate, then play()
+//
+// `els`: an element, an array of elements, or a () => Element[] getter (re-run
+// after the mutate — pass a getter when the mutate replaces/inserts nodes).
+// opts.axis: 'x' | 'y' | 'both' (default 'both') — which offset to invert.
+// opts.compensateZoom: divide the measured delta by documentElement's `zoom`
+//   before using it as a transform — needed when the page sets a CSS `zoom`
+//   (main.css does, under 2100px): getBoundingClientRect() is already zoom-
+//   scaled but a transform value is applied in pre-zoom px and scaled again, so
+//   the raw delta double-counts zoom without this. Off by default.
+const _FLIP_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
+
+function flipCapture(els, {duration = 200, axis = 'both', compensateZoom = false} = {}) {
+    const resolve = () => {
+        const raw = typeof els === 'function' ? els()
+            : Array.isArray(els) ? els
+            : els ? [els] : [];
+        return raw.filter(Boolean);
+    };
+    const first = new Map(resolve().map(el => [el, _flipVisualRect(el)]));
+
+    return function play() {
+        const zoom = compensateZoom
+            ? (parseFloat(getComputedStyle(document.documentElement).zoom) || 1)
+            : 1;
+        for (const el of resolve()) {
+            if (!el.isConnected) continue;
+            const f = first.get(el);
+            if (!f || (f.width === 0 && f.height === 0)) continue; // was hidden — no origin to slide from
+            const last = _flipVisualRect(el);
+            const dx = axis === 'y' ? 0 : (f.left - last.left) / zoom;
+            const dy = axis === 'x' ? 0 : (f.top - last.top) / zoom;
+            if (!dx && !dy) continue;
+
+            const anim = el.animate(
+                [{transform: `translate(${dx}px, ${dy}px)`}, {transform: 'translate(0, 0)'}],
+                {duration, easing: _FLIP_EASING, fill: 'backwards'},
+            );
+            // fill:'backwards' holds the inverted offset from call time (so no
+            // pre-play flash at the destination); once the active interval ends
+            // the effect stops applying and `el` renders at its true position,
+            // so this cancel is just tidy-up.
+            sleep(duration).then(() => anim.cancel());
+        }
+    };
+}
+
+// Returns a promise that resolves once the slide's duration has elapsed, so a
+// caller can sequence a follow-on step after the slide settles.
+function flipSlide(els, mutate, opts = {}) {
+    const play = flipCapture(els, opts);
+    mutate();
+    play();
+    return sleep(opts.duration ?? 200);
+}
+
+// Crossfade between two DIFFERENT elements around a content swap: fade `outEl`
+// out (opacity + `outShift`), run `mutate`, then fade `inEl` in (opacity +
+// `inShift` -> rest). Distinct from fadeSwap, which fades the SAME element(s)
+// out and back around an in-place swap. By default toggles `.hidden` on each;
+// pass toggleHidden:false when the mutate itself removes/inserts the nodes.
+//
+// `onBetween` runs synchronously after `outEl` is hidden and `mutate` has run,
+// before `inEl` is shown — the window where the layout is briefly collapsed. It
+// may return a function, which is then called right after `inEl`'s from-state is
+// applied (before its transition to rest) — the capture/play split for a FLIP
+// on neighbouring content whose position depends on `inEl` becoming visible.
+async function crossFade(outEl, inEl, mutate, {
+    outMs = 150,
+    inMs = 200,
+    outShift = 'translateY(-6px)',
+    inShift = 'translateY(6px)',
+    toggleHidden = true,
+    onBetween,
+} = {}) {
+    if (outEl) {
+        outEl.style.transition = `opacity ${outMs}ms ease, transform ${outMs}ms ease`;
+        outEl.style.opacity = '0';
+        outEl.style.transform = outShift;
+    }
+
+    await sleep(outMs);
+
+    if (outEl && toggleHidden) {
+        outEl.classList.add('hidden');
+        outEl.style.transition = '';
+        outEl.style.opacity = '';
+        outEl.style.transform = '';
+    }
+
+    await mutate();
+    const afterShow = onBetween?.();
+
+    if (!inEl) return;
+
+    if (toggleHidden) inEl.classList.remove('hidden');
+    inEl.style.opacity = '0';
+    inEl.style.transform = inShift;
+    inEl.style.transition = `opacity ${inMs}ms ease, transform ${inMs}ms ease`;
+
+    if (typeof afterShow === 'function') afterShow();
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        inEl.style.opacity = '1';
+        inEl.style.transform = 'translateY(0)';
+    }));
+
+    setTimeout(() => {
+        inEl.style.transition = '';
+        inEl.style.opacity = '';
+        inEl.style.transform = '';
+    }, inMs + 20);
 }

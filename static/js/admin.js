@@ -73,7 +73,7 @@ function adminPidIsScrapable(productId) {
 }
 
 // positionPillIndicator (used below for the Cards section's two pill
-// toggles: Info/Pricing, Regular/Discord) now lives in modal-anim.js, shared
+// toggles: Info/Pricing, Regular/Discord) now lives in animation.js, shared
 // alongside the rest of this page's animation helpers (animateBoxResize,
 // fadeSwap) for any future page that wants the same sliding-pill look.
 
@@ -162,7 +162,7 @@ async function switchAdminSection(section) {
 // The card info window (.admin-pricing-image-col/.admin-pricing-detail) is
 // deliberately NOT part of that fade — it stays visible throughout and
 // simply gets carried along for free by animateGridColumns below (see
-// modal-anim.js): that animates .admin-pricing-layout's own
+// animation.js): that animates .admin-pricing-layout's own
 // grid-template-columns rather than giving the list item an explicit width
 // of its own to animate, so the info window sitting in the NEXT track over
 // visibly slides with the list as the grid recalculates each frame, instead
@@ -352,132 +352,19 @@ document.addEventListener('focusout', e => {
     if (e.target.closest?.('.admin-system-info')) _hideAdminSystemTip();
 });
 
-// Phase 2's vertical reveal of the sync panel — a height "wipe" (0 <-> its
-// natural height, overflow clipped), NOT a fade or a scale/zoom. Same 300ms
-// height-animation technique as the staging confirm bar's own wipe
-// (_playStagingBarWipe), so when a switch is being staged the bar and this
-// panel open / collapse in lockstep. Only the height moves here — the
-// panel's horizontal space is already claimed in phase 1 (see
-// _slideSettingsCard).
+// Phase 2 of animateSystemPanelsForUseJson vertically wipes the sync panel
+// open/shut via animateHeightWipe (animation.js) — same 300ms technique as
+// the staging confirm bar's own wipe, so bar and panel move in lockstep when a
+// switch is being staged. Phase 1 slides the settings card via flipSlide: the
+// card's horizontal position shifts only as a side effect of
+// #admin-system-panels' justify-content:center re-centering around however many
+// flex items are visible (card alone vs. card + sync panel), which no CSS
+// property directly drives — FLIP inverts the resulting jump into a slide.
 const ADMIN_SYNC_PANEL_WIPE_MS = 300;
 
-// Tracks the panel's in-flight wipe (only ever one such element, so a
-// single variable does — unlike animateBoxResize's per-box WeakMap). A
-// rapid re-toggle cancels the previous wipe rather than leaving two racing
-// on the same element and ending on whichever finishes last.
-let _adminSyncPanelAnim = null;
-
-// Clears the inline styles a height wipe leaves on the panel, handing
-// sizing back to CSS. Safe to call anytime.
-function _clearSyncPanelWipeStyles() {
-    const panel = document.getElementById('admin-system-sync-panel');
-    if (!panel) return;
-    for (const prop of ['height', 'overflow', 'paddingTop', 'paddingBottom']) {
-        panel.style[prop] = '';
-    }
-}
-
-// Plays the panel's vertical wipe — entering (0 -> open height) or leaving
-// (open height -> 0). Vertical padding collapses with the height so the
-// panel wipes down to nothing rather than leaving a thin bar of its own
-// padding. The panel is already un-hidden and holding its horizontal space
-// (phase 1) before an entering wipe; the caller adds .hidden after a
-// leaving one. Resolves on a plain timer, not anim.finished — see
-// animateBoxResize's comment on why.
-function _playSyncPanelWipe(entering) {
-    const panel = document.getElementById('admin-system-sync-panel');
-    if (!panel) return Promise.resolve();
-
-    _adminSyncPanelAnim?.cancel();
-
-    // Clear the pins phase 1 left (height/padding at 0) so
-    // getComputedStyle/getBoundingClientRect read the true open box, then
-    // clip overflow for the tween.
-    panel.style.height = '';
-    panel.style.paddingTop = '';
-    panel.style.paddingBottom = '';
-    panel.style.overflow = 'hidden';
-    const cs = getComputedStyle(panel);
-    const openPadTop = cs.paddingTop;
-    const openPadBottom = cs.paddingBottom;
-    const openHeight = panel.getBoundingClientRect().height;
-
-    const shut = {height: '0px', paddingTop: '0px', paddingBottom: '0px'};
-    const open = {height: openHeight + 'px', paddingTop: openPadTop, paddingBottom: openPadBottom};
-
-    const anim = panel.animate(
-        entering ? [shut, open] : [open, shut],
-        // fill:'backwards' holds the 0 frame from the instant this is
-        // called (no delay) so an opening panel never flashes at full
-        // height first; fill:'forwards' holds the 0 frame after a closing
-        // wipe until the caller adds .hidden (see
-        // _adminSyncPanelCleanupAfterHide).
-        {
-            duration: ADMIN_SYNC_PANEL_WIPE_MS,
-            easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
-            fill: entering ? 'backwards' : 'forwards',
-        },
-    );
-    _adminSyncPanelAnim = anim;
-
-    return sleep(ADMIN_SYNC_PANEL_WIPE_MS).then(() => {
-        if (_adminSyncPanelAnim !== anim) return; // superseded by a later toggle
-
-        if (entering) {
-            anim.cancel();
-            _adminSyncPanelAnim = null;
-            _clearSyncPanelWipeStyles();
-        }
-        // Leaving: keep the held 0-height state until .hidden is actually
-        // in place — releasing it now would flash the panel back to full
-        // height for a frame. _adminSyncPanelCleanupAfterHide does it.
-    });
-}
-
-// Releases a closing wipe's held 0-height state — call only once .hidden is
-// on the panel, never before.
-function _adminSyncPanelCleanupAfterHide() {
-    _adminSyncPanelAnim?.cancel();
-    _adminSyncPanelAnim = null;
-    _clearSyncPanelWipeStyles();
-}
-
-// Phase 1 (horizontal) of animateSystemPanelsForUseJson — the settings
-// card's own horizontal position shifts as a side effect of
-// #admin-system-panels' justify-content:center re-centering around however
-// many flex items are actually visible (the card alone vs. paired with the
-// sync panel) — not a fixed pixel value there's any CSS property to
-// hand-animate. Uses the FLIP technique instead: measure the card's
-// position before `mutate` changes what's visible, apply it, measure
-// again, then play the resulting visual jump back down to zero so it reads
-// as a slide instead of a snap.
-function _slideSettingsCard(mutate) {
-    const card = document.getElementById('admin-system-options-col')
+function _settingsCardEl() {
+    return document.getElementById('admin-system-options-col')
         || document.getElementById('admin-system-settings');
-    if (!card) { mutate(); return Promise.resolve(); }
-
-    const before = card.getBoundingClientRect().left;
-    mutate();
-    const after = card.getBoundingClientRect().left;
-    const deltaX = before - after;
-
-    if (!deltaX) return Promise.resolve();
-
-    card.style.transform = `translateX(${deltaX}px)`;
-    card.getBoundingClientRect(); // flush layout so that jump is committed before animating away from it
-    const duration = 280;
-    const anim = card.animate(
-        [{transform: `translateX(${deltaX}px)`}, {transform: 'translateX(0)'}],
-        {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'},
-    );
-
-    return new Promise(resolve => {
-        setTimeout(() => {
-            anim.cancel();
-            card.style.transform = '';
-            resolve();
-        }, duration);
-    });
 }
 
 // Bumped once per animateSystemPanelsForUseJson call. Each phase re-checks
@@ -493,8 +380,8 @@ let _adminSystemPanelsGen = 0;
 //
 //   Showing:  1) un-hide the sync panel but pin it to zero height, so it
 //             claims only its width; the settings card slides across to its
-//             paired position around that (see _slideSettingsCard).
-//             2) THEN the sync panel wipes open downward (_playSyncPanelWipe).
+//             paired position around that (flipSlide).
+//             2) THEN the sync panel wipes open downward (animateHeightWipe).
 //
 //   Hiding:   the exact reverse — 1) the panel collapses its height to zero,
 //             2) THEN it's dropped (releasing its width) and the settings
@@ -506,23 +393,23 @@ async function animateSystemPanelsForUseJson(useJson) {
     const gen = ++_adminSystemPanelsGen;
 
     if (!useJson) {
-        await _slideSettingsCard(() => {
+        await flipSlide(_settingsCardEl(), () => {
             syncPanel.classList.remove('hidden');
             syncPanel.style.height = '0px';
             syncPanel.style.paddingTop = '0px';
             syncPanel.style.paddingBottom = '0px';
             syncPanel.style.overflow = 'hidden';
-        });
+        }, {axis: 'x', duration: 280});
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
-        await _playSyncPanelWipe(true);
+        await animateHeightWipe(syncPanel, true, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
     } else {
-        await _playSyncPanelWipe(false);
+        await animateHeightWipe(syncPanel, false, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
-        await _slideSettingsCard(() => {
+        await flipSlide(_settingsCardEl(), () => {
             syncPanel.classList.add('hidden');
-        });
+        }, {axis: 'x', duration: 280});
         if (gen !== _adminSystemPanelsGen) return;
-        _adminSyncPanelCleanupAfterHide();
+        resetHeightWipe(syncPanel);
     }
 }
 
@@ -599,64 +486,16 @@ async function updateAdminSystemSetting(key, value) {
 // until Confirm. Cancel — or clicking On — backs out with no server write.
 let adminUseJsonStaging = false;
 
-// Vertical height "wipe" for the confirm bar — the same technique and 300ms
-// timing as _playSyncPanelWipe (the Database Connection panel just below it),
-// so the bar and the panels it sits above open / collapse in lockstep. Runs
-// on the #admin-system-staging-wrap clipper (overflow:hidden, flex-shrink:0 in
-// CSS) rather than the bar itself: the bar keeps its natural flex layout while
-// only the wrap's height animates 0 ↔ natural. entering: 0 → natural; leaving:
-// natural → 0 (the caller adds .hidden to the wrap afterwards, then calls
-// _stagingBarWipeCleanup). One such element ever, so a single module-level
-// handle tracks the in-flight anim — a rapid re-toggle cancels the previous.
+// The confirm bar's vertical wipe (animateHeightWipe, animation.js) runs on the
+// #admin-system-staging-wrap clipper (overflow:hidden, flex-shrink:0 in CSS)
+// rather than the bar itself, so the bar keeps its natural flex layout while
+// only the wrap's height animates 0 ↔ natural — hence no collapsePadding. Same
+// 300ms timing as the Database Connection panel just below it, so the bar and
+// the panels open / collapse in lockstep.
 const ADMIN_STAGING_BAR_WIPE_MS = 300;
-let _adminStagingBarAnim = null;
 
-function _playStagingBarWipe(entering) {
-    const wrap = document.getElementById('admin-system-staging-wrap');
-    if (!wrap) return Promise.resolve();
-
-    _adminStagingBarAnim?.cancel();
-
-    // Clear any height pin a previous wipe left so the natural (open) height
-    // reads true.
-    wrap.style.height = '';
-    const openHeight = wrap.getBoundingClientRect().height;
-
-    const anim = wrap.animate(
-        entering
-            ? [{height: '0px'}, {height: openHeight + 'px'}]
-            : [{height: openHeight + 'px'}, {height: '0px'}],
-        {
-            duration: ADMIN_STAGING_BAR_WIPE_MS,
-            easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
-            // backwards: hold the 0 frame from the instant this is called so an
-            // opening bar never flashes at full height first. forwards: hold the
-            // 0 frame after a closing wipe until the caller adds .hidden.
-            fill: entering ? 'backwards' : 'forwards',
-        },
-    );
-    _adminStagingBarAnim = anim;
-
-    // Timer, not anim.finished — see animateBoxResize's comment on why.
-    return sleep(ADMIN_STAGING_BAR_WIPE_MS).then(() => {
-        if (_adminStagingBarAnim !== anim) return; // superseded by a later toggle
-        if (entering) {
-            anim.cancel();
-            _adminStagingBarAnim = null;
-            wrap.style.height = '';
-        }
-        // Leaving: keep the held 0-height state until .hidden is in place —
-        // _stagingBarWipeCleanup releases it.
-    });
-}
-
-// Release a closing wipe's held 0-height state — call only once .hidden is on
-// the wrap, never before (releasing early flashes it back to full height).
-function _stagingBarWipeCleanup() {
-    _adminStagingBarAnim?.cancel();
-    _adminStagingBarAnim = null;
-    const wrap = document.getElementById('admin-system-staging-wrap');
-    if (wrap) wrap.style.height = '';
+function _stagingWrapEl() {
+    return document.getElementById('admin-system-staging-wrap');
 }
 
 function beginUseJsonStaging() {
@@ -666,10 +505,10 @@ function beginUseJsonStaging() {
     renderAdminSystemToggle('use_json', false);   // visual pill only — no fetch
     animateSystemPanelsForUseJson(false);          // reveal the DB Connection panel
 
-    const wrap = document.getElementById('admin-system-staging-wrap');
+    const wrap = _stagingWrapEl();
     if (wrap) {
         wrap.classList.remove('hidden');
-        _playStagingBarWipe(true);                  // wipe down, concurrent with the panels
+        animateHeightWipe(wrap, true, {duration: ADMIN_STAGING_BAR_WIPE_MS}); // wipe down, concurrent with the panels
     }
     _setStagingError('');
     refreshDbModePrecheck();
@@ -683,12 +522,12 @@ async function cancelUseJsonStaging() {
     animateSystemPanelsForUseJson(true);
     _setStagingError('');
 
-    const wrap = document.getElementById('admin-system-staging-wrap');
+    const wrap = _stagingWrapEl();
     if (wrap) {
-        await _playStagingBarWipe(false);          // wipe up, concurrent with the panels
+        await animateHeightWipe(wrap, false, {duration: ADMIN_STAGING_BAR_WIPE_MS}); // wipe up, concurrent with the panels
         if (adminUseJsonStaging) return;           // re-opened mid-collapse — leave it shown
         wrap.classList.add('hidden');
-        _stagingBarWipeCleanup();
+        resetHeightWipe(wrap);
     }
 }
 
@@ -1007,7 +846,7 @@ async function _runAdminDbAutosave() {
 }
 
 // The SSL field is an .admin-pid-dropdown widget (rotating arrow +
-// dropdownReveal, same as the Cards page filters — see admin.html) over a
+// revealDown, same as the Cards page filters — see admin.html) over a
 // hidden <input id="admin-system-db-sslmode"> that _readAdminDbFields /
 // load / save treat like any other field. After those write the hidden
 // value, mirror it onto the visible button label and the menu's .selected
@@ -4346,7 +4185,6 @@ function initAdmin() {
 
     adminSystemLoaded = false;
     adminUseJsonStaging = false;
-    _adminStagingBarAnim = null;
     adminUsersLoaded = false;
     adminUsersData = [];
     adminUserDetailSelected = null;

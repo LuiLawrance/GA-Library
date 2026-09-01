@@ -1,0 +1,91 @@
+/* ═══════════════════════════════════════
+   animation.css — shared @keyframes vocabulary
+   ═══════════════════════════════════════
+
+   The single home for animation keyframes used across more than one page. The
+   JS side of this lives in static/js/animation.js. @keyframes are global no
+   matter which stylesheet declares them, so consumers in any feature CSS file
+   just reference these names in their own `animation:` shorthand (which is
+   where per-element duration/easing lives).
+
+   Page-specific one-off keyframes stay in their own file:
+     adminDbPipPulse       — admin.css (status-pip pulse, coupled to [data-state])
+     drawerContentReveal   — drawer.css (drawer's translateX entrance)
+*/
+
+/* Reveal upward — fade in while rising from 10px below. Consumers set their own
+   opacity:0 so a staggered animation-delay holds them hidden until their turn.
+   Used by: .card-tile / .featured-set-tile (cards.css), .inv-bin-tile /
+   .inv-bin-create / .inv-card-tile / .inv-search-tile (inventory.css),
+   .dga-deck-tile / .dga-deck-create / .dga-card-tile (decks_ga.css),
+   .drawer-edition-tile (drawer.css). */
+@keyframes revealUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Reveal downward — fade in while dropping from 8px above. For menus/dropdowns
+   that open below their trigger.
+   Used by: #set-dropdown / .cards-filter-menu (cards.css), .inv-filter-menu
+   (inventory.css), .dga-fmt-dropdown-menu (decks_ga.css), .admin-* dropdowns
+   (admin.css). */
+@keyframes revealDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Modal backdrop fade — used by .inv-modal-overlay (inventory.css). */
+@keyframes overlayFade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Modal box entrance — fade + settle from slightly small and low. Suppressed
+   mid-morph via .inv-modal.morph-resizing (see morphBoxIn in animation.js).
+   Used by .inv-modal (inventory.css). */
+@keyframes modalReveal {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+/* Context-menu pop — quick fade + scale. Used by .inv-context-menu (inventory.css). */
+@keyframes contextReveal {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* Tile image loading spinner. Used by .tile-img-spinner svg (cards.css), shared
+   across Cards / Inventory / decks_ga / drawer / Admin tile grids. */
+@keyframes tile-img-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

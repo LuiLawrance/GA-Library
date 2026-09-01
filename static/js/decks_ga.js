@@ -577,30 +577,14 @@ function dgaSettledRect(el) {
     return r;
 }
 
-// FLIP: record positions, mutate the DOM, then animate everything that shifted
+// FLIP the section-grid card tiles (+ the "add" tile and the drop placeholder)
+// from where they sit before `mutate` reorders/inserts to where it leaves them —
+// see flipSlide in animation.js.
 function dgaFlipMove(mutate) {
     const els = [...document.querySelectorAll(
         '.dga-section-grid .dga-card-tile, ' +
         '.dga-section-grid .inv-card-add-tile, .dga-drop-placeholder')];
-    const first = new Map(els.map(el => [el, el.getBoundingClientRect()]));
-    mutate();
-    for (const el of els) {
-        if (!el.isConnected) continue;
-        const f = first.get(el);
-        if (!f || (f.width === 0 && f.height === 0)) continue; // was hidden — no origin to slide from
-        const l = el.getBoundingClientRect();
-        const dx = f.left - l.left, dy = f.top - l.top;
-        if (!dx && !dy) continue;
-        el.style.transition = 'none';
-        el.style.transform = `translate(${dx}px, ${dy}px)`;
-        requestAnimationFrame(() => {
-            el.style.transition = 'transform 0.18s ease';
-            el.style.transform = '';
-            el.addEventListener('transitionend', () => {
-                el.style.transition = '';
-            }, {once: true});
-        });
-    }
+    flipSlide(els, mutate, {duration: 180});
 }
 
 // Pure geometric insertion: cursor position in, reference tile out.

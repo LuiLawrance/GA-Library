@@ -196,7 +196,7 @@ function showBinValuePopup(badgeEl, data) {
     const tile = row.closest('.inv-bin-tile');
     if (tile) {
         // Every tile gets its own stacking context from its entrance
-        // animation (opacity/transform in @keyframes tileReveal), so a
+        // animation (opacity/transform in @keyframes revealUp), so a
         // popup nested in an earlier-row tile paints BEHIND a later-row
         // tile's opaque background regardless of the popup's own z-index —
         // z-index only ranks siblings within the same stacking context.
