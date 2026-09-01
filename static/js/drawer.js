@@ -1305,7 +1305,12 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
                             <div class="drawer-name">${cardName}</div>
                             <div class="drawer-set">${drawerSetLineHTML(selectedEdition)}</div>
                         </div>
-                        ${card.element ? `<img class="drawer-element" src="/elements/${card.element}.png" alt="${card.element}">` : ''}
+                        <!-- card.element comes straight from the Grand Archive API in
+                             UPPERCASE (e.g. "NORM"), but assets/GA_ELEMENTS' own filenames
+                             are lowercase — harmless on Windows' case-insensitive filesystem,
+                             but a 404 (missing element icon) once served from Railway's
+                             case-sensitive Linux one, so this always lowercases the path. -->
+                        ${card.element ? `<img class="drawer-element" src="/elements/${card.element.toLowerCase()}.png" alt="${card.element}">` : ''}
                     </div>
 
                     <div class="drawer-tab-info">

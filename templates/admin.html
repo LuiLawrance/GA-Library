@@ -92,8 +92,8 @@
                     <div class="admin-system-options admin-system-local-db-card hidden" id="admin-system-local-db-card">
                         <div class="admin-system-option-row">
                             <span class="admin-system-option-name">
-                                Local DB
-                                <button type="button" class="admin-system-info" aria-label="About Local DB"
+                                Local Database
+                                <button type="button" class="admin-system-info" aria-label="About Local Database"
                                         data-tip="On — this instance can launch the TCGPlayer scraper, so the Cards page shows its 🔍 auto product-ID finder and Refresh Sales/Listings/Selected buttons. Off — it's hosted (e.g. Railway), which can't, so those buttons are hidden.">i</button>
                             </span>
                             <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_db">
@@ -104,6 +104,30 @@
                                         onclick="updateAdminSystemSetting('local_db', true)">On</button>
                             </div>
                         </div>
+                        <!-- Sync / Wipe live in this same card (not the Database Connection
+                             panel) so all the Postgres-mode controls sit together; their
+                             explainers are ⓘ hovers like the toggles above rather than
+                             inline <p> text. Both buttons still drive runAdminSystemSync /
+                             runAdminSystemWipe in admin.js by id, and share #admin-system-sync-log. -->
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Sync JSON &rarr; Database
+                                <button type="button" class="admin-system-info" aria-label="About Sync Now"
+                                        data-tip="Copies the JSON files into Postgres. Safe to re-run.">i</button>
+                            </span>
+                            <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
+                                    id="admin-system-sync-btn" onclick="runAdminSystemSync()">Sync Now</button>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Wipe Database
+                                <button type="button" class="admin-system-info" aria-label="About Wipe Database"
+                                        data-tip="Deletes all catalog, pricing, and inventory rows. Keeps users. Permanent.">i</button>
+                            </span>
+                            <button type="button" class="admin-pid-refresh-btn admin-system-wipe-btn"
+                                    id="admin-system-wipe-btn" onclick="runAdminSystemWipe()">Wipe Database</button>
+                        </div>
+                        <pre class="admin-system-sync-log hidden" id="admin-system-sync-log"></pre>
                     </div>
                 </div>
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
@@ -170,31 +194,12 @@
                     </div>
                     <div class="admin-system-db-actions">
                         <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
-                                id="admin-system-db-test-btn" onclick="testAdminSystemDatabaseConnection()">Test connection</button>
+                                id="admin-system-db-test-btn" onclick="testAdminSystemDatabaseConnection()">Test</button>
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                id="admin-system-db-setup-btn" onclick="setupAdminDatabase()">Set Up Database</button>
                     </div>
                     <p class="admin-system-db-status hidden" id="admin-system-db-status"></p>
-
-                    <div class="admin-system-db-actions">
-                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
-                                id="admin-system-db-init-schema-btn" onclick="initAdminSchema()">Set up schema</button>
-                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
-                                id="admin-system-db-port-owner-btn" onclick="portOwnerToDatabase()">Port Owner</button>
-                    </div>
                     <p class="admin-system-db-status hidden" id="admin-system-db-setup-status"></p>
-
-                    <div class="admin-system-wipe-divider"></div>
-                    <span class="admin-system-sync-title">Sync JSON &rarr; Database</span>
-                    <p class="admin-system-sync-desc">Copies the JSON files into Postgres. Safe to re-run.</p>
-                    <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
-                            id="admin-system-sync-btn" onclick="runAdminSystemSync()">Sync Now</button>
-
-                    <div class="admin-system-wipe-divider"></div>
-                    <span class="admin-system-sync-title">Wipe Database</span>
-                    <p class="admin-system-sync-desc">Deletes all catalog, pricing, and inventory rows. Keeps users. Permanent.</p>
-                    <button type="button" class="admin-pid-refresh-btn admin-system-wipe-btn"
-                            id="admin-system-wipe-btn" onclick="runAdminSystemWipe()">Wipe Database</button>
-
-                    <pre class="admin-system-sync-log hidden" id="admin-system-sync-log"></pre>
                 </div>
             </div>
         </div>

@@ -1162,7 +1162,7 @@ def _db_mode_switch_blocker() -> str | None:
 
     if not _schema_ready(url):
         return (
-            "The database has no schema yet — click \"Set up schema\" in the Database Connection "
+            "The database has no schema yet — click \"Set Up Database\" in the Database Connection "
             "panel (or run `alembic upgrade head`) before turning Use JSON off."
         )
 
@@ -1237,8 +1237,8 @@ async def api_admin_test_database_url(request: Request):
 # re-checks it every request and never reads USERS.json, so the schema must
 # exist and the owner must already be a row there. These endpoints back the
 # staged confirmation on the System page (see admin.js beginUseJsonStaging):
-# the precheck drives its checklist, "Set up schema" runs the migrations,
-# "Port Owner" copies the owner across. The real enforcement is
+# the precheck drives its checklist, "Set up database" runs the migrations
+# and copies the owner across. The real enforcement is
 # _db_mode_switch_blocker, called from api_admin_set_settings below.
 @app.get("/api/admin/system/db-mode-precheck")
 async def api_admin_db_mode_precheck(request: Request):
@@ -1277,9 +1277,9 @@ async def api_admin_port_owner_to_database(request: Request):
     return JSONResponse(result)
 
 
-# "Set up schema" button — `alembic upgrade head` against the saved connection,
-# so a fresh Railway/managed database gets its tables before Port Owner / the
-# switch into DB mode need them. Idempotent. Run in a thread so the (few-second,
+# "Set up database" button, step 1 — `alembic upgrade head` against the saved
+# connection, so a fresh Railway/managed database gets its tables before the
+# owner copy / the switch into DB mode need them. Idempotent. Run in a thread so the (few-second,
 # network-bound) DDL doesn't block the event loop.
 @app.post("/api/admin/system/init-schema")
 async def api_admin_init_schema(request: Request):

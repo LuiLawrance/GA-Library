@@ -712,8 +712,8 @@ function _setStagingCheck(name, state, label) {
 
 // Polls the server for whether it's safe to flip into DB mode and drives the
 // checklist + Confirm gating. Called on entry, and again after every Save /
-// Test / Set up schema / Port Owner so the bar tracks edits live. No-ops once
-// staging ends.
+// Test / Set up database so the bar tracks edits live. No-ops once staging
+// ends.
 async function refreshDbModePrecheck() {
     if (!adminUseJsonStaging) return;
 
@@ -749,7 +749,7 @@ async function refreshDbModePrecheck() {
     _setStagingCheck(
         'schema',
         !data.connection_ok ? 'pending' : (data.schema_ready ? 'ok' : 'fail'),
-        data.schema_ready ? 'Database schema' : 'Database schema — click "Set up schema"',
+        data.schema_ready ? 'Database schema' : 'Database schema — click "Set Up Database"',
     );
 
     // Owner — also gated on the schema existing. No owner account anywhere ⇒
@@ -794,7 +794,7 @@ async function confirmUseJsonStaging() {
     }
 }
 
-// Shared status line under the "Set up schema" / "Port Owner" button row.
+// Shared status line under the "Set up database" button.
 function _setAdminDbSetupStatus(text, kind) {
     const el = document.getElementById('admin-system-db-setup-status');
     if (!el) return;
@@ -804,51 +804,39 @@ function _setAdminDbSetupStatus(text, kind) {
     el.classList.toggle('admin-system-db-status-ok', kind === 'ok');
 }
 
-// "Set up schema" button — runs `alembic upgrade head` against the saved
-// connection (POST /api/admin/system/init-schema). A fresh Railway/managed
-// database has no tables until this runs; idempotent once it has.
-async function initAdminSchema() {
-    const btn = document.getElementById('admin-system-db-init-schema-btn');
+// "Set up database" button — one click runs both bootstrap steps against the
+// saved connection, in order:
+//   1. `alembic upgrade head` to create the schema (POST
+//      /api/admin/system/init-schema) — a fresh Railway/managed database has
+//      no tables until this runs.
+//   2. copy the auth_type=="owner" account from USERS.json into Postgres
+//      (POST /api/admin/system/port-owner-to-database) — needs the schema, so
+//      a step-1 failure stops here.
+// Both endpoints are idempotent, so the button is safe to re-click.
+async function setupAdminDatabase() {
+    const btn = document.getElementById('admin-system-db-setup-btn');
     if (btn) btn.disabled = true;
     _setAdminDbSetupStatus('Setting up schema…', null);
 
     try {
-        const res = await fetch('/api/admin/system/init-schema', {method: 'POST'});
-        const data = await res.json().catch(() => ({}));
-
+        let res = await fetch('/api/admin/system/init-schema', {method: 'POST'});
+        let data = await res.json().catch(() => ({}));
         if (!res.ok) {
             _setAdminDbSetupStatus(data.detail || 'Schema setup failed.', 'error');
             return;
         }
-        _setAdminDbSetupStatus('Schema is ready.', 'ok');
-    } catch (err) {
-        _setAdminDbSetupStatus('Schema setup failed.', 'error');
-    } finally {
-        if (btn) btn.disabled = false;
-        refreshDbModePrecheck();
-    }
-}
 
-// "Port Owner" button — copies just the auth_type=="owner" account from
-// USERS.json into Postgres via /api/admin/system/port-owner-to-database.
-// Idempotent (upsert); needs the schema to exist first.
-async function portOwnerToDatabase() {
-    const btn = document.getElementById('admin-system-db-port-owner-btn');
-
-    if (btn) btn.disabled = true;
-    _setAdminDbSetupStatus('Copying owner account…', null);
-
-    try {
-        const res = await fetch('/api/admin/system/port-owner-to-database', {method: 'POST'});
-        const data = await res.json().catch(() => ({}));
-
+        _setAdminDbSetupStatus('Copying owner account…', null);
+        res = await fetch('/api/admin/system/port-owner-to-database', {method: 'POST'});
+        data = await res.json().catch(() => ({}));
         if (!res.ok) {
             _setAdminDbSetupStatus(data.detail || 'Failed to copy the owner account.', 'error');
             return;
         }
-        _setAdminDbSetupStatus(`Owner account "${data.owner}" copied to the database.`, 'ok');
+
+        _setAdminDbSetupStatus(`Schema is ready and owner account "${data.owner}" copied to the database.`, 'ok');
     } catch (err) {
-        _setAdminDbSetupStatus('Failed to copy the owner account.', 'error');
+        _setAdminDbSetupStatus('Database setup failed.', 'error');
     } finally {
         if (btn) btn.disabled = false;
         refreshDbModePrecheck();

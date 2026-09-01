@@ -234,6 +234,15 @@
 
 .admin-system-sync-btn {
     align-self: flex-start;
+    flex-shrink: 0;
+}
+
+/* Sync / Wipe now sit in the Local DB card as .admin-system-option-row items
+   (right-aligned action button, ⓘ hover on the label — see admin.html). The
+   result log is a direct child of that card's flex column, so give it the
+   same 16px side inset the rows have and lift it clear of the last row. */
+.admin-system-local-db-card .admin-system-sync-log {
+    margin: 0 16px 14px;
 }
 
 /* Visually separates Sync (constructive) from Wipe (destructive) within
@@ -252,6 +261,7 @@
    — this is just the visual warning, not the safeguard itself. */
 .admin-system-wipe-btn {
     align-self: flex-start;
+    flex-shrink: 0;
     background: var(--error);
 }
 
