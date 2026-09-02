@@ -11,8 +11,9 @@ from datetime import date, datetime, timedelta, timezone
 from db.connection_url import compose as compose_database_url, parse as parse_database_url
 from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection
 from db.session import get_session, reset_engine
+from db_connection import resolved_database_url, save_database_url
 from db_mode import is_db_mode
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -1058,15 +1059,19 @@ async def api_admin_wipe_database(request: Request):
 
 
 # ── Database Connection panel ────────────────────────────────────────────
-# Reads/edits the pieces of DATABASE_URL (host, port, db, user, password,
-# sslmode). DATABASE_URL stays the single source of truth — a save writes
-# the reassembled string back to .env AND to os.environ, then resets the
-# engine so the next query reconnects. On Railway the platform injects
-# DATABASE_URL as a real env var and /app is ephemeral, so a save there
-# takes effect for the running process only — it won't survive a redeploy
-# and won't override the platform var on the next boot (persistent prod
-# changes belong in the Railway dashboard).
-_DOTENV_PATH = ".env"
+# Reads/edits the pieces of the connection string (host, port, db, user,
+# password, sslmode). A save persists the reassembled string to SETTINGS.json
+# (save_database_url) and resets the engine so the next query reconnects — the
+# .env file / platform DATABASE_URL is a read-only default and is never
+# written. resolved_database_url() (db_connection.py) is what everything
+# actually connects with: the SETTINGS.json override if one has been saved,
+# otherwise the env default.
+#
+# The override persists (locally in DATA_GENERAL/SETTINGS.json, on Railway on
+# the volume it's symlinked onto), so a saved connection now sticks across a
+# redeploy and takes priority over the platform's own DATABASE_URL. To fall
+# back to the env default again, delete the "database_url" key from
+# SETTINGS.json (db_connection.clear_database_url()).
 
 
 def _test_database_connection(url: str | None) -> tuple[bool, str | None]:
@@ -1129,12 +1134,12 @@ def _schema_ready(url: str) -> bool:
 
 
 def run_schema_migration() -> dict:
-    """`alembic upgrade head` against the currently-configured DATABASE_URL,
-    run in-process (alembic/env.py re-reads DATABASE_URL from the environment,
-    which api_admin_set_database_url keeps current). Creates the schema on a
-    fresh database and is a no-op when it's already at head. Blocking — call
-    from a thread. Returns {"ok", "log", "error"}."""
-    url = os.getenv("DATABASE_URL")
+    """`alembic upgrade head` against the currently-configured connection,
+    run in-process. The resolved URL is passed straight to Alembic's Config
+    below, so this doesn't rely on alembic/env.py's own lookup. Creates the
+    schema on a fresh database and is a no-op when it's already at head.
+    Blocking — call from a thread. Returns {"ok", "log", "error"}."""
+    url = resolved_database_url()
     if not url:
         return {"ok": False, "log": "", "error": "No database connection configured."}
 
@@ -1165,7 +1170,7 @@ def _db_mode_switch_blocker() -> str | None:
     guard in api_admin_set_settings for why the owner must be there first."""
     from scripts.migrate_json_to_pg import find_owner_username, port_owner_to_database
 
-    url = os.getenv("DATABASE_URL")
+    url = resolved_database_url()
     if not url:
         return "Set and save the database connection before turning Use JSON off."
 
@@ -1201,7 +1206,7 @@ def _db_mode_switch_blocker() -> str | None:
 async def api_admin_get_database_url(request: Request):
     require_admin(request)
 
-    return JSONResponse(parse_database_url(os.getenv("DATABASE_URL")))
+    return JSONResponse(parse_database_url(resolved_database_url()))
 
 
 @app.post("/api/admin/system/database-url")
@@ -1211,12 +1216,12 @@ async def api_admin_set_database_url(request: Request):
     body = await request.json()
 
     try:
-        url = compose_database_url(body, base_url=os.getenv("DATABASE_URL"))
+        url = compose_database_url(body, base_url=resolved_database_url())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    set_key(_DOTENV_PATH, "DATABASE_URL", url, quote_mode="never")
-    os.environ["DATABASE_URL"] = url
+    # Persist the override to SETTINGS.json only — .env is never touched.
+    save_database_url(url)
 
     # Different database ⇒ different rows: drop the pooled engine and every
     # memoized whole-table read (same reason the wipe handler above busts).
@@ -1232,14 +1237,14 @@ async def api_admin_test_database_url(request: Request):
 
     body = await request.json()
 
-    # Test the posted fields if any were sent, otherwise whatever is saved.
+    # Test the posted fields if any were sent, otherwise whatever is resolved.
     if any((body or {}).get(k) for k in ("host", "database", "username", "password", "port", "sslmode")):
         try:
-            url = compose_database_url(body, base_url=os.getenv("DATABASE_URL"))
+            url = compose_database_url(body, base_url=resolved_database_url())
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": str(exc)})
     else:
-        url = os.getenv("DATABASE_URL")
+        url = resolved_database_url()
 
     ok, err = _test_database_connection(url)
     return JSONResponse({"ok": True} if ok else {"ok": False, "error": err})
@@ -1259,7 +1264,7 @@ async def api_admin_db_mode_precheck(request: Request):
 
     from scripts.migrate_json_to_pg import find_owner_username
 
-    url = os.getenv("DATABASE_URL")
+    url = resolved_database_url()
     owner_username = find_owner_username()
 
     connection_ok, connection_error = _test_database_connection(url) if url else (False, None)
@@ -1354,7 +1359,9 @@ def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
 @app.get("/api/admin/settings")
 async def api_admin_get_settings(request: Request):
     require_admin(request)
-    return JSONResponse(load_settings())
+    # The DB connection string (with its password) lives in SETTINGS.json too
+    # but has its own dedicated endpoint — don't ship it in this toggle blob.
+    return JSONResponse({k: v for k, v in load_settings().items() if k != "database_url"})
 
 
 @app.post("/api/admin/settings")

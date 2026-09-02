@@ -26,10 +26,14 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# DATABASE_URL from .env overrides whatever alembic.ini has on disk, so the
-# connection string (with its password) only ever needs to live in one place.
+# The connection actually in effect overrides whatever alembic.ini has on
+# disk: the SETTINGS.json override saved through the admin panel if there is
+# one, otherwise DATABASE_URL from .env / the platform. load_dotenv first so
+# the env fallback is populated before resolved_database_url() looks.
 load_dotenv(".env" if os.path.exists(".env") else "env")
-database_url = os.getenv("DATABASE_URL")
+from db_connection import resolved_database_url
+
+database_url = resolved_database_url()
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 

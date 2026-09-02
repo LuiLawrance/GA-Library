@@ -717,12 +717,12 @@ async function setupAdminDatabase() {
 }
 
 // ── Database Connection panel ───────────────────────────────────────────
-// Reads/writes the pieces of DATABASE_URL via /api/admin/system/database-url
-// (see app.py). There is no Save button — an edit to any field auto-saves
-// (debounced): the POST writes .env + os.environ and resets the engine
-// server-side, no reload needed. Each field carries a pip
-// (.admin-system-db-pip) showing that edit's save state — amber pending,
-// green saved, red failed.
+// Reads/writes the pieces of the connection string via
+// /api/admin/system/database-url (see app.py). There is no Save button — an
+// edit to any field auto-saves (debounced): the POST persists the override to
+// SETTINGS.json (never .env) and resets the engine server-side, no reload
+// needed. Each field carries a pip (.admin-system-db-pip) showing that edit's
+// save state — amber pending, green saved, red failed.
 const ADMIN_DB_FIELDS = ['host', 'port', 'database', 'username', 'password', 'sslmode'];
 const ADMIN_DB_AUTOSAVE_MS = 800;
 

@@ -1,13 +1,14 @@
-"""Parse / rebuild the DATABASE_URL from its individual pieces.
+"""Parse / rebuild a database connection string from its individual pieces.
 
 Backs the Admin -> System -> "Database Connection" panel: parse() turns the
-current DATABASE_URL into the fields shown there, compose() turns edited
-fields back into a URL string to write to .env and os.environ. Both go
-through SQLAlchemy's own URL type so quoting, IPv6 hosts, odd passwords etc.
-are handled the same way get_session()'s create_engine() would handle them.
+connection currently in effect into the fields shown there, compose() turns
+edited fields back into a URL string. Both go through SQLAlchemy's own URL
+type so quoting, IPv6 hosts, odd passwords etc. are handled the same way
+get_session()'s create_engine() would handle them.
 
-DATABASE_URL is still the single source of truth (see db/session.py) — this
-module never stores anything itself.
+This module is pure string manipulation — it never reads or stores the
+connection. Resolving it (SETTINGS.json override vs. the .env default) and
+persisting an admin edit both live in db_connection.py.
 """
 
 from sqlalchemy.engine import make_url
