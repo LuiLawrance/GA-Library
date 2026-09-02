@@ -1501,17 +1501,7 @@
     color: var(--accent);
 }
 
-.inv-filter-arrow {
-    display: inline-block;
-    font-size: 1.1rem;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.25s ease;
-}
-
-.inv-filter-dropdown-btn.open .inv-filter-arrow {
-    transform: rotate(90deg);
-}
+/* .inv-filter-arrow is the shared .dropdown-arrow (components.css). */
 
 /* Shared .menu (components.css) — scrolls when tall. */
 .inv-filter-menu {

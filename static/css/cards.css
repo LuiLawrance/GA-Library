@@ -29,17 +29,7 @@
     border-color: var(--border-focus);
 }
 
-.set-dropdown-arrow {
-    display: inline-block;
-    font-size: 1.1rem;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.25s ease;
-}
-
-.set-dropdown-btn.open .set-dropdown-arrow {
-    transform: rotate(90deg);
-}
+/* .set-dropdown-arrow is the shared .dropdown-arrow (components.css). */
 
 /* Shared .menu (components.css). */
 .set-dropdown-menu {
@@ -532,17 +522,7 @@
     color: var(--accent);
 }
 
-.cards-filter-arrow {
-    display: inline-block;
-    font-size: 1.1rem;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.25s ease;
-}
-
-.cards-filter-btn.open .cards-filter-arrow {
-    transform: rotate(90deg);
-}
+/* .cards-filter-arrow is the shared .dropdown-arrow (components.css). */
 
 /* Shared .menu (components.css). */
 .cards-filter-menu {

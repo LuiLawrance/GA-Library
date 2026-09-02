@@ -76,7 +76,12 @@
    itself via margin:auto; align-items:flex-start so the shorter panel
    doesn't stretch to match the taller one's height. admin.js's
    animateSystemPanelsForUseJson (via flipSlide / animateHeightWipe in
-   animation.js) animates the re-centre and the Sync panel's reveal. */
+   animation.js) animates the re-centre and the Sync panel's reveal.
+
+   No overflow clip here: flipSlide only ever moves the settings card between
+   two in-bounds positions, and animateHeightWipe clips the Sync panel on the
+   panel itself — so nothing escapes this row. Clipping here instead cut off
+   the SSL field's dropdown where it extended past the Sync panel's bottom. */
 .admin-system-panels {
     display: flex;
     gap: 16px;
@@ -84,7 +89,6 @@
     align-items: flex-start;
     width: 100%;
     margin-top: 32px;
-    overflow: hidden;
 }
 
 /* The left stack in .admin-system-panels — the main settings card plus the
@@ -180,10 +184,10 @@
     opacity: 1;
 }
 
-/* Reuses .admin-pid-source-toggle/-btn (the Cards section's Regular/Discord
-   pill) as-is for the sliding On/Off look — .admin-system-option-toggle only
+/* The System On/Off setting toggles carry the shared .pill-toggle plus
+   .admin-pid-source-toggle (the tighter Regular/Discord track); this class only
    adds the data-setting hook loadAdminSystemSettings/updateAdminSystemSetting
-   (admin.js) use to find the right pill, no visual overrides needed. */
+   (admin.js) use to find the right pill. */
 .admin-system-option-toggle {
     flex-shrink: 0;
 }
@@ -223,26 +227,30 @@
 
 /* Sync / Wipe now sit in the Local DB card as .admin-system-option-row items
    (right-aligned action button, ⓘ hover on the label — see admin.html). The
-   result log is a direct child of that card's flex column, so give it the
-   same 16px side inset the rows have and lift it clear of the last row. */
-.admin-system-local-db-card .admin-system-sync-log {
-    margin: 0 16px 14px;
+   result log ("Wiped N tables…" / the sync counts) is the card's final child
+   and reads as part of the same menu: no inset box, no border, and NO divider
+   line above it — the Wipe row (last .admin-system-option-row) drops its
+   bottom border so nothing separates it from the log. The card animates its
+   own height around the log appearing / changing via animateBoxResize (see
+   runAdminSystemSync / runAdminSystemWipe in admin.js). */
+.admin-system-local-db-card .admin-system-option-row:last-of-type {
+    border-bottom: none;
 }
 
-/* Visually separates Sync (constructive) from Wipe (destructive) within
-   the same panel, so the two aren't just two same-weight buttons stacked
-   with nothing distinguishing which one is the dangerous one. */
-.admin-system-wipe-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 0;
+.admin-system-local-db-card .admin-system-sync-log {
+    margin: 0;
+    padding: 12px 16px 14px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
 }
 
 /* Wipe Database — same shape as .admin-system-sync-btn (inherits
    .admin-pid-refresh-btn's base look) but in --error instead of --accent,
-   the one deliberately alarming-looking control in this panel. Actual
-   confirmation happens in JS (runAdminSystemWipe requires typing DELETE)
-   — this is just the visual warning, not the safeguard itself. */
+   the one deliberately alarming-looking control in this card. Actual
+   confirmation happens in JS (runAdminSystemWipe opens the shared type-
+   "confirm" appConfirm modal) — this is just the visual warning, not the
+   safeguard itself. */
 .admin-system-wipe-btn {
     align-self: flex-start;
     flex-shrink: 0;
@@ -252,7 +260,9 @@
 /* Sync Now's result log — the same output CLI users of
    scripts/migrate_json_to_pg.py see, just rendered in the panel instead of
    a terminal (see runAdminSystemSync in admin.js). Monospace + pre-wrap so
-   the per-domain row counts stay readable without a horizontal scrollbar. */
+   the per-domain row counts stay readable without a horizontal scrollbar.
+   Caps at 240px and scrolls with the shared .scroll-thin bar (main.css) —
+   the class is on the element in admin.html. */
 .admin-system-sync-log {
     max-height: 240px;
     overflow-y: auto;
@@ -348,31 +358,45 @@
 }
 
 /* The SSL field is an .admin-pid-dropdown widget (rotating arrow +
-   revealDown menu, same look as the Cards page filters — see
-   admin.html). Nudge its button padding to sit level with the sibling text
-   inputs in this row; the menu is already left:0/right:0 so it tracks the
-   narrow grid cell. */
+   revealDown menu, same look as the Cards page filters — see admin.html).
+   Nudge its button padding to sit level with the sibling text inputs in this
+   row; the menu is already left:0/right:0 so it tracks the narrow grid cell,
+   and opens downward past the Sync panel's edge now that .admin-system-panels
+   no longer clips it. */
 .admin-system-db-ssl-wrap .admin-pid-dropdown-btn {
     padding: 7px 9px;
 }
 
-/* Matches #set-dropdown-options's scrollbar on the Cards page exactly (same
-   as the Set/Rarity column filters do — see #admin-pid-table-header
-   .set-dropdown-menu below). */
-.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar {
+/* Scroll the inner list, never the .menu box itself. A rounded element's own
+   scrollbar isn't clipped by its border-radius and spills past the corner;
+   nesting the scroll one level in lets .menu's overflow:hidden clip the bar to
+   the rounded edge — the same split the Cards page uses for #set-dropdown-options
+   inside its .menu. */
+.admin-system-db-ssl-wrap .admin-pid-dropdown-menu {
+    overflow: hidden;
+    max-height: none;
+}
+
+.admin-system-db-ssl-wrap .admin-pid-dropdown-options {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Scrollbar matches #set-dropdown-options on the Cards page exactly. */
+.admin-system-db-ssl-wrap .admin-pid-dropdown-options::-webkit-scrollbar {
     width: 6px;
 }
 
-.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar-track {
+.admin-system-db-ssl-wrap .admin-pid-dropdown-options::-webkit-scrollbar-track {
     background: var(--bg-card);
 }
 
-.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar-thumb {
+.admin-system-db-ssl-wrap .admin-pid-dropdown-options::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 3px;
 }
 
-.admin-system-db-ssl-wrap .admin-pid-dropdown-menu::-webkit-scrollbar-thumb:hover {
+.admin-system-db-ssl-wrap .admin-pid-dropdown-options::-webkit-scrollbar-thumb:hover {
     background: var(--border-focus);
 }
 
@@ -383,7 +407,14 @@
     margin-top: 2px;
 }
 
+/* Test / Set Up Database result line. Caps + scrolls (shared .scroll-thin bar,
+   main.css — class is on the <p> in admin.html) so a multi-line Postgres error
+   doesn't balloon the panel; #admin-system-sync-panel animates its own height
+   around this appearing (animateBoxResize in testAdminSystemDatabaseConnection
+   / setupAdminDatabase). */
 .admin-system-db-status {
+    max-height: 120px;
+    overflow-y: auto;
     margin: 0;
     font-size: 0.75rem;
     line-height: 1.4;
@@ -540,63 +571,16 @@
     flex-shrink: 0;
 }
 
-/* Pill toggle between the Cards section's own sub-views (Info / Pricing) —
-   deliberately a filled pill rather than the top-level .admin-subnav's
-   underline-tab look, so it reads as a mode switch inside Cards rather than
-   a second, competing top-level nav. */
-.admin-cards-subnav {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 3px;
-    flex-shrink: 0;
-}
-
+/* Cards sub-view switch (Info / Pricing) — the shared .pill-toggle /
+   .pill-toggle-btn (components.css) with a monospace uppercase label, so it
+   reads as a mode switch inside Cards rather than a second top-level nav. */
 .admin-cards-subnav-btn {
-    position: relative;
-    z-index: 1;
     font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 400;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    border-radius: 999px;
     padding: 6px 16px;
-    cursor: pointer;
-    transition: color 0.25s;
-}
-
-.admin-cards-subnav-btn:hover {
-    color: var(--text);
-}
-
-.admin-cards-subnav-btn.active {
-    color: var(--bg);
-}
-
-/* Sliding highlight shared by both pill toggles in this section (Info/Pricing
-   and Regular/Discord) — positionPillIndicator (animation.js) measures the
-   active button and sets width/height/top and a translateX transform
-   directly, so this only needs to define the visual + the transition, not
-   any sizing. .pill-indicator (not admin-prefixed) is that shared helper's
-   own expected class name — any future page using it needs this same rule
-   (or an equivalently-shaped one) defined in its own CSS. */
-.pill-indicator {
-    position: absolute;
-    top: 0;
-    left: 0;
-    background: var(--accent);
-    border-radius: 999px;
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-    z-index: 0;
 }
 
 .admin-cards-view {
@@ -749,44 +733,12 @@
     min-width: 0;
 }
 
-/* Regular/Discord pill — sits left of the refresh buttons in the same row.
-   Same filled-pill shape as .admin-cards-subnav (the Info/Pricing toggle),
-   but its own sizing tuned to match .admin-pid-refresh-btn's height exactly,
-   since that's the button it's sitting directly next to. */
+/* Regular/Discord pill (also reused for the System section's On/Off setting
+   toggles) — the shared .pill-toggle / .pill-toggle-btn (components.css); the
+   only tweak is a tighter track so it matches .admin-pid-refresh-btn's height
+   exactly, since it sits directly beside it. */
 .admin-pid-source-toggle {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 999px;
     padding: 2px;
-    flex-shrink: 0;
-}
-
-.admin-pid-source-toggle-btn {
-    position: relative;
-    z-index: 1;
-    font-family: var(--font-sans);
-    font-size: 0.82rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    background: transparent;
-    border: none;
-    border-radius: 999px;
-    padding: 6px 14px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color 0.25s;
-}
-
-.admin-pid-source-toggle-btn:hover {
-    color: var(--text);
-}
-
-.admin-pid-source-toggle-btn.active {
-    color: var(--bg);
 }
 
 .admin-pid-search {
@@ -1364,12 +1316,11 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    /* Reserves the scrollbar's own width as a gutter (same technique
-       prices.css uses) rather than letting it overlay the row content —
-       without this the count column, flush against this list's right edge
-       via .admin-pricing-sets-row's justify-content:space-between, sat
-       directly under the scrollbar thumb whenever one appeared. */
-    scrollbar-gutter: stable;
+    /* No scrollbar-gutter: stable here — the .scroll-thin bar is a classic
+       (space-consuming) scrollbar, so when it's present it already takes its
+       own 8px from the content box and .admin-pricing-sets-row-actions'
+       margin-right keeps the count/button off it; when it's absent that width
+       returns to the rows instead of sitting reserved and empty. */
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -1422,10 +1373,8 @@
     color: var(--text-muted);
 }
 
-/* margin-right nudges the whole group off the list's right edge — separate
-   from (and on top of) scrollbar-gutter's own reserved space on
-   .admin-pricing-sets-list above, which only keeps the scrollbar itself from
-   overlapping this. */
+/* margin-right nudges the whole group off the list's right edge — and, when
+   the list is scrolling, off its (space-consuming) scrollbar too. */
 .admin-pricing-sets-row-actions {
     flex-shrink: 0;
     display: flex;
@@ -2494,17 +2443,9 @@
     color: var(--text-muted);
 }
 
+/* Shared .dropdown-arrow (components.css) + muted colour. */
 .admin-pid-dropdown-arrow {
-    display: inline-block;
-    font-size: 1.1rem;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.25s ease;
     color: var(--text-muted);
-}
-
-.admin-pid-dropdown-btn.open .admin-pid-dropdown-arrow {
-    transform: rotate(90deg);
 }
 
 /* Shared .menu (components.css) — full-width, scrolls when tall, above the drawer. */

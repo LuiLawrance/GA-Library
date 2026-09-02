@@ -259,12 +259,12 @@ async function fadeSwap(els, mutate, {outClass = 'fade-out', inClass = 'fade-in'
     setTimeout(() => list.forEach(el => el.classList.remove(inClass)), inMs);
 }
 
-// Sliding highlight for a pill-style toggle — measures whichever child of `container`
-// currently has `.active` and positions the `.pill-indicator` sibling under it via
-// width/height/top + a translateX transform, so a plain CSS transition on
-// `.pill-indicator` (not driven by this function — see admin.css) animates it sliding
-// there from wherever it was. Call after toggling which child has `.active`, and again
-// once a previously-hidden container becomes visible (offsetWidth reads 0 while
+// Sliding highlight for a `.pill-toggle` (components.css) — measures whichever child of
+// `container` currently has `.active` and positions the `.pill-indicator` sibling under
+// it via width/height/top + a translateX transform, so the plain CSS transition on
+// `.pill-indicator` (defined in components.css, not driven by this function) animates it
+// sliding there from wherever it was. Call after toggling which child has `.active`, and
+// again once a previously-hidden container becomes visible (offsetWidth reads 0 while
 // display:none, so a call made while hidden has nothing to measure).
 function positionPillIndicator(container) {
     const indicator = container?.querySelector('.pill-indicator');

@@ -149,6 +149,74 @@ input::placeholder,
     animation: revealDown 0.2s ease forwards;
 }
 
+/* Rotating chevron on a .menu trigger — the `‹` glyph is in the markup; it
+   points down at rest and flips up while the trigger carries `.open`. */
+.dropdown-arrow {
+    display: inline-block;
+    font-size: 1.1rem;
+    line-height: 1;
+    transform: rotate(-90deg);
+    transition: transform 0.25s ease;
+}
+.open > .dropdown-arrow {
+    transform: rotate(90deg);
+}
+
+/* ── Pill toggle ─────────────────────────
+   Segmented control: a rounded track holding 2+ `.pill-toggle-btn` options with
+   a `.pill-indicator` sliding behind whichever has `.active`. positionPillIndicator()
+   (animation.js) sizes and moves the indicator — call it after changing which
+   button is `.active`, and once the track first becomes visible. The prefixed
+   class keeps only size/typography deltas. */
+.pill-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    flex-shrink: 0;
+}
+
+.pill-toggle-btn {
+    position: relative;
+    z-index: 1;
+    font-family: var(--font-sans);
+    font-weight: 500;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.25s;
+}
+.pill-toggle-btn:hover {
+    color: var(--text);
+}
+.pill-toggle-btn.active {
+    color: var(--bg);
+}
+
+/* The sliding highlight behind the active button. Its width/height/top and a
+   translateX transform are set inline by positionPillIndicator(); this only
+   defines the look and the motion. */
+.pill-indicator {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    z-index: 0;
+}
+
 /* ── Panel / Overlay / Modal ─────────────
    .panel: the bordered card surface. .overlay: full-viewport dim backdrop.
    .modal: a centered dialog box (a .panel with dialog padding/scroll). */

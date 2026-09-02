@@ -515,17 +515,9 @@
     border-color: var(--border-focus);
 }
 
+/* Shared .dropdown-arrow (components.css) + muted colour. */
 .dga-fmt-dropdown-arrow {
-    display: inline-block;
-    font-size: 1.1rem;
-    line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 0.25s ease;
     color: var(--text-muted);
-}
-
-.dga-fmt-dropdown-btn.open .dga-fmt-dropdown-arrow {
-    transform: rotate(90deg);
 }
 
 /* Shared .menu (components.css) — full-width under its trigger, scrolls when tall. */

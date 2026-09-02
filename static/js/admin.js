@@ -633,6 +633,16 @@ async function confirmUseJsonStaging() {
     }
 }
 
+// Run `mutate` (a synchronous status-line change — Test's or Set Up Database's)
+// while animating #admin-system-sync-panel's own height so the Database
+// Connection card grows / shrinks into place around the message rather than
+// snapping. Same helper + await-the-previous rule as _animateAdminSyncLog.
+function _animateAdminDbPanel(mutate) {
+    const panel = document.getElementById('admin-system-sync-panel');
+    if (!panel) { mutate(); return Promise.resolve(); }
+    return animateBoxResize(panel, mutate);
+}
+
 // Shared status line under the "Set up database" button.
 function _setAdminDbSetupStatus(text, kind) {
     const el = document.getElementById('admin-system-db-setup-status');
@@ -655,27 +665,32 @@ function _setAdminDbSetupStatus(text, kind) {
 async function setupAdminDatabase() {
     const btn = document.getElementById('admin-system-db-setup-btn');
     if (btn) btn.disabled = true;
-    _setAdminDbSetupStatus('Setting up schema…', null);
+
+    // Each status change animates the panel's resize; `step` awaits the
+    // previous resize before starting the next so a fast response can't cut
+    // one short (see _animateAdminDbPanel).
+    let resize = _animateAdminDbPanel(() => _setAdminDbSetupStatus('Setting up schema…', null));
+    const step = async mutate => { await resize; resize = _animateAdminDbPanel(mutate); await resize; };
 
     try {
         let res = await fetch('/api/admin/system/init-schema', {method: 'POST'});
         let data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            _setAdminDbSetupStatus(data.detail || 'Schema setup failed.', 'error');
+            await step(() => _setAdminDbSetupStatus(data.detail || 'Schema setup failed.', 'error'));
             return;
         }
 
-        _setAdminDbSetupStatus('Copying owner account…', null);
+        await step(() => _setAdminDbSetupStatus('Copying owner account…', null));
         res = await fetch('/api/admin/system/port-owner-to-database', {method: 'POST'});
         data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            _setAdminDbSetupStatus(data.detail || 'Failed to copy the owner account.', 'error');
+            await step(() => _setAdminDbSetupStatus(data.detail || 'Failed to copy the owner account.', 'error'));
             return;
         }
 
-        _setAdminDbSetupStatus(`Schema is ready and owner account "${data.owner}" copied to the database.`, 'ok');
+        await step(() => _setAdminDbSetupStatus(`Schema is ready and owner account "${data.owner}" copied to the database.`, 'ok'));
     } catch (err) {
-        _setAdminDbSetupStatus('Database setup failed.', 'error');
+        await step(() => _setAdminDbSetupStatus('Database setup failed.', 'error'));
     } finally {
         if (btn) btn.disabled = false;
         refreshDbModePrecheck();
@@ -900,7 +915,7 @@ async function loadAdminSystemDatabaseSettings() {
 async function testAdminSystemDatabaseConnection() {
     const btn = document.getElementById('admin-system-db-test-btn');
     if (btn) btn.disabled = true;
-    _setAdminDbStatus('Testing…', null);
+    const revealed = _animateAdminDbPanel(() => _setAdminDbStatus('Testing…', null));
 
     try {
         const res = await fetch('/api/admin/system/database-url/test', {
@@ -910,17 +925,34 @@ async function testAdminSystemDatabaseConnection() {
         });
         const data = await res.json().catch(() => ({}));
 
-        if (data.ok) {
-            _setAdminDbStatus('Connection succeeded.', 'ok');
-        } else {
-            _setAdminDbStatus(data.error || 'Connection failed.', 'error');
-        }
+        await revealed;
+        await _animateAdminDbPanel(() => {
+            if (data.ok) {
+                _setAdminDbStatus('Connection succeeded.', 'ok');
+            } else {
+                _setAdminDbStatus(data.error || 'Connection failed.', 'error');
+            }
+        });
     } catch (err) {
-        _setAdminDbStatus('Connection failed.', 'error');
+        await revealed;
+        await _animateAdminDbPanel(() => _setAdminDbStatus('Connection failed.', 'error'));
     } finally {
         if (btn) btn.disabled = false;
         if (adminUseJsonStaging) refreshDbModePrecheck();
     }
+}
+
+// Reveal / update #admin-system-sync-log (the Sync / Wipe result area, last
+// child of the Local Database card) while animating the card's own height so
+// the status grows — or shrinks — into place instead of snapping. `mutate` is
+// the synchronous text/class change; the returned promise resolves once the
+// resize settles. A caller firing a second update shortly after (the final
+// result replacing "Running…") should await the first — animateBoxResize
+// cancels whatever's still running on the card, which would cut it short.
+function _animateAdminSyncLog(mutate) {
+    const card = document.getElementById('admin-system-local-db-card');
+    if (!card) { mutate(); return Promise.resolve(); }
+    return animateBoxResize(card, mutate);
 }
 
 // Sync Now — runs scripts/migrate_json_to_pg.py's full migration via the
@@ -941,8 +973,10 @@ async function runAdminSystemSync() {
     const originalLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Syncing…';
-    log.classList.remove('hidden', 'admin-system-sync-log-error');
-    log.textContent = 'Running…';
+    const revealed = _animateAdminSyncLog(() => {
+        log.classList.remove('hidden', 'admin-system-sync-log-error');
+        log.textContent = 'Running…';
+    });
 
     try {
         const startRes = await fetch('/api/admin/system/sync-to-database/start', {method: 'POST'});
@@ -964,15 +998,21 @@ async function runAdminSystemSync() {
             }
         }
 
-        if (result.ok) {
-            log.textContent = result.log || '(no output)';
-        } else {
-            log.classList.add('admin-system-sync-log-error');
-            log.textContent = (result.error ? `${result.error}\n\n` : '') + (result.log || '');
-        }
+        await revealed;
+        await _animateAdminSyncLog(() => {
+            if (result.ok) {
+                log.textContent = result.log || '(no output)';
+            } else {
+                log.classList.add('admin-system-sync-log-error');
+                log.textContent = (result.error ? `${result.error}\n\n` : '') + (result.log || '');
+            }
+        });
     } catch (err) {
-        log.classList.add('admin-system-sync-log-error');
-        log.textContent = err.message || 'Sync failed.';
+        await revealed;
+        await _animateAdminSyncLog(() => {
+            log.classList.add('admin-system-sync-log-error');
+            log.textContent = err.message || 'Sync failed.';
+        });
     } finally {
         btn.disabled = false;
         btn.textContent = originalLabel;
@@ -988,11 +1028,12 @@ async function runAdminSystemSync() {
 // TRUNCATE is near-instant, unlike Sync's row-by-row work) and shares
 // Sync's own result log area.
 async function runAdminSystemWipe() {
-    const typed = prompt(
+    const confirmed = await appConfirm(
         'This permanently deletes every card, pricing, inventory, deck, and watchlist row from the ' +
-        'database. Your user accounts are kept. This cannot be undone.\n\nType DELETE to confirm:'
+        'database. Your user accounts are kept. This cannot be undone.',
+        {title: 'Wipe Database', confirmLabel: 'Wipe Database'}
     );
-    if (typed !== 'DELETE') return;
+    if (!confirmed) return;
 
     const btn = document.getElementById('admin-system-wipe-btn');
     const log = document.getElementById('admin-system-sync-log');
@@ -1001,8 +1042,10 @@ async function runAdminSystemWipe() {
     const originalLabel = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Wiping…';
-    log.classList.remove('hidden', 'admin-system-sync-log-error');
-    log.textContent = 'Running…';
+    const revealed = _animateAdminSyncLog(() => {
+        log.classList.remove('hidden', 'admin-system-sync-log-error');
+        log.textContent = 'Running…';
+    });
 
     try {
         const res = await fetch('/api/admin/system/wipe-database', {method: 'POST'});
@@ -1012,10 +1055,16 @@ async function runAdminSystemWipe() {
             throw new Error(data.detail || 'Wipe failed.');
         }
 
-        log.textContent = data.log || '(no output)';
+        await revealed;
+        await _animateAdminSyncLog(() => {
+            log.textContent = data.log || '(no output)';
+        });
     } catch (err) {
-        log.classList.add('admin-system-sync-log-error');
-        log.textContent = err.message || 'Wipe failed.';
+        await revealed;
+        await _animateAdminSyncLog(() => {
+            log.classList.add('admin-system-sync-log-error');
+            log.textContent = err.message || 'Wipe failed.';
+        });
     } finally {
         btn.disabled = false;
         btn.textContent = originalLabel;
@@ -2501,7 +2550,7 @@ function adminPidSetFilterHtml() {
             <button type="button" class="set-dropdown-btn btn btn--ghost btn--mono ${adminPidSetFilterOpen ? 'open' : ''}"
                     onclick="event.stopPropagation(); toggleAdminPidSetFilter()">
                 <span>Set</span>
-                <span class="set-dropdown-arrow">&#8249;</span>
+                <span class="set-dropdown-arrow dropdown-arrow">&#8249;</span>
             </button>
             <div class="set-dropdown-menu menu ${adminPidSetFilterOpen ? '' : 'hidden'}">
                 ${optionsHtml || '<div class="admin-pid-detail-empty-small">No sets</div>'}
@@ -2576,7 +2625,7 @@ function adminPidRarityFilterHtml() {
             <button type="button" class="set-dropdown-btn btn btn--ghost btn--mono ${adminPidRarityFilterOpen ? 'open' : ''}"
                     onclick="event.stopPropagation(); toggleAdminPidRarityFilter()">
                 <span>Rarity</span>
-                <span class="set-dropdown-arrow">&#8249;</span>
+                <span class="set-dropdown-arrow dropdown-arrow">&#8249;</span>
             </button>
             <div class="set-dropdown-menu menu ${adminPidRarityFilterOpen ? '' : 'hidden'}">
                 ${optionsHtml || '<div class="admin-pid-detail-empty-small">No rarities</div>'}
@@ -3900,7 +3949,7 @@ function adminPidDropdownHtml({wrapId, menuId, btnId, labelId, hiddenId, label, 
             <button type="button" class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="${btnId}"
                     onclick="toggleAdminPidDropdown('${menuId}', '${btnId}')" ${disabled ? 'disabled' : ''}>
                 <span id="${labelId}">${escapeHtml(label || '')}</span>
-                <span class="admin-pid-dropdown-arrow">&#8249;</span>
+                <span class="admin-pid-dropdown-arrow dropdown-arrow">&#8249;</span>
             </button>
             <div class="admin-pid-dropdown-menu menu hidden" id="${menuId}">
                 ${optionsHtml}
@@ -3978,7 +4027,7 @@ function adminPidMarketplaceFieldHtml() {
             <div class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="admin-pid-marketplace-dropdown-btn">
                 <input type="text" class="admin-pid-marketplace-input" id="admin-pid-add-marketplace"
                        placeholder="Marketplace" value="TCGPlayer" onfocus="openAdminPidMarketplaceDropdown()">
-                <span class="admin-pid-dropdown-arrow"
+                <span class="admin-pid-dropdown-arrow dropdown-arrow"
                       onclick="toggleAdminPidDropdown('admin-pid-marketplace-dropdown-menu', 'admin-pid-marketplace-dropdown-btn')">&#8249;</span>
             </div>
             <div class="admin-pid-dropdown-menu menu hidden" id="admin-pid-marketplace-dropdown-menu">

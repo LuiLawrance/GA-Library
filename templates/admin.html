@@ -63,11 +63,11 @@
                     <div class="admin-system-options" id="admin-system-settings">
                         <div class="admin-system-option-row">
                             <span class="admin-system-option-name">Store Images Locally</span>
-                            <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="store_images_locally">
+                            <div class="admin-pid-source-toggle pill-toggle admin-system-option-toggle" data-setting="store_images_locally">
                                 <span class="pill-indicator"></span>
-                                <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn active" data-value="false"
                                         onclick="updateAdminSystemSetting('store_images_locally', false)">Off</button>
-                                <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn" data-value="true"
                                         onclick="updateAdminSystemSetting('store_images_locally', true)">On</button>
                             </div>
                         </div>
@@ -77,11 +77,11 @@
                                 <button type="button" class="admin-system-info" aria-label="About Use JSON"
                                         data-tip="On — store everything in flat JSON files. Off — use the Postgres database at the Database Connection settings.">i</button>
                             </span>
-                            <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="use_json">
+                            <div class="admin-pid-source-toggle pill-toggle admin-system-option-toggle" data-setting="use_json">
                                 <span class="pill-indicator"></span>
-                                <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn active" data-value="false"
                                         onclick="beginUseJsonStaging()">Off</button>
-                                <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn" data-value="true"
                                         onclick="updateAdminSystemSetting('use_json', true)">On</button>
                             </div>
                         </div>
@@ -96,11 +96,11 @@
                                 <button type="button" class="admin-system-info" aria-label="About Local Database"
                                         data-tip="On — this instance can launch the TCGPlayer scraper, so the Cards page shows its 🔍 auto product-ID finder and Refresh Sales/Listings/Selected buttons. Off — it's hosted (e.g. Railway), which can't, so those buttons are hidden.">i</button>
                             </span>
-                            <div class="admin-pid-source-toggle admin-system-option-toggle" data-setting="local_db">
+                            <div class="admin-pid-source-toggle pill-toggle admin-system-option-toggle" data-setting="local_db">
                                 <span class="pill-indicator"></span>
-                                <button type="button" class="admin-pid-source-toggle-btn active" data-value="false"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn active" data-value="false"
                                         onclick="updateAdminSystemSetting('local_db', false)">Off</button>
-                                <button type="button" class="admin-pid-source-toggle-btn" data-value="true"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn" data-value="true"
                                         onclick="updateAdminSystemSetting('local_db', true)">On</button>
                             </div>
                         </div>
@@ -127,7 +127,7 @@
                             <button type="button" class="admin-pid-refresh-btn admin-system-wipe-btn"
                                     id="admin-system-wipe-btn" onclick="runAdminSystemWipe()">Wipe Database</button>
                         </div>
-                        <pre class="admin-system-sync-log hidden" id="admin-system-sync-log"></pre>
+                        <pre class="admin-system-sync-log scroll-thin hidden" id="admin-system-sync-log"></pre>
                     </div>
                 </div>
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
@@ -170,23 +170,29 @@
                                 <button type="button" class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="admin-system-db-ssl-btn"
                                         onclick="toggleAdminPidDropdown('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn')">
                                     <span id="admin-system-db-ssl-label">default</span>
-                                    <span class="admin-pid-dropdown-arrow">&#8249;</span>
+                                    <span class="admin-pid-dropdown-arrow dropdown-arrow">&#8249;</span>
                                 </button>
+                                <!-- Options live in an inner scroll box (like the Cards page's
+                                     #set-dropdown-options) so the scrollbar is clipped by the
+                                     menu's rounded overflow:hidden instead of spilling past the
+                                     corner — see .admin-system-db-ssl-wrap rules in admin.css. -->
                                 <div class="admin-pid-dropdown-menu menu hidden" id="admin-system-db-ssl-menu">
-                                    <div class="admin-pid-dropdown-option selected" data-value=""
-                                         onclick="selectAdminDbSsl('', 'default')">default</div>
-                                    <div class="admin-pid-dropdown-option" data-value="disable"
-                                         onclick="selectAdminDbSsl('disable', 'disable')">disable</div>
-                                    <div class="admin-pid-dropdown-option" data-value="allow"
-                                         onclick="selectAdminDbSsl('allow', 'allow')">allow</div>
-                                    <div class="admin-pid-dropdown-option" data-value="prefer"
-                                         onclick="selectAdminDbSsl('prefer', 'prefer')">prefer</div>
-                                    <div class="admin-pid-dropdown-option" data-value="require"
-                                         onclick="selectAdminDbSsl('require', 'require')">require</div>
-                                    <div class="admin-pid-dropdown-option" data-value="verify-ca"
-                                         onclick="selectAdminDbSsl('verify-ca', 'verify-ca')">verify-ca</div>
-                                    <div class="admin-pid-dropdown-option" data-value="verify-full"
-                                         onclick="selectAdminDbSsl('verify-full', 'verify-full')">verify-full</div>
+                                    <div class="admin-pid-dropdown-options" id="admin-system-db-ssl-options">
+                                        <div class="admin-pid-dropdown-option selected" data-value=""
+                                             onclick="selectAdminDbSsl('', 'default')">default</div>
+                                        <div class="admin-pid-dropdown-option" data-value="disable"
+                                             onclick="selectAdminDbSsl('disable', 'disable')">disable</div>
+                                        <div class="admin-pid-dropdown-option" data-value="allow"
+                                             onclick="selectAdminDbSsl('allow', 'allow')">allow</div>
+                                        <div class="admin-pid-dropdown-option" data-value="prefer"
+                                             onclick="selectAdminDbSsl('prefer', 'prefer')">prefer</div>
+                                        <div class="admin-pid-dropdown-option" data-value="require"
+                                             onclick="selectAdminDbSsl('require', 'require')">require</div>
+                                        <div class="admin-pid-dropdown-option" data-value="verify-ca"
+                                             onclick="selectAdminDbSsl('verify-ca', 'verify-ca')">verify-ca</div>
+                                        <div class="admin-pid-dropdown-option" data-value="verify-full"
+                                             onclick="selectAdminDbSsl('verify-full', 'verify-full')">verify-full</div>
+                                    </div>
                                 </div>
                                 <input type="hidden" id="admin-system-db-sslmode" value="">
                             </div>
@@ -198,8 +204,8 @@
                         <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
                                 id="admin-system-db-setup-btn" onclick="setupAdminDatabase()">Set Up Database</button>
                     </div>
-                    <p class="admin-system-db-status hidden" id="admin-system-db-status"></p>
-                    <p class="admin-system-db-status hidden" id="admin-system-db-setup-status"></p>
+                    <p class="admin-system-db-status scroll-thin hidden" id="admin-system-db-status"></p>
+                    <p class="admin-system-db-status scroll-thin hidden" id="admin-system-db-setup-status"></p>
                 </div>
             </div>
         </div>
@@ -240,10 +246,10 @@
 
         <div class="admin-section" id="admin-section-pricing">
             <div class="admin-pid-controls-row admin-cards-header-row">
-                <div class="admin-cards-subnav">
+                <div class="admin-cards-subnav pill-toggle">
                     <span class="pill-indicator"></span>
-                    <button class="admin-cards-subnav-btn" data-view="info" onclick="switchAdminCardsView('info')">Info</button>
-                    <button class="admin-cards-subnav-btn active" data-view="pricing" onclick="switchAdminCardsView('pricing')">Pricing</button>
+                    <button class="admin-cards-subnav-btn pill-toggle-btn" data-view="info" onclick="switchAdminCardsView('info')">Info</button>
+                    <button class="admin-cards-subnav-btn pill-toggle-btn active" data-view="pricing" onclick="switchAdminCardsView('pricing')">Pricing</button>
                 </div>
                 <input type="text" class="admin-pid-search" id="admin-pid-search"
                        placeholder="Search cards or sets..." oninput="renderAdminPidRows()">
@@ -271,11 +277,11 @@
                         </div>
                         <div class="admin-pid-controls-cell-image"></div>
                         <div class="admin-pid-controls-cell-detail">
-                            <div class="admin-pid-source-toggle" id="admin-pid-source-toggle">
+                            <div class="admin-pid-source-toggle pill-toggle" id="admin-pid-source-toggle">
                                 <span class="pill-indicator"></span>
-                                <button type="button" class="admin-pid-source-toggle-btn active" data-mode="regular"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn active" data-mode="regular"
                                         onclick="switchAdminPidDetailMode('regular')">Regular</button>
-                                <button type="button" class="admin-pid-source-toggle-btn" data-mode="discord"
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn" data-mode="discord"
                                         onclick="switchAdminPidDetailMode('discord')">Discord</button>
                             </div>
                             <div class="admin-pid-refresh-group">
