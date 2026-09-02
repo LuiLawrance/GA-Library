@@ -6,7 +6,7 @@ from db.session import get_session
 from db_mode import is_db_mode
 from pricing_ga import _sync_info
 from settings import load_settings
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from tqdm import tqdm
 from util_file import new_dir, new_json
 
@@ -658,6 +658,74 @@ def _load_featured_sets_data_db() -> dict:
         group.group_name: {"sets": sets_by_group.get(group.group_name, []), "image_path": group.image_path}
         for group in groups
     }
+
+
+# ── Set-search bookkeeping (last set-searched date + admin-entered tcgcsv
+# Group ID) ─────────────────────────────────────────────────────────────────
+#
+# JSON mode keeps this in DATA_GA/CARDS_GA/SET_SEARCHES.json — app.py owns the
+# in-memory _set_search_cache mirror of that file and every write to it. DB
+# mode instead stores both on the set's own row (sets.last_searched /
+# sets.tcgplayer_group_id) so an admin's manually-entered Group ID lands in
+# the real backing store rather than only in a JSON file the DB-mode app
+# never reads back. catalog_sync and sync_featured_sets both deliberately
+# leave these two columns untouched (see db/catalog_sync.py) so the writers
+# here are their sole owner; migrate_json_to_pg.migrate_sets seeds them onto
+# new rows only, never nulls a live value.
+
+def load_set_searches_data() -> dict:
+    """slug -> {"last_searched": ISO str, "tcgplayer_group_id": str}, carrying
+    only the keys that actually have a value — mirrors SET_SEARCHES.json's
+    normalized shape (see app.py's _set_search_cache back-compat pass). DB
+    mode only; JSON mode reads _set_search_cache in app.py directly."""
+    return _db_cached("set_searches_data", _load_set_searches_data_db)
+
+
+def _load_set_searches_data_db() -> dict:
+    with get_session() as session:
+        rows = session.execute(
+            select(Set.slug, Set.last_searched, Set.tcgplayer_group_id).where(
+                or_(Set.last_searched.isnot(None), Set.tcgplayer_group_id.isnot(None))
+            )
+        ).all()
+
+    result: dict[str, dict] = {}
+    for slug, last_searched, group_id in rows:
+        entry: dict = {}
+        if last_searched is not None:
+            entry["last_searched"] = last_searched.isoformat()
+        if group_id is not None:
+            entry["tcgplayer_group_id"] = group_id
+        result[slug] = entry
+    return result
+
+
+def _persist_set_bookkeeping(slug: str, values: dict) -> None:
+    """Upsert one sets row, touching only the given bookkeeping column(s).
+    Creates a bare row — prefix falls back to the slug, matching
+    migrate_json_to_pg.migrate_sets — for a set with no catalog or featured
+    data yet, so a Group ID can be entered before the set is ever searched.
+    Busts the DB read cache."""
+    with get_session() as session:
+        catalog_sync.upsert(
+            session, Set,
+            [{"slug": slug, "prefix": slug, **values}],
+            ["slug"],
+            update_cols=list(values),
+        )
+    db_cache.bust()
+
+
+def set_group_id(slug: str, group_id: str | None) -> None:
+    """DB-mode writer for the admin-entered tcgcsv Group ID (JSON mode: see
+    api_admin_set_group_id in app.py)."""
+    _persist_set_bookkeeping(slug, {"tcgplayer_group_id": group_id})
+
+
+def mark_set_searched(slug: str, when: str) -> None:
+    """DB-mode writer for a set's last-searched date — `when` is an ISO date
+    string (JSON mode: see api_sets_search_start in app.py)."""
+    _persist_set_bookkeeping(slug, {"last_searched": when})
 
 
 def load_set_names() -> list[str]:

@@ -1,8 +1,9 @@
 from api_ga import _api_search, _build_collector_map, _download_card_image, _download_set_image, \
     _format_search, _group_slug, _sort_collector_number, _update_slug, API_HOST, API_IMAGE, card_reset, \
     DIR_SETS, JSON_SET_SEARCHES, load_all_set_collector_data, load_card_detail_data, load_editions_data, \
-    load_featured_sets_data, load_info_data, load_set_collector_data, load_set_names, load_slugs_data, \
-    load_thema_for_editions, load_update_data, set_search, sync_featured_sets, UPDATE_THRESHOLD
+    load_featured_sets_data, load_info_data, load_set_collector_data, load_set_names, load_set_searches_data, \
+    load_slugs_data, load_thema_for_editions, load_update_data, mark_set_searched, set_group_id, set_search, \
+    sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
     import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
     get_last_listings, get_last_sales, set_foil_product_id, set_product_id
@@ -62,6 +63,11 @@ app.mount("/marketplaces", StaticFiles(directory="assets/MARKETPLACES"), name="m
 # re-persists it on every write, and GET /api/admin/set-searches (further
 # down) exposes it read-only for the Admin Cards Info panel's per-set
 # "already searched" indicator.
+#
+# JSON mode only: in DB mode last_searched / tcgplayer_group_id live on the
+# sets table instead (api_ga.load_set_searches_data / set_group_id /
+# mark_set_searched), and the readers/writers below branch on is_db_mode()
+# so this dict is loaded-but-unused there.
 with new_json(JSON_SET_SEARCHES).open(encoding="utf-8") as f:
     _set_search_cache = json.load(f)
 
@@ -670,7 +676,10 @@ def _run_set_search_job(job_id: str, set_prefix: str) -> None:
 async def api_sets_search_start(prefix: str):
     set_filter = prefix.strip().lower().replace(" ", "_")
 
-    last_searched = _set_search_cache.get(set_filter, {}).get("last_searched")
+    if is_db_mode():
+        last_searched = load_set_searches_data().get(set_filter, {}).get("last_searched")
+    else:
+        last_searched = _set_search_cache.get(set_filter, {}).get("last_searched")
     needs_fetch = last_searched is None
     if not needs_fetch:
         last_sync = date.fromisoformat(last_searched)
@@ -680,11 +689,15 @@ async def api_sets_search_start(prefix: str):
         # Local data is fresh enough — no job needed, frontend can fetch results immediately
         return JSONResponse({"job_id": None, "cached": True})
 
-    # setdefault rather than a plain assignment — preserves tcgplayer_group_id
-    # (see api_admin_set_group_id) if an admin already set one for this slug.
-    _set_search_cache.setdefault(set_filter, {})["last_searched"] = date.today().isoformat()
-    with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
-        json.dump(_set_search_cache, f, indent=4)
+    today_iso = date.today().isoformat()
+    if is_db_mode():
+        mark_set_searched(set_filter, today_iso)
+    else:
+        # setdefault rather than a plain assignment — preserves tcgplayer_group_id
+        # (see api_admin_set_group_id) if an admin already set one for this slug.
+        _set_search_cache.setdefault(set_filter, {})["last_searched"] = today_iso
+        with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
+            json.dump(_set_search_cache, f, indent=4)
 
     job_id = uuid.uuid4().hex
     with _set_search_jobs_lock:
@@ -1616,14 +1629,17 @@ async def api_admin_featured_sets(request: Request):
 async def api_admin_set_searches(request: Request):
     require_admin(request)
 
-    return JSONResponse({"searches": _set_search_cache})
+    searches = load_set_searches_data() if is_db_mode() else _set_search_cache
+    return JSONResponse({"searches": searches})
 
 
 # Admin-entered tcgcsv.com Group ID for a set (see api_tcgplayer.py's
 # scraping — this is manual for now, no group-id-based lookup wired up yet).
-# Stored in the same SET_SEARCHES.json entry as last_searched rather than a
-# separate file, per-slug, so it's set even for a slug that hasn't been
-# set-searched yet.
+# JSON mode stores it in the same SET_SEARCHES.json entry as last_searched
+# (per-slug, so it's set even for a slug that hasn't been set-searched yet);
+# DB mode writes sets.tcgplayer_group_id directly (see set_group_id in
+# api_ga.py) so it lands in the actual backing store, not a file the DB-mode
+# app never reads.
 @app.patch("/api/admin/set-searches/{slug}")
 async def api_admin_set_group_id(slug: str, request: Request):
     require_admin(request)
@@ -1635,14 +1651,18 @@ async def api_admin_set_group_id(slug: str, request: Request):
         raise HTTPException(status_code=400, detail="TCGplayer Group ID must be numeric")
 
     slug = slug.strip().lower().replace(" ", "_")
-    entry = _set_search_cache.setdefault(slug, {})
-    if group_id:
-        entry["tcgplayer_group_id"] = group_id
-    else:
-        entry.pop("tcgplayer_group_id", None)
 
-    with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
-        json.dump(_set_search_cache, f, indent=4)
+    if is_db_mode():
+        set_group_id(slug, group_id or None)
+    else:
+        entry = _set_search_cache.setdefault(slug, {})
+        if group_id:
+            entry["tcgplayer_group_id"] = group_id
+        else:
+            entry.pop("tcgplayer_group_id", None)
+
+        with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
+            json.dump(_set_search_cache, f, indent=4)
 
     return JSONResponse({"slug": slug, "tcgplayer_group_id": group_id or None})
 
@@ -1650,20 +1670,25 @@ async def api_admin_set_group_id(slug: str, request: Request):
 # Backfills product IDs for every edition in one set from tcgcsv.com (see
 # import_product_ids_from_tcgcsv in pricing_ga.py), using its admin-entered
 # Group ID (see api_admin_set_group_id above). Runs synchronously rather than
-# as a background job like set-search/find-product-ids — it's a single JSON
-# fetch plus local file matching, no Playwright browser involved, so it's
+# as a background job like set-search/find-product-ids — it's a single tcgcsv
+# fetch plus local catalog matching, no Playwright browser involved, so it's
 # fast enough not to need polling.
 @app.post("/api/admin/set-searches/{slug}/import-tcgcsv")
 async def api_admin_import_tcgcsv(slug: str, request: Request):
     require_admin(request)
 
     slug = slug.strip().lower().replace(" ", "_")
-    group_id = _set_search_cache.get(slug, {}).get("tcgplayer_group_id")
+    if is_db_mode():
+        group_id = load_set_searches_data().get(slug, {}).get("tcgplayer_group_id")
+    else:
+        group_id = _set_search_cache.get(slug, {}).get("tcgplayer_group_id")
 
     if not group_id:
         raise HTTPException(status_code=400, detail="No TCGplayer Group ID set for this set")
 
-    if not os.path.exists(f"{DIR_SETS}/{slug}.json"):
+    has_local_set = bool(load_set_collector_data(slug)) if is_db_mode() \
+        else os.path.exists(f"{DIR_SETS}/{slug}.json")
+    if not has_local_set:
         raise HTTPException(status_code=400, detail="This set hasn't been set-searched locally yet")
 
     try:

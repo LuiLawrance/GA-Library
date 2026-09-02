@@ -240,7 +240,30 @@ def migrate_sets(info_data: dict) -> None:
             {**entry, "prefix": entry["prefix"] or entry["slug"]}
             for entry in sets_by_slug.values()
         ]
-        _upsert(session, Set, rows, index_elements=["slug"])
+
+        # last_searched / tcgplayer_group_id are owned by the running app's
+        # set-search bookkeeping: in DB mode app.py writes them straight to
+        # sets.* and never back to SET_SEARCHES.json (see api_ga.set_group_id).
+        # So a re-sync must SEED them onto brand-new rows (they're still in
+        # `rows`, applied on INSERT) but must NOT overwrite an existing row's
+        # live value from this now-stale JSON — hence they're dropped from the
+        # on-conflict update here. The one exception: a value that IS present
+        # in the JSON (an admin who set a Group ID while still in JSON mode,
+        # now migrating it in) is re-applied to its row below.
+        bookkeeping = ("last_searched", "tcgplayer_group_id")
+        catalog_cols = [c for c in rows[0] if c not in ("slug", *bookkeeping)] if rows else []
+        _upsert(session, Set, rows, index_elements=["slug"], update_cols=catalog_cols)
+
+        # Each bookkeeping column re-applied on its own, only for the rows the
+        # JSON actually has a value for — so a JSON entry that carries just
+        # last_searched can't null out a Group ID the running app wrote, and
+        # vice versa.
+        for col in bookkeeping:
+            seeded = [
+                {"slug": r["slug"], "prefix": r["prefix"], col: r[col]}
+                for r in rows if r[col] is not None
+            ]
+            _upsert(session, Set, seeded, index_elements=["slug"], update_cols=[col])
 
     print(f"featured_set_groups: {len(group_rows)}, sets: {len(rows)}")
 

@@ -1586,29 +1586,42 @@ function renderAdminInfoSetsPanel() {
         ? groupHtml('Featured', featuredRows, true) + groupHtml('Other', otherRows, false)
         : rows.map(rowHtml).join('');
 
-    // The three action buttons (Search/Clear/Sync) act on whichever one set
-    // is currently selected (see selectAdminSet, searchSelectedAdminSet,
-    // clearSelectedAdminSetIds, syncSelectedAdminSetTcgcsv).
+    // The three icon action buttons (Import ♻️ / Search 📥 / Clear ❌) act on
+    // whichever one set is currently selected (see selectAdminSet,
+    // searchSelectedAdminSet, clearSelectedAdminSetIds,
+    // syncSelectedAdminSetTcgcsv); "Check Featured" and the 🌐 link don't.
     const anySelected = !!adminSetsSelectedSlug;
 
     panel.innerHTML = `
         <div class="admin-pricing-sets-header">
-            <span class="admin-pricing-sets-title">Sets</span>
+            <span class="admin-pricing-sets-header-left">
+                <span class="admin-pricing-sets-title">Sets</span>
+                <!-- Search-Set progress AND the post-action status line both
+                     sit in the header's otherwise-empty left gutter (aligned
+                     with the icon button row) so neither grows the panel's
+                     fixed-height header. Only one is ever non-empty at a time. -->
+                <span class="admin-pricing-sets-header-msg">
+                    <div class="admin-pricing-sets-progress-wrap hidden" id="admin-pricing-sets-progress-wrap"></div>
+                    <div class="admin-pricing-sets-status" id="admin-pricing-sets-status"></div>
+                </span>
+            </span>
             <span class="admin-pricing-sets-header-actions">
-                <button type="button" class="admin-pricing-sets-action-btn" id="admin-pricing-sets-action-sync" ${anySelected ? '' : 'disabled'}
-                        title="Import product IDs from tcgcsv.com for the selected set" onclick="syncSelectedAdminSetTcgcsv()">♻️</button>
-                <button type="button" class="admin-pricing-sets-action-btn" id="admin-pricing-sets-action-search" ${anySelected ? '' : 'disabled'}
-                        title="Search Set (download cards) for the selected set" onclick="searchSelectedAdminSet()">📥</button>
-                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pricing-sets-featured-btn"
-                        onclick="checkFeaturedSets(this)">Check Featured</button>
-                <button type="button" class="admin-pricing-sets-action-btn admin-pricing-sets-action-btn-danger" id="admin-pricing-sets-action-clear" ${anySelected ? '' : 'disabled'}
-                        title="Clear saved TCGplayer product IDs for the selected set" onclick="clearSelectedAdminSetIds()">❌</button>
-                <a class="admin-pricing-sets-action-btn" href="https://tcgcsv.com" target="_blank" rel="noopener noreferrer"
-                   title="Open tcgcsv.com">🌐</a>
+                <span class="admin-pricing-sets-action-row">
+                    <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pricing-sets-featured-btn"
+                            onclick="checkFeaturedSets(this)">Check Featured</button>
+                </span>
+                <span class="admin-pricing-sets-action-row">
+                    <button type="button" class="admin-pricing-sets-action-btn" id="admin-pricing-sets-action-search" ${anySelected ? '' : 'disabled'}
+                            title="Search Set (download cards) for the selected set" onclick="searchSelectedAdminSet()">📥</button>
+                    <button type="button" class="admin-pricing-sets-action-btn" id="admin-pricing-sets-action-sync" ${anySelected ? '' : 'disabled'}
+                            title="Import product IDs from tcgcsv.com for the selected set" onclick="syncSelectedAdminSetTcgcsv()">♻️</button>
+                    <button type="button" class="admin-pricing-sets-action-btn admin-pricing-sets-action-btn-danger" id="admin-pricing-sets-action-clear" ${anySelected ? '' : 'disabled'}
+                            title="Clear saved TCGplayer product IDs for the selected set" onclick="clearSelectedAdminSetIds()">❌</button>
+                    <a class="admin-pricing-sets-action-btn" href="https://tcgcsv.com" target="_blank" rel="noopener noreferrer"
+                       title="Open tcgcsv.com">🌐</a>
+                </span>
             </span>
         </div>
-        <div class="admin-pricing-sets-status" id="admin-pricing-sets-status"></div>
-        <div class="admin-pricing-sets-progress-wrap hidden" id="admin-pricing-sets-progress-wrap"></div>
         <div class="admin-pricing-sets-list scroll-thin">
             ${rowsHtml || '<div class="admin-pid-detail-empty-small">No cards loaded.</div>'}
         </div>
@@ -1618,6 +1631,20 @@ function renderAdminInfoSetsPanel() {
     if (list) list.scrollTop = scrollTop;
 }
 
+// Sets panel status line. Lives in the header's left gutter next to the
+// progress bar (see .admin-pricing-sets-header-msg) so a message never grows
+// the fixed-height header; it's one line, ellipsis-clipped at that width, with
+// the full text on the title attr for the longer import/clear summaries.
+// Re-selects the element every call since renderAdminInfoSetsPanel() rebuilds
+// it out from under any held reference.
+function setAdminSetsStatus(message, isError) {
+    const el = document.getElementById('admin-pricing-sets-status');
+    if (!el) return;
+    el.textContent = message || '';
+    el.title = message || '';
+    el.classList.toggle('admin-pricing-sets-status-error', !!message && !!isError);
+}
+
 // "Check Featured" button in the Sets panel — fetches api.gatcg.com's current
 // Featured Sets list via the backend (sync_featured_sets in api_ga.py) and
 // records which local set prefixes belong to one, then re-renders the panel
@@ -1625,12 +1652,10 @@ function renderAdminInfoSetsPanel() {
 // triggered rather than automatic since Featured Sets change infrequently
 // (new set releases).
 async function checkFeaturedSets(btnEl) {
-    const status = document.getElementById('admin-pricing-sets-status');
-    if (!status) return;
+    if (!document.getElementById('admin-pricing-sets-status')) return;
 
     btnEl.disabled = true;
-    status.classList.remove('admin-pricing-sets-status-error');
-    status.textContent = 'Checking…';
+    setAdminSetsStatus('Checking…', false);
 
     try {
         const res = await fetch('/api/admin/featured-sets/refresh', {method: 'POST'});
@@ -1642,17 +1667,16 @@ async function checkFeaturedSets(btnEl) {
         const setCount = adminFeaturedSlugs().size;
 
         // Rebuilds the whole panel (button included, freshly enabled) to
-        // reflect the new grouping — the `status`/`btnEl` references above
-        // are stale after this, so re-select rather than reuse them.
+        // reflect the new grouping — setAdminSetsStatus re-finds the fresh
+        // status element on its own.
         renderAdminInfoSetsPanel();
-        const newStatus = document.getElementById('admin-pricing-sets-status');
-        if (newStatus) {
-            newStatus.textContent = `Recorded ${setCount} featured set${setCount === 1 ? '' : 's'} `
-                + `across ${releaseCount} release${releaseCount === 1 ? '' : 's'}.`;
-        }
+        setAdminSetsStatus(
+            `Recorded ${setCount} featured set${setCount === 1 ? '' : 's'} `
+            + `across ${releaseCount} release${releaseCount === 1 ? '' : 's'}.`,
+            false,
+        );
     } catch (err) {
-        status.classList.add('admin-pricing-sets-status-error');
-        status.textContent = 'Failed to check featured sets.';
+        setAdminSetsStatus('Failed to check featured sets.', true);
         btnEl.disabled = false;
     }
 }
@@ -1742,11 +1766,7 @@ async function searchSelectedAdminSet() {
     if (!slug) return;
 
     setAdminSetActionButtonsDisabled(true);
-    const status = document.getElementById('admin-pricing-sets-status');
-    if (status) {
-        status.classList.remove('admin-pricing-sets-status-error');
-        status.textContent = '';
-    }
+    setAdminSetsStatus('', false);
     showAdminSetsProgress(0, 0, slug, null);
 
     let message;
@@ -1772,8 +1792,8 @@ async function searchSelectedAdminSet() {
         // set_search() may have just downloaded new cards — refreshAdminPidData()
         // re-fetches adminPidData and re-renders the list/Sets panel so counts
         // and "already searched" indicators update immediately. That rebuilds
-        // the whole panel (status div included), so the message is set
-        // afterward via a fresh lookup rather than the `status` reference above.
+        // the whole panel (status line included), so the message is set
+        // afterward (setAdminSetsStatus re-finds the fresh element).
         await refreshAdminPidData();
     } catch (err) {
         message = `Failed to search ${slug.toUpperCase()}.`;
@@ -1785,11 +1805,7 @@ async function searchSelectedAdminSet() {
     // the error path, where that rebuild never happened.
     hideAdminSetsProgress();
 
-    const freshStatus = document.getElementById('admin-pricing-sets-status');
-    if (freshStatus) {
-        freshStatus.classList.toggle('admin-pricing-sets-status-error', isError);
-        freshStatus.textContent = message;
-    }
+    setAdminSetsStatus(message, isError);
     setAdminSetActionButtonsDisabled(false);
 }
 
@@ -1824,11 +1840,7 @@ async function clearSelectedAdminSetIds() {
         isError = true;
     }
 
-    const status = document.getElementById('admin-pricing-sets-status');
-    if (status) {
-        status.classList.toggle('admin-pricing-sets-status-error', isError);
-        status.textContent = message;
-    }
+    setAdminSetsStatus(message, isError);
     setAdminSetActionButtonsDisabled(false);
 }
 
@@ -1872,17 +1884,14 @@ async function syncSelectedAdminSetTcgcsv() {
         isError = true;
     }
 
-    const status = document.getElementById('admin-pricing-sets-status');
-    if (status) {
-        status.classList.toggle('admin-pricing-sets-status-error', isError);
-        status.textContent = message;
-    }
+    setAdminSetsStatus(message, isError);
     setAdminSetActionButtonsDisabled(false);
 }
 
-// Per-row TCGplayer Group ID field in the Sets panel — saves to
-// SET_SEARCHES.json via PATCH /api/admin/set-searches/{slug} (see
-// api_admin_set_group_id in app.py). tcgcsv.com's Group ID isn't discoverable
+// Per-row TCGplayer Group ID field in the Sets panel — saves via PATCH
+// /api/admin/set-searches/{slug} (see api_admin_set_group_id in app.py),
+// which persists to SET_SEARCHES.json in JSON mode or sets.tcgplayer_group_id
+// in DB mode. tcgcsv.com's Group ID isn't discoverable
 // through anything this app can query on its own, so it's entered manually
 // by an admin here rather than looked up automatically. Updates
 // adminSetSearches in place rather than re-rendering the whole panel, since a

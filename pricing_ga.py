@@ -1734,18 +1734,17 @@ def import_product_ids_from_tcgcsv(set_slug: str, group_id: str, debug: bool = F
     A collector number tcgcsv reports with no local match, whose only local
     candidate(s) don't share its rarity, or that (even after the rarity
     filter) still maps to more than one edition, is skipped and counted
-    rather than guessed at."""
-    from api_ga import DIR_SETS, JSON_EDITIONS, JSON_INFO
+    rather than guessed at.
 
-    set_file = new_json(f"{DIR_SETS}/{set_slug}.json")
-    with set_file.open("r", encoding="utf-8") as f:
-        set_data = json.load(f)  # collector_number -> [edition_id, ...]
+    Reads the local catalog (this set's collector map, EDITIONS, INFO) and
+    writes product IDs through the same mode-aware loaders / api_tcgplayer
+    setters everything else uses, so it works whether Use JSON is on (files)
+    or off (Postgres)."""
+    from api_ga import load_editions_data, load_info_data, load_set_collector_data
 
-    with new_json(JSON_EDITIONS).open("r", encoding="utf-8") as f:
-        editions_data = json.load(f)
-
-    with new_json(JSON_INFO).open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
+    set_data = load_set_collector_data(set_slug)  # collector_number -> [edition_id, ...]
+    editions_data = load_editions_data()
+    info_data = load_info_data()
 
     ids_data = api_tcgplayer.get_all_ids()
 
@@ -1850,12 +1849,13 @@ def clear_product_ids_for_set(set_slug: str, debug: bool = False) -> dict:
     scrape-history clocks (see api_tcgplayer.clear_product_id/
     clear_foil_product_id) — those stay meaningful bookkeeping even once the
     ID that produced them is cleared, same as the existing per-card Clear
-    buttons elsewhere in the admin console leave product_id alone."""
-    from api_ga import DIR_SETS
+    buttons elsewhere in the admin console leave product_id alone.
 
-    set_file = new_json(f"{DIR_SETS}/{set_slug}.json")
-    with set_file.open("r", encoding="utf-8") as f:
-        set_data = json.load(f)  # collector_number -> [edition_id, ...]
+    Mode-aware (Use JSON on or off) via load_set_collector_data and the
+    api_tcgplayer clear_* setters."""
+    from api_ga import load_set_collector_data
+
+    set_data = load_set_collector_data(set_slug)  # collector_number -> [edition_id, ...]
 
     edition_ids = set()
     for eids in set_data.values():

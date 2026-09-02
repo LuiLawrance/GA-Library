@@ -1229,16 +1229,50 @@
 .admin-pricing-sets-header {
     flex-shrink: 0;
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: space-between;
     gap: 10px;
     margin-bottom: 10px;
 }
 
+/* Title on top, the message slot (Search-Set progress bar / post-action
+   status line) pinned to the bottom so it lines up with the icon button row
+   opposite it — filling the header's dead space instead of adding a row of
+   its own below. */
+.admin-pricing-sets-header-left {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+/* Height matched to .admin-pricing-sets-action-btn so this slot spans the
+   icon button row exactly; centering keeps the progress bar / status text on
+   that row's vertical midline rather than dropping to the header's baseline. */
+.admin-pricing-sets-header-msg {
+    min-width: 0;
+    min-height: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* Two right-aligned rows: "Check Featured" on top, the four icon actions
+   (import / search / clear / tcgcsv link) below. */
 .admin-pricing-sets-header-actions {
     flex-shrink: 0;
     display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+}
+
+.admin-pricing-sets-action-row {
+    display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 6px;
 }
 
@@ -1252,18 +1286,22 @@
 
 /* Smaller than .admin-pid-refresh-btn's usual padding — this panel is
    narrower than where that class is normally used, and "Check Featured"
-   sits right next to the section title rather than on its own control row. */
+   sits on its own compact row above the icon actions. */
 .admin-pricing-sets-featured-btn {
     padding: 4px 10px;
     font-size: 0.72rem;
 }
 
+/* Shares the header's left gutter with the progress bar (only one is ever
+   non-empty at a time). One line, clipped to the gutter width with the full
+   text on the title attr, and zero height while empty — so a status message
+   never grows the fixed-height header or pushes the list down. */
 .admin-pricing-sets-status {
-    flex-shrink: 0;
-    min-height: 1.2em;
-    font-size: 0.76rem;
+    font-size: 0.72rem;
     color: var(--text-muted);
-    margin-bottom: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .admin-pricing-sets-status-error {
@@ -1272,17 +1310,18 @@
 
 /* "Search Set" download progress — same visual language as the Cards page's
    own set-search progress bar (.cards-set-progress-* in cards.css), just
-   scoped to this panel's own compact padding/font-size. */
+   scoped to this panel's own compact padding/font-size. Lives in the header's
+   left gutter (.admin-pricing-sets-header-msg), so no outer margin — the
+   header's own margin-bottom already spaces it from the list. */
 .admin-pricing-sets-progress-wrap {
     flex-shrink: 0;
-    margin-bottom: 8px;
 }
 
 .admin-pricing-sets-progress-label {
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     color: var(--text-muted);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
