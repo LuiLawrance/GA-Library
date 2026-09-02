@@ -9,7 +9,7 @@
 //          slide + wipe), drawer.js (edition switch, tab switch, card switch)
 // ═══════════════════════════════════════
 //
-// Eight reusable pieces:
+// Eight reusable pieces (animateGridColumns also has a multi-element group variant):
 //
 //   animateBoxResize(box, mutate) — smoothly resizes a single, persistent box (same
 //   overlay throughout) between two states caused by `mutate`, a synchronous DOM/class
@@ -23,6 +23,10 @@
 //   sitting in one of the OTHER tracks (the card info window, in the fixed 320px track)
 //   visibly slide along for free, as a normal side effect of the grid recalculating each
 //   frame, instead of needing its own separate position animation.
+//   animateGridColumnsGroup(els, mutate) is the same thing for several sibling grids
+//   that share one column change (a list's header row + its on-screen data rows, each
+//   its own grid) — one mutate, all measured and animated on the same clock. Used for
+//   admin's Pricing Product ID column collapse.
 //
 //   morphBoxIn(box, fromRect) / resetMorphBox(box) — animates a box growing/shrinking
 //   from `fromRect`'s size down to its own natural size via transform:scale(), for
@@ -190,6 +194,50 @@ function animateGridColumns(el, mutate, {duration = 300} = {}) {
         anim.cancel();
         _gridColumnAnims.delete(el);
         el.style.gridTemplateColumns = '';
+    });
+}
+
+// animateGridColumns for a SET of separate grid elements that share one
+// column change from a single `mutate` — several sibling grids (e.g. a list's
+// header row and its data rows, each its own grid) that need to resize their
+// tracks together in lockstep. `mutate` runs exactly once; every element in
+// `els` is measured before and after it and animated on the same clock.
+//
+// Pass only the grids that are actually on screen — animating grid-template-columns
+// is a layout animation, and doing it across hundreds of rows at once janks
+// badly (a plain CSS transition on grid-template-columns would too, and isn't
+// even reliable cross-browser). Off-screen rows should just take `mutate`'s new
+// CSS directly; they're snapped before anyone scrolls them into view.
+function animateGridColumnsGroup(els, mutate, {duration = 300} = {}) {
+    els = (els || []).filter(Boolean);
+    if (!els.length) { mutate(); return Promise.resolve(); }
+
+    els.forEach(el => {
+        _gridColumnAnims.get(el)?.cancel();
+        _gridColumnAnims.delete(el);
+    });
+
+    const from = els.map(el => getComputedStyle(el).gridTemplateColumns);
+    mutate();
+    const to = els.map(el => getComputedStyle(el).gridTemplateColumns);
+
+    const anims = els.map((el, i) => {
+        if (from[i] === to[i]) return null;
+        const anim = el.animate([
+            {gridTemplateColumns: from[i]},
+            {gridTemplateColumns: to[i]}
+        ], {duration, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards'});
+        _gridColumnAnims.set(el, anim);
+        return anim;
+    });
+
+    return sleep(duration).then(() => {
+        els.forEach((el, i) => {
+            if (!anims[i] || _gridColumnAnims.get(el) !== anims[i]) return;
+            anims[i].cancel();
+            _gridColumnAnims.delete(el);
+            el.style.gridTemplateColumns = '';
+        });
     });
 }
 

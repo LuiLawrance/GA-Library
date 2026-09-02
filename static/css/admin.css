@@ -826,6 +826,10 @@
     width: 26px;
     height: 26px;
     padding: 0;
+    /* Rides the Product ID column collapse alongside the row ✨ toggles (see
+       .admin-pid-hide-pid) — overrides the shared checkbox transition above. */
+    transition: background 0.15s, border-color 0.15s,
+        margin-right 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Card-select checkboxes (both the per-row ones and their "select all" in
@@ -851,135 +855,85 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Fade + horizontal wipe on show/hide (marketplace pill / Local Database),
+       via .admin-pid-collapsed below. Both this and the Link button sit at the
+       trailing edge of their flex row, so collapsing max-width to 0 only eats
+       invisible slack — the row's own gap needs no special handling. */
+    overflow: hidden;
+    max-width: 700px;
+    transition: opacity 0.2s ease, max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.admin-pid-tcg-btn {
+.admin-pid-link-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     width: 32px;
     height: 32px;
+    min-width: 0;
+    max-width: 32px;
     padding: 0;
+    overflow: hidden;
     color: var(--text);
     background: transparent;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: border-color 0.15s, opacity 0.15s;
+    transition: border-color 0.15s, opacity 0.2s ease,
+        max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.admin-pid-tcg-btn:hover:not(:disabled) {
+.admin-pid-link-btn:hover:not(:disabled) {
     border-color: var(--border-focus);
 }
 
-.admin-pid-tcg-btn:disabled {
+.admin-pid-link-btn:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
     opacity: 0.6;
 }
 
-.admin-pid-tcg-icon {
-    width: 16px;
-    height: 16px;
+/* Collapsed (faded + wiped to zero width) state for the Link button and the
+   Refresh group — toggled by updateAdminPidLinkButton / updateAdminPidRefreshButton
+   instead of .hidden so the change animates. Comes after :disabled above so its
+   opacity:0 wins for a Link button that's both disabled and collapsed. */
+.admin-pid-link-btn.admin-pid-collapsed,
+.admin-pid-refresh-group.admin-pid-collapsed {
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.admin-pid-link-icon {
+    width: 22px;
+    height: 22px;
     object-fit: contain;
     flex-shrink: 0;
 }
 
-/* Sits in the row list's own header, in the Product ID column (see
-   renderAdminPidHeader) — right above where each row's own 🔍 auto-detect
-   button lands below it, so scaled to fit that same ~130px-wide column
-   alongside the "Product ID" label, rather than the 32px controls-row icon
-   buttons like .admin-pid-tcg-btn. */
-.admin-pid-import-wrap {
-    position: relative;
-    flex-shrink: 0;
-}
-
-.admin-pid-import-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    /* Matches .admin-pid-find-btn's own size (see there) — its right edge
-       already lines up with the column below via justify-content:
-       space-between on the header cell, but a smaller button's left edge
-       (and so its visual center) didn't, which read as not-quite-aligned
-       even though the one edge technically matched. */
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    font-size: 0.75rem;
-    line-height: 1;
-    color: var(--text-muted);
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
-}
-
-.admin-pid-import-btn:hover,
-.admin-pid-import-btn.open {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-/* Same base as .admin-pid-bulk-paste-menu (see there — position/card/shadow/
-   animation all come from the shared .admin-pid-add-entry-menu class both
-   apply alongside this one), just its own width — right-aligned rather than
-   bulk-paste's left, since this button sits at the right edge of a narrow
-   column with more room to its left than its right. Compound selector (not
-   just .admin-pid-import-menu alone) so this reliably outranks
-   .admin-pid-add-entry-menu's own width regardless of which rule happens to
-   sit later in the file — equal single-class specificity would otherwise
-   leave that to source order, the way .admin-pid-bulk-paste-menu only wins
-   because it happens to be declared after it. */
-.admin-pid-add-entry-menu.admin-pid-import-menu {
-    width: 360px;
-    z-index: 1000;
-}
-
-.admin-pid-import-hint {
-    font-family: var(--font-sans);
-    font-size: 0.72rem;
-    line-height: 1.5;
-    color: var(--text-muted);
-}
-
-/* Matches .admin-pid-bulk-paste-textarea exactly (see there) — same sizing,
-   fonts, and the hidden-scrollbar treatment (scrolls, but the scrollbar
-   itself never shows) rather than a visible native one. */
-.admin-pid-import-textarea {
-    width: 100%;
-    height: 280px;
-    resize: none;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--text);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px 10px;
-    overflow-y: auto;
-}
-
-/* Scrollbar hidden via the shared .scroll-none (main.css). */
-
-.admin-pid-import-textarea:focus {
-    outline: none;
-    border-color: var(--border-focus);
-}
-
-.admin-pid-import-actions {
+/* Right cluster of the list controls cell: the Link button plus the
+   marketplace scope pill. Sits as .admin-pid-controls-cell-list's second flex
+   child, so space-between pins it to the cell's right edge — which shares
+   .admin-pricing-layout's first track, i.e. flush with the Card list's right
+   edge below. */
+.admin-pid-list-actions {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex-shrink: 0;
 }
 
-.admin-pid-import-status {
-    font-size: 0.76rem;
-    color: var(--text-muted);
+/* Marketplace scope pill (TCGPlayer / CoreTCG / Manual) — the shared
+   .pill-toggle / .pill-toggle-btn (components.css), tightened to match
+   .admin-pid-link-btn's height the same way .admin-pid-source-toggle is. */
+.admin-pid-marketplace-toggle {
+    padding: 2px;
+}
+
+.admin-pid-marketplace-toggle-btn {
+    padding: 5px 12px;
+    font-size: 0.8rem;
 }
 
 .admin-pid-refresh-btn {
@@ -1107,6 +1061,9 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 16px;
+    /* Lets .admin-pid-detail-pid-row animate max-height to/from `max-content`
+       (its collapse wipe). Inherited; scoped here rather than global :root. */
+    interpolate-size: allow-keywords;
 }
 
 .admin-pid-scrape-stats {
@@ -1492,14 +1449,15 @@
 
 /* The panels above use the shared .fade-out / .fade-in (main.css). */
 
-/* Curio Foil toggle's own fade, used only on .admin-pricing-detail (see
-   toggleAdminPidCurioView) — same look as .fade-out/.fade-in above, just
-   slower. Switching cards fades both the image column AND this panel
-   together, which reads as a bigger, slower motion; toggling only fades
-   this one (smaller) panel, so matching .fade-out/.fade-in's exact timing
-   made it look noticeably quicker despite the underlying data swap being
-   the same kind of change — these give it its own pace instead of sharing
-   card-switching's, which stays untouched. */
+/* The .admin-pricing-detail panel's own fade — used when its Sales/Listings
+   content is swapped in place without the image column also changing: the
+   Curio Foil toggle (toggleAdminPidCurioView) and the marketplace scope pill
+   (switchAdminPidMarketplace). Same look as .fade-out/.fade-in above, just
+   slower. Switching cards fades both the image column AND this panel together,
+   which reads as a bigger, slower motion; fading only this one (smaller) panel
+   at .fade-out/.fade-in's exact timing looked noticeably quicker despite being
+   the same kind of data swap — this gives it its own pace, leaving
+   card-switching's untouched. */
 .admin-pricing-detail.curio-fade-out {
     opacity: 0;
     transform: translateY(8px);
@@ -1607,19 +1565,14 @@
     overflow: visible;
 }
 
-/* Lays out each header label (Product ID / Sales / Listings — plus, for
-   Product ID, the curio select-all checkbox, actually positioned outside
-   this cell to its left, see its own comment further up) alongside that
-   column's own Import-from-JSON button, pushed to the cell's right edge —
-   landing directly above whatever each row shows in that same column below
-   (the 🔍 auto-detect button for Product ID, the day-count badges for
-   Sales/Listings). */
+/* Header labels (Product ID / Sales / Listings) sit left-aligned above their
+   column. Product ID also carries the curio select-all checkbox, itself
+   positioned outside this cell to its left (see its own comment further up). */
 .admin-pid-row-header .admin-pid-col-status,
 .admin-pid-row-header .admin-pid-col-sales,
 .admin-pid-row-header .admin-pid-col-listings {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 6px;
 }
 
@@ -1762,7 +1715,10 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    /* margin-right eases with the Product ID column collapse (see
+       .admin-pid-hide-pid) — same 300ms / curve as --admin-pid-status-col. */
+    transition: border-color 0.15s, color 0.15s, background 0.15s,
+        margin-right 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .admin-pid-curio-toggle:hover {
@@ -1812,6 +1768,43 @@
 .admin-pid-find-btn.finding {
     color: var(--accent);
     font-family: var(--font-mono);
+}
+
+/* ── Non-TCGPlayer marketplace: collapsed Product ID column ──────────────
+   Only TCGPlayer has scraper automation, so nothing stores product IDs for
+   CoreTCG / Manual — the list's Product ID column shrinks to just its
+   curio-foil ✨ toggles (row toggles + the header select-all), and the
+   input, auto-detect button and header label all hide.
+   Driven by .admin-pid-hide-pid on #admin-section-pricing (see
+   updateAdminPidProductIdVisibility in admin.js) — which also eases the
+   grid-template-columns change here via animateGridColumnsGroup (animation.js)
+   on the header row plus the on-screen data rows; off-screen rows just take
+   the new rule directly.
+
+   Every selector is guarded with :not(.admin-cards-mode-info): Info mode
+   swaps in its own reduced 3-column row template (.admin-pid-row-info) and
+   fades the marketplace pill out entirely, so this must never touch it.
+   The compound-class specificity ((0,3,x)) also clears
+   .admin-pid-row.admin-pid-row-info's grid-template-columns for free. */
+.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-row {
+    grid-template-columns: 28px 2fr 0.6fr 0.8fr 34px 100px 100px;
+}
+
+.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-col-status .admin-pid-input,
+.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-col-status .admin-pid-find-btn,
+.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-row-header .admin-pid-col-status-label {
+    display: none;
+}
+
+/* The ✨ toggles normally hang off the Product ID column's left edge (see
+   .admin-pid-curio-toggle / .admin-pid-curio-select-all). With the column
+   collapsed there's nothing to hang off of, so slide them in over the track
+   itself — a negative margin-right rather than a position swap, so it stays
+   anchored to the (moving, shrinking) column edge and eases across with it
+   instead of jumping. */
+.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-curio-toggle,
+.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-curio-select-all {
+    margin-right: -28px;
 }
 
 .admin-pid-empty {
@@ -2126,6 +2119,23 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    /* Wipes closed on non-TCGPlayer marketplaces (Product ID is TCGPlayer-only)
+       — see .admin-pid-detail-pid-row-collapsed, toggled by
+       syncAdminPricingImageColForMarketplace. interpolate-size (inherited from
+       .admin-pricing-image-col) lets the grid-height keyword animate; the
+       negative margin cancels the parent's 14px flex gap so a collapsed row
+       leaves no dead space. */
+    overflow: hidden;
+    max-height: max-content;
+    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.2s ease, margin-top 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.admin-pid-detail-pid-row-collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin-top: -14px;
+    pointer-events: none;
 }
 
 /* Shared .label .label--muted (main.css) + tighter tracking. */
@@ -2348,6 +2358,14 @@
     color: var(--accent);
 }
 
+/* Import (↓) / export (↑) arrow glyphs — monochrome, so they pick up the
+   hover/open accent `color` like the "+". Bumped up and bolder since a lone
+   arrow reads narrower than the "+" at the same size. */
+.admin-pid-add-entry-toggle-io {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+
 .admin-pid-add-entry-menu {
     position: absolute;
     top: calc(100% + 6px);
@@ -2366,14 +2384,65 @@
     animation: revealDown 0.2s ease forwards;
 }
 
-.admin-pid-bulk-paste-menu {
-    width: 320px;
+/* Import (↓) popover — TCGPlayer-paste / GAL-JSON textarea. */
+.admin-pid-import-menu {
+    width: 340px;
     z-index: 1000;
 }
 
-/* Temporarily lifts the panel's own scroll-clipping while the bulk-paste or
-   add-entry popup is open, so it isn't cut off — restored the instant it
-   closes. Kept as a plain CSS override (position/top/right/left still come
+/* Sales import action row: [Import] [paste/GAL pill]. The status wraps onto its
+   own line below once it has a message; while empty it's removed entirely so it
+   adds no trailing gap under the button. */
+.admin-pid-import-actions {
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.admin-pid-import-actions .admin-pid-add-entry-status {
+    flex: 1 1 100%;
+}
+.admin-pid-import-actions .admin-pid-add-entry-status:empty {
+    display: none;
+}
+
+/* Paste / GAL mode switch — a compact segmented control (shared .pill-toggle /
+   .pill-toggle-btn, components.css) sitting next to the Import button. */
+.admin-pid-import-mode-toggle {
+    display: inline-flex;
+    padding: 2px;
+    flex-shrink: 0;
+}
+.admin-pid-import-mode-toggle .pill-toggle-btn {
+    padding: 3px 9px;
+    font-size: 0.7rem;
+}
+
+/* GAL export popover — same card, a touch wider for the two action buttons
+   (Copy / Download). Its textarea reads rather than accepts input, and is
+   shorter (exports are usually a handful of entries; it scrolls if longer) to
+   keep the popover from clipping the viewport. */
+.admin-pid-export-menu {
+    width: 340px;
+    z-index: 1000;
+}
+
+.admin-pid-export-menu textarea {
+    height: 200px;
+    cursor: text;
+    color: var(--text-muted);
+}
+
+/* Flips a section-action popover to open above its trigger instead of below —
+   toggled by renderAdminPricingDetail when opening downward would clip the
+   viewport bottom. */
+.admin-pid-add-entry-menu.admin-pid-menu-flip-up {
+    top: auto;
+    bottom: calc(100% + 6px);
+    animation-name: revealUp;
+}
+
+/* Temporarily lifts the panel's own scroll-clipping while a section-action
+   popup (import / export / add-entry) is open, so it isn't cut off — restored
+   the instant it closes. Kept as a plain CSS override (position/top/right/left still come
    from the shared .admin-pid-add-entry-menu rule) rather than JS-computed
    positioning, since this page's global `zoom` scale doesn't compose
    correctly with manually-set position values. .admin-pricing-layout is the
@@ -2388,16 +2457,16 @@
     overflow: visible;
 }
 
-.admin-pid-bulk-paste-hint {
+.admin-pid-import-hint {
     font-family: var(--font-sans);
     font-size: 0.72rem;
     line-height: 1.5;
     color: var(--text-muted);
 }
 
-.admin-pid-bulk-paste-textarea {
+.admin-pid-import-textarea {
     width: 100%;
-    height: 280px;
+    height: 200px;
     resize: none;
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -2411,7 +2480,7 @@
 
 /* Scrollbar hidden via the shared .scroll-none (main.css). */
 
-.admin-pid-bulk-paste-textarea:focus {
+.admin-pid-import-textarea:focus {
     outline: none;
     border-color: var(--border-focus);
 }
@@ -2474,30 +2543,6 @@
 
 .admin-pid-dropdown-option.selected {
     color: var(--accent);
-}
-
-/* The marketplace field reuses .admin-pid-dropdown-btn for its box (border,
-   background, padding) but the box wraps a real <input> instead of a
-   <button>, so the input itself needs to blend in rather than look like a
-   second, nested field. */
-.admin-pid-marketplace-input {
-    flex: 1;
-    min-width: 0;
-    font: inherit;
-    color: inherit;
-    letter-spacing: inherit;
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: text;
-}
-
-.admin-pid-marketplace-input:focus {
-    outline: none;
-}
-
-.admin-pid-marketplace-input::placeholder {
-    color: var(--text-muted);
 }
 
 /* The Rarity- and Set-column header filters both reuse cards.css's

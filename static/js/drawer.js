@@ -926,7 +926,7 @@ function buildPricingStats(sales, listings) {
 // A saved product_id of "~" (NO_LISTINGS_SENTINEL in api_tcgplayer.py) means
 // "confirmed to have no TCGPlayer listings" — not a real product to link to —
 // so this falls back to a name search instead, same as the Admin Pricing
-// tab's own TCG Player button (see openAdminPidTcgPlayer in admin.js).
+// tab's own Link button (see openAdminPidLink in admin.js).
 function pricingTcgPlayerHref(productId, searchName) {
     return (productId && productId !== '~')
         ? `https://www.tcgplayer.com/product/${encodeURIComponent(productId)}`
@@ -1024,7 +1024,7 @@ function buildTabPricingPanel(edition, cardName) {
     // (e.g. multi-stamp tournament promos, which have several variants
     // rather than the lone one a Curio Foil has) still get their own
     // section — linked only to its own override, same as the Admin Pricing
-    // tab's Curio Foil view (see openAdminPidTcgPlayer in admin.js), since
+    // tab's Curio Foil view (see openAdminPidLink in admin.js), since
     // the edition's main product page isn't about this variant.
     entries.forEach(entry => {
         const sole = soleVariantOf(entry);

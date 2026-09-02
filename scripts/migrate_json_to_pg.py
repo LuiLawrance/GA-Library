@@ -23,8 +23,8 @@ from db.catalog_sync import (
 )
 from db.models import (
     Card, CardError, CardRule, CardSlug, Deck, DeckCard, DeckSection, Edition, FeaturedSetGroup, Foil,
-    FoilTcgOverride, InventoryBin, InventoryCard, InventorySection, PriceListing, PriceSale, Set, ThemaScore, User,
-    WatchlistEntry, WishlistEntry,
+    FoilTcgOverride, InventoryBin, InventoryCard, InventorySection, MarketplaceScrapeClock, PriceListing, PriceSale,
+    Set, ThemaScore, User, WatchlistEntry, WishlistEntry,
 )
 from db.session import get_session
 from dotenv import load_dotenv
@@ -342,8 +342,6 @@ def migrate_editions_and_foils(info_data: dict) -> set[tuple[str, str]]:
                 **build_edition_row(card_id, edition_id, edition),
                 "tcg_product_id": None if is_no_listings else product_id,
                 "tcg_is_no_listings": is_no_listings,
-                "tcg_last_sales": tcg.get("last_sales"),
-                "tcg_last_listings": tcg.get("last_listings"),
             })
 
     with get_session() as session:
@@ -397,14 +395,45 @@ def migrate_editions_and_foils(info_data: dict) -> set[tuple[str, str]]:
                 "foil_id": foil_id,
                 "product_id": None if is_no_listings else product_id,
                 "is_no_listings": is_no_listings,
-                "last_sales": override.get("last_sales"),
-                "last_listings": override.get("last_listings"),
             })
 
     with get_session() as session:
         _upsert(session, FoilTcgOverride, override_rows, index_elements=["edition_id", "foil_id"])
 
     print(f"foil_tcg_overrides: {len(override_rows)}" + (f" ({skipped} skipped, unknown foil_id)" if skipped else ""))
+
+    # Per-marketplace "Last Sales" / "Last Listings" clocks. ID_TCGPLAYER.json's
+    # last_sales / last_listings (edition-level and nested under foils) may be a
+    # bare "YYYY-MM-DD" string (legacy — read as {"TCGPlayer": <string>}) or a
+    # {marketplace: date} dict. foil_id "" == the edition-level (main) clock.
+    def _clock_map(value) -> dict:
+        if isinstance(value, str):
+            return {"TCGPlayer": value}
+        if isinstance(value, dict):
+            return {mkt: iso for mkt, iso in value.items() if iso}
+        return {}
+
+    clock_rows = []
+    for edition_id, tcg in id_tcg_data.items():
+        if edition_id not in known_edition_ids:
+            continue
+        scopes = [("", tcg)] + [
+            (foil_id, override) for foil_id, override in tcg.get("foils", {}).items()
+            if (edition_id, foil_id) in known_foil_pairs
+        ]
+        for foil_id, entry in scopes:
+            for field, key in (("sales", "last_sales"), ("listings", "last_listings")):
+                for marketplace, iso in _clock_map(entry.get(key)).items():
+                    clock_rows.append({
+                        "edition_id": edition_id, "foil_id": foil_id,
+                        "marketplace": marketplace, "field": field, "last_date": iso,
+                    })
+
+    with get_session() as session:
+        _upsert(session, MarketplaceScrapeClock, clock_rows,
+                index_elements=["edition_id", "foil_id", "marketplace", "field"])
+
+    print(f"marketplace_scrape_clocks: {len(clock_rows)}")
 
     return known_foil_pairs
 
@@ -515,8 +544,8 @@ def migrate_pricing(known_foil_pairs: set[tuple[str, str]], force: bool = False)
 
         session.execute(delete(PriceSale))
         for batch in _chunked(sales_rows):
-            # ON CONFLICT DO NOTHING mirrors _entry_key's existing dedup
-            # tuple (date, marketplace, price, quantity, condition) per foil.
+            # ON CONFLICT DO NOTHING dedups on the full row tuple
+            # (date, marketplace, price, quantity, condition) per foil.
             stmt = pg_insert(PriceSale).values(batch).on_conflict_do_nothing(
                 index_elements=["edition_id", "foil_id", "date", "marketplace", "price", "quantity", "condition"]
             )

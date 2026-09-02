@@ -1,5 +1,5 @@
 from datetime import date
-from db.models import Edition, Foil, FoilTcgOverride
+from db.models import Edition, Foil, FoilTcgOverride, MarketplaceScrapeClock
 from db.session import get_session
 from db_mode import is_db_mode
 from playwright.sync_api import sync_playwright
@@ -31,6 +31,11 @@ TCGCSV_USER_AGENT = "GA-Library/1.0"
 
 JSON_IDS = "DATA_GA/PRICING_GA/ID_TCGPLAYER.json"
 
+# The marketplaces the admin Pricing pill offers. "Last Sales" / "Last Listings"
+# clocks are tracked per marketplace (see the *_last_scraped functions below);
+# the TCGPlayer scraper and its 7-day listings gate only ever touch "TCGPlayer".
+MARKETPLACES = ("TCGPlayer", "CoreTCG", "Manual")
+
 # Admins enter this as the product ID for cards confirmed to have no
 # TCGPlayer listings at all, instead of leaving it blank — it marks the
 # absence as deliberate rather than "not yet looked up". Scrape entry points
@@ -52,13 +57,13 @@ def _build_url(product_id: str, page: int = 1) -> str:
 
 
 # Scope note: both reads and writes here follow is_db_mode(). In DB mode the
-# per-edition product_id / no-listings flag / last_sales / last_listings live
-# on the editions row (tcg_* columns), and their foil-scoped counterparts on
-# foil_tcg_overrides; _set_ids_field / _set_foil_ids_field / import_ids write
-# those directly and bust db_cache, so the getters below (and the 7-day
-# listings-refresh gate that reads through them) stay current between
-# scripts/migrate_json_to_pg.py runs. In JSON mode everything reads and
-# writes ID_TCGPLAYER.json as before.
+# per-edition product_id / no-listings flag live on the editions row (tcg_*
+# columns), and their foil-scoped counterparts on foil_tcg_overrides. The
+# last_sales / last_listings clocks moved to marketplace_scrape_clocks (they're
+# per-marketplace now — see the *_last_scraped functions further down).
+# _set_ids_field / _set_foil_ids_field write directly and bust db_cache, so the
+# getters below stay current between scripts/migrate_json_to_pg.py runs. In JSON
+# mode everything reads and writes ID_TCGPLAYER.json as before.
 
 def _get_ids_field(edition_id: str, field: str) -> str | None:
     if is_db_mode():
@@ -70,10 +75,6 @@ def _get_ids_field(edition_id: str, field: str) -> str | None:
 
             if field == "product_id":
                 return NO_LISTINGS_SENTINEL if edition.tcg_is_no_listings else edition.tcg_product_id
-            if field == "last_sales":
-                return edition.tcg_last_sales.isoformat() if edition.tcg_last_sales else None
-            if field == "last_listings":
-                return edition.tcg_last_listings.isoformat() if edition.tcg_last_listings else None
 
             return None
 
@@ -85,12 +86,43 @@ def _get_ids_field(edition_id: str, field: str) -> str | None:
     return ids_data.get(edition_id, {}).get(field)
 
 
+# A per-marketplace clock value in the ID_TCGPLAYER.json store (and everything
+# get_all_ids returns) is a {marketplace: "YYYY-MM-DD"} dict. Legacy files have
+# a bare "YYYY-MM-DD" string there — read it as {"TCGPlayer": <string>}.
+def _normalize_clock_map(value) -> dict:
+    if isinstance(value, str):
+        return {"TCGPlayer": value}
+    if isinstance(value, dict):
+        return {mkt: iso for mkt, iso in value.items() if iso}
+    return {}
+
+
+def _normalize_ids_clocks(ids_data: dict) -> dict:
+    """In-place: every last_sales / last_listings in ids_data (edition-level and
+    nested under foils) to its {marketplace: iso} dict form."""
+    for entry in ids_data.values():
+        if not isinstance(entry, dict):
+            continue
+        for key in ("last_sales", "last_listings"):
+            if key in entry:
+                entry[key] = _normalize_clock_map(entry[key])
+        for foil_entry in (entry.get("foils") or {}).values():
+            if not isinstance(foil_entry, dict):
+                continue
+            for key in ("last_sales", "last_listings"):
+                if key in foil_entry:
+                    foil_entry[key] = _normalize_clock_map(foil_entry[key])
+    return ids_data
+
+
 def get_all_ids() -> dict:
     """Reads the whole ID_TCGPLAYER.json store in one go, for callers building
     a view across many editions (e.g. the admin product-ID list) — avoids
     re-opening and re-parsing the file once per edition per field the way
-    get_product_id()/get_last_sales()/get_last_listings() do when called
-    individually in a loop."""
+    get_product_id() / get_last_scraped() do when called individually in a loop.
+
+    last_sales / last_listings values (edition-level and nested under foils) are
+    always {marketplace: "YYYY-MM-DD"} dicts here, normalized on read."""
     if is_db_mode():
         cached = db_cache.peek("tcg_ids")
         if cached is not None:
@@ -100,32 +132,29 @@ def get_all_ids() -> dict:
             editions = session.execute(
                 select(Edition).where(or_(
                     Edition.tcg_product_id.isnot(None), Edition.tcg_is_no_listings,
-                    Edition.tcg_last_sales.isnot(None), Edition.tcg_last_listings.isnot(None),
                 ))
             ).scalars().all()
             overrides = session.execute(select(FoilTcgOverride)).scalars().all()
+            clocks = session.execute(select(MarketplaceScrapeClock)).scalars().all()
 
         result = {}
 
         for edition in editions:
-            entry = {
+            result[edition.edition_id] = {
                 "product_id": NO_LISTINGS_SENTINEL if edition.tcg_is_no_listings else edition.tcg_product_id,
             }
-            if edition.tcg_last_sales:
-                entry["last_sales"] = edition.tcg_last_sales.isoformat()
-            if edition.tcg_last_listings:
-                entry["last_listings"] = edition.tcg_last_listings.isoformat()
-            result[edition.edition_id] = entry
 
         for override in overrides:
-            entry = {
+            result.setdefault(override.edition_id, {}).setdefault("foils", {})[override.foil_id] = {
                 "product_id": NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id,
             }
-            if override.last_sales:
-                entry["last_sales"] = override.last_sales.isoformat()
-            if override.last_listings:
-                entry["last_listings"] = override.last_listings.isoformat()
-            result.setdefault(override.edition_id, {}).setdefault("foils", {})[override.foil_id] = entry
+
+        for clock in clocks:
+            json_key = "last_sales" if clock.field == "sales" else "last_listings"
+            scope = result.setdefault(clock.edition_id, {})
+            if clock.foil_id:
+                scope = scope.setdefault("foils", {}).setdefault(clock.foil_id, {})
+            scope.setdefault(json_key, {})[clock.marketplace] = clock.last_date.isoformat()
 
         db_cache.put("tcg_ids", result)
         return result
@@ -133,130 +162,7 @@ def get_all_ids() -> dict:
     ids_file = new_json(JSON_IDS)
 
     with ids_file.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def import_ids(import_data: dict) -> dict:
-    """Backfills ID_TCGPLAYER.json from a JSON blob shaped exactly like the
-    file itself — the admin console's Import Product IDs button, for
-    reloading product IDs after a local hard reset wipes this file (sales/
-    listings data and the rest of DATA_GA aren't part of it; this only ever
-    restores product_id mappings), or more generally for re-merging any
-    prior export back in.
-
-    Deliberately narrow, on request: only ADDS a product_id where the
-    edition (or foil override) doesn't already have one — an already-stored
-    ID is never overwritten, so re-running the same import twice (or
-    importing an old export over a newer store) can't clobber anything
-    entered since; that's the only duplicate-safety this needs, so an
-    edition_id doesn't have to already exist elsewhere (e.g. in
-    EDITIONS.json) to be imported here — creates a fresh entry for one that
-    isn't in the current store at all, same as backfilling one that already
-    has a partial entry. last_sales/last_listings are never read from
-    import_data at all, even if present in it — those clocks should start
-    fresh rather than carry over dates from before whatever prompted the
-    import, which would otherwise misrepresent data that may not exist
-    locally as already scraped.
-
-    Single bulk read + write regardless of how many editions are in
-    import_data, matching get_all_ids()'s reasoning above — not one file
-    round-trip per edition via _set_ids_field/_set_foil_ids_field.
-
-    In DB mode the same "only fill a blank" rule applies to editions.tcg_* /
-    foil_tcg_overrides. The one difference the schema forces: a product_id
-    can't conjure an editions/foils row, so an (edition/foil) absent from the
-    catalog is skipped rather than created — a live card fetch builds the
-    row, then a re-import backfills it."""
-    if is_db_mode():
-        return _import_ids_db(import_data)
-
-    ids_file = new_json(JSON_IDS)
-
-    with ids_file.open("r", encoding="utf-8") as f:
-        current = json.load(f)
-
-    added_main = 0
-    added_foil = 0
-
-    for edition_id, entry in import_data.items():
-        if not isinstance(entry, dict):
-            continue
-
-        current_entry = current.setdefault(edition_id, {})
-
-        product_id = entry.get("product_id")
-        if product_id and not current_entry.get("product_id"):
-            current_entry["product_id"] = product_id
-            added_main += 1
-
-        for foil_id, foil_entry in (entry.get("foils") or {}).items():
-            if not isinstance(foil_entry, dict):
-                continue
-
-            foil_product_id = foil_entry.get("product_id")
-            if not foil_product_id:
-                continue
-
-            current_foils = current_entry.setdefault("foils", {})
-            current_foil_entry = current_foils.setdefault(foil_id, {})
-
-            if not current_foil_entry.get("product_id"):
-                current_foil_entry["product_id"] = foil_product_id
-                added_foil += 1
-
-    with ids_file.open("w", encoding="utf-8") as f:
-        json.dump(current, f, indent=4)
-
-    return {"added_main": added_main, "added_foil": added_foil}
-
-
-def _import_ids_db(import_data: dict) -> dict:
-    added_main = 0
-    added_foil = 0
-
-    with get_session() as session:
-        for edition_id, entry in import_data.items():
-            if not isinstance(entry, dict):
-                continue
-
-            product_id = entry.get("product_id")
-            if product_id:
-                edition = session.get(Edition, edition_id)
-                if edition is not None and not edition.tcg_product_id and not edition.tcg_is_no_listings:
-                    if product_id == NO_LISTINGS_SENTINEL:
-                        edition.tcg_is_no_listings = True
-                    else:
-                        edition.tcg_product_id = product_id
-                    added_main += 1
-
-            for foil_id, foil_entry in (entry.get("foils") or {}).items():
-                if not isinstance(foil_entry, dict):
-                    continue
-
-                foil_product_id = foil_entry.get("product_id")
-                if not foil_product_id:
-                    continue
-
-                override = session.get(FoilTcgOverride, (edition_id, foil_id))
-                if override is None:
-                    foil_exists = session.execute(
-                        select(Foil.foil_id).where(Foil.edition_id == edition_id, Foil.foil_id == foil_id)
-                    ).first()
-                    if foil_exists is None:
-                        continue
-                    override = FoilTcgOverride(edition_id=edition_id, foil_id=foil_id)
-                    session.add(override)
-                elif override.product_id or override.is_no_listings:
-                    continue
-
-                if foil_product_id == NO_LISTINGS_SENTINEL:
-                    override.is_no_listings = True
-                else:
-                    override.product_id = foil_product_id
-                added_foil += 1
-
-    db_cache.bust()
-    return {"added_main": added_main, "added_foil": added_foil}
+        return _normalize_ids_clocks(json.load(f))
 
 
 def _set_ids_field(edition_id: str, field: str, value: str | None, debug: bool = False) -> None:
@@ -275,10 +181,6 @@ def _set_ids_field(edition_id: str, field: str, value: str | None, debug: bool =
             if field == "product_id":
                 edition.tcg_is_no_listings = value == NO_LISTINGS_SENTINEL
                 edition.tcg_product_id = None if value in (None, NO_LISTINGS_SENTINEL) else value
-            elif field == "last_sales":
-                edition.tcg_last_sales = date.fromisoformat(value) if value else None
-            elif field == "last_listings":
-                edition.tcg_last_listings = date.fromisoformat(value) if value else None
 
         db_cache.bust()
 
@@ -304,34 +206,153 @@ def _set_ids_field(edition_id: str, field: str, value: str | None, debug: bool =
         )
 
 
+# ── Per-marketplace "Last Sales" / "Last Listings" clocks ──
+# `field` is "sales" or "listings"; `marketplace` one of MARKETPLACES;
+# `foil_id` "" for the edition's main-product clock or a variant id for a Curio
+# Foil's own separate one. JSON mode: a {marketplace: iso} dict under
+# last_sales / last_listings in ID_TCGPLAYER.json (edition entry, or nested
+# foils.<foil_id>). DB mode: rows in marketplace_scrape_clocks.
+
+def _clock_json_key(field: str) -> str:
+    return "last_sales" if field == "sales" else "last_listings"
+
+
+def get_last_scraped_map(edition_id: str, field: str, foil_id: str = "") -> dict:
+    """{marketplace: "YYYY-MM-DD"} for this clock — all marketplaces at once."""
+    if is_db_mode():
+        with get_session() as session:
+            rows = session.execute(
+                select(MarketplaceScrapeClock).where(
+                    MarketplaceScrapeClock.edition_id == edition_id,
+                    MarketplaceScrapeClock.foil_id == foil_id,
+                    MarketplaceScrapeClock.field == field,
+                )
+            ).scalars().all()
+        return {row.marketplace: row.last_date.isoformat() for row in rows}
+
+    ids_file = new_json(JSON_IDS)
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    scope = ids_data.get(edition_id, {})
+    if foil_id:
+        scope = scope.get("foils", {}).get(foil_id, {})
+    return _normalize_clock_map(scope.get(_clock_json_key(field)))
+
+
+def get_last_scraped(edition_id: str, field: str, marketplace: str, foil_id: str = "") -> str | None:
+    return get_last_scraped_map(edition_id, field, foil_id).get(marketplace)
+
+
+def _write_last_scraped(edition_id: str, field: str, marketplace: str, value: str | None,
+                        foil_id: str = "", debug: bool = False) -> None:
+    """`value` is an ISO date to stamp, or None to clear that marketplace's key."""
+    if is_db_mode():
+        with get_session() as session:
+            if foil_id:
+                foil_exists = session.execute(
+                    select(Foil.foil_id).where(Foil.edition_id == edition_id, Foil.foil_id == foil_id)
+                ).first()
+                if foil_exists is None:
+                    if debug:
+                        print(f"Skipped clock write — unknown foil | edition_id={edition_id} | foil_id={foil_id}")
+                    return
+            elif session.get(Edition, edition_id) is None:
+                if debug:
+                    print(f"Skipped clock write — unknown edition | edition_id={edition_id}")
+                return
+
+            key = (edition_id, foil_id, marketplace, field)
+            row = session.get(MarketplaceScrapeClock, key)
+
+            if value is None:
+                if row is not None:
+                    session.delete(row)
+            elif row is None:
+                session.add(MarketplaceScrapeClock(
+                    edition_id=edition_id, foil_id=foil_id, marketplace=marketplace,
+                    field=field, last_date=date.fromisoformat(value),
+                ))
+            else:
+                row.last_date = date.fromisoformat(value)
+
+        db_cache.bust()
+
+        if debug:
+            print(f"Updated marketplace_scrape_clocks | {edition_id} | foil_id={foil_id or '-'} | "
+                  f"{marketplace} {field} = {value}")
+        return
+
+    ids_file = new_json(JSON_IDS)
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    scope = ids_data.setdefault(edition_id, {})
+    if foil_id:
+        scope = scope.setdefault("foils", {}).setdefault(foil_id, {})
+
+    json_key = _clock_json_key(field)
+    clock_map = _normalize_clock_map(scope.get(json_key))
+    if value is None:
+        clock_map.pop(marketplace, None)
+    else:
+        clock_map[marketplace] = value
+
+    if clock_map:
+        scope[json_key] = clock_map
+    else:
+        scope.pop(json_key, None)
+
+    with ids_file.open("w", encoding="utf-8") as f:
+        json.dump(ids_data, f, indent=4)
+
+    if debug:
+        print(f"Updated ID_TCGPLAYER.json | {edition_id} | foil_id={foil_id or '-'} | "
+              f"{marketplace} {json_key} = {value}")
+
+
+def set_last_scraped(edition_id: str, field: str, marketplace: str, foil_id: str = "",
+                     when: str | None = None, debug: bool = False) -> None:
+    _write_last_scraped(edition_id, field, marketplace, when or date.today().isoformat(), foil_id, debug)
+
+
+def clear_last_scraped(edition_id: str, field: str, marketplace: str, foil_id: str = "",
+                       debug: bool = False) -> None:
+    _write_last_scraped(edition_id, field, marketplace, None, foil_id, debug)
+
+
+# ── Back-compat wrappers ──
+# The TCGPlayer scraper (_process_sales_result / _process_listings_result /
+# import_pasted_sales_tcg_by_edition in pricing_ga.py) and its 7-day listings
+# gate (_listings_gate_result) are inherently TCGPlayer — they keep calling
+# these, which are hardwired to the "TCGPlayer" marketplace.
+
 def get_last_sales(edition_id: str) -> str | None:
-    return _get_ids_field(edition_id, "last_sales")
+    return get_last_scraped(edition_id, "sales", "TCGPlayer")
 
 
 def set_last_sales(edition_id: str, debug: bool = False) -> None:
-    _set_ids_field(edition_id, "last_sales", date.today().isoformat(), debug)
+    set_last_scraped(edition_id, "sales", "TCGPlayer", debug=debug)
 
 
 def get_last_listings(edition_id: str) -> str | None:
-    return _get_ids_field(edition_id, "last_listings")
+    return get_last_scraped(edition_id, "listings", "TCGPlayer")
 
 
 def set_last_listings(edition_id: str, debug: bool = False) -> None:
-    _set_ids_field(edition_id, "last_listings", date.today().isoformat(), debug)
+    set_last_scraped(edition_id, "listings", "TCGPlayer", debug=debug)
 
 
 def clear_last_sales(edition_id: str, debug: bool = False) -> None:
-    """Resets last_sales back to never-scraped — lets an admin force past the
-    "recently updated" state (e.g. to immediately re-run Refresh Sales)
-    without waiting it out, from the admin console's Last Sales badge."""
-    _set_ids_field(edition_id, "last_sales", None, debug)
+    """Resets the TCGPlayer last_sales back to never-scraped — lets an admin
+    force past the "recently updated" state without waiting it out."""
+    clear_last_scraped(edition_id, "sales", "TCGPlayer", debug=debug)
 
 
 def clear_last_listings(edition_id: str, debug: bool = False) -> None:
     """Listings counterpart to clear_last_sales() — also lifts the 7-day
-    listings-refresh gate (_listings_gate_result), since that's keyed off
-    this same field."""
-    _set_ids_field(edition_id, "last_listings", None, debug)
+    listings-refresh gate (_listings_gate_result), keyed off this same clock."""
+    clear_last_scraped(edition_id, "listings", "TCGPlayer", debug=debug)
 
 
 def get_product_id(edition_id: str) -> str | None:
@@ -372,10 +393,6 @@ def _get_foil_ids_field(edition_id: str, foil_id: str, field: str) -> str | None
 
             if field == "product_id":
                 return NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id
-            if field == "last_sales":
-                return override.last_sales.isoformat() if override.last_sales else None
-            if field == "last_listings":
-                return override.last_listings.isoformat() if override.last_listings else None
 
             return None
 
@@ -408,10 +425,6 @@ def _set_foil_ids_field(edition_id: str, foil_id: str, field: str, value: str | 
             if field == "product_id":
                 override.is_no_listings = value == NO_LISTINGS_SENTINEL
                 override.product_id = None if value in (None, NO_LISTINGS_SENTINEL) else value
-            elif field == "last_sales":
-                override.last_sales = date.fromisoformat(value) if value else None
-            elif field == "last_listings":
-                override.last_listings = date.fromisoformat(value) if value else None
 
         db_cache.bust()
 
@@ -439,23 +452,21 @@ def _set_foil_ids_field(edition_id: str, foil_id: str, field: str, value: str | 
 
 
 def get_foil_overrides(edition_id: str) -> dict:
-    """edition_id's foil-level overrides ({foil_id: {product_id, last_sales,
-    last_listings}}), or {} if it has none."""
+    """edition_id's foil-level overrides ({foil_id: {product_id}}), or {} if it
+    has none. Callers use product_id only; the per-marketplace clocks live in
+    marketplace_scrape_clocks now (see get_last_scraped_map)."""
     if is_db_mode():
         with get_session() as session:
             overrides = session.execute(
                 select(FoilTcgOverride).where(FoilTcgOverride.edition_id == edition_id)
             ).scalars().all()
 
-        result = {}
-        for override in overrides:
-            entry = {"product_id": NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id}
-            if override.last_sales:
-                entry["last_sales"] = override.last_sales.isoformat()
-            if override.last_listings:
-                entry["last_listings"] = override.last_listings.isoformat()
-            result[override.foil_id] = entry
-        return result
+        return {
+            override.foil_id: {
+                "product_id": NO_LISTINGS_SENTINEL if override.is_no_listings else override.product_id,
+            }
+            for override in overrides
+        }
 
     ids_file = new_json(JSON_IDS)
 
@@ -465,30 +476,51 @@ def get_foil_overrides(edition_id: str) -> dict:
     return ids_data.get(edition_id, {}).get("foils", {})
 
 
+# Foil-scoped, marketplace-aware — a Curio Foil's own separate clock, distinct
+# from the edition's main-product one.
+def get_foil_last_scraped_map(edition_id: str, foil_id: str, field: str) -> dict:
+    return get_last_scraped_map(edition_id, field, foil_id)
+
+
+def get_foil_last_scraped(edition_id: str, foil_id: str, field: str, marketplace: str) -> str | None:
+    return get_last_scraped(edition_id, field, marketplace, foil_id)
+
+
+def set_foil_last_scraped(edition_id: str, foil_id: str, field: str, marketplace: str,
+                          when: str | None = None, debug: bool = False) -> None:
+    set_last_scraped(edition_id, field, marketplace, foil_id, when, debug)
+
+
+def clear_foil_last_scraped(edition_id: str, foil_id: str, field: str, marketplace: str,
+                            debug: bool = False) -> None:
+    clear_last_scraped(edition_id, field, marketplace, foil_id, debug)
+
+
+# Back-compat wrappers — the TCGPlayer scrape/gate code stays untouched.
 def get_foil_last_sales(edition_id: str, foil_id: str) -> str | None:
-    return _get_foil_ids_field(edition_id, foil_id, "last_sales")
+    return get_foil_last_scraped(edition_id, foil_id, "sales", "TCGPlayer")
 
 
 def set_foil_last_sales(edition_id: str, foil_id: str, debug: bool = False) -> None:
-    _set_foil_ids_field(edition_id, foil_id, "last_sales", date.today().isoformat(), debug)
+    set_foil_last_scraped(edition_id, foil_id, "sales", "TCGPlayer", debug=debug)
 
 
 def get_foil_last_listings(edition_id: str, foil_id: str) -> str | None:
-    return _get_foil_ids_field(edition_id, foil_id, "last_listings")
+    return get_foil_last_scraped(edition_id, foil_id, "listings", "TCGPlayer")
 
 
 def set_foil_last_listings(edition_id: str, foil_id: str, debug: bool = False) -> None:
-    _set_foil_ids_field(edition_id, foil_id, "last_listings", date.today().isoformat(), debug)
+    set_foil_last_scraped(edition_id, foil_id, "listings", "TCGPlayer", debug=debug)
 
 
 def clear_foil_last_sales(edition_id: str, foil_id: str, debug: bool = False) -> None:
-    """Foil-scoped counterpart to clear_last_sales() — e.g. resets a Curio
-    Foil's own separate clock without touching the edition's main one."""
-    _set_foil_ids_field(edition_id, foil_id, "last_sales", None, debug)
+    """Foil-scoped counterpart to clear_last_sales() — resets a Curio Foil's own
+    separate TCGPlayer clock without touching the edition's main one."""
+    clear_foil_last_scraped(edition_id, foil_id, "sales", "TCGPlayer", debug=debug)
 
 
 def clear_foil_last_listings(edition_id: str, foil_id: str, debug: bool = False) -> None:
-    _set_foil_ids_field(edition_id, foil_id, "last_listings", None, debug)
+    clear_foil_last_scraped(edition_id, foil_id, "listings", "TCGPlayer", debug=debug)
 
 
 def get_foil_product_id(edition_id: str, foil_id: str) -> str | None:

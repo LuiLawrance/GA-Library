@@ -136,11 +136,12 @@ class Edition(Base):
     date_created: Mapped[dt.date | None] = mapped_column(Date)
     date_release: Mapped[dt.date | None] = mapped_column(Date)
     date_update: Mapped[dt.date | None] = mapped_column(Date)
-    # ID_TCGPLAYER.json's top-level (main-product) entry folded onto the edition
+    # ID_TCGPLAYER.json's top-level (main-product) entry folded onto the edition.
+    # The last_sales / last_listings clocks that used to live here (and on
+    # foil_tcg_overrides) moved to marketplace_scrape_clocks — they're now
+    # per-marketplace, not TCGPlayer-only.
     tcg_product_id: Mapped[str | None] = mapped_column(Text)
     tcg_is_no_listings: Mapped[bool] = mapped_column(Boolean, default=False)
-    tcg_last_sales: Mapped[dt.date | None] = mapped_column(Date)
-    tcg_last_listings: Mapped[dt.date | None] = mapped_column(Date)
 
 
 class Foil(Base):
@@ -169,7 +170,10 @@ class Foil(Base):
 
 class FoilTcgOverride(Base):
     """Sparse — only for variants (Curio Foils etc.) sold as their own
-    separate TCGPlayer product, distinct from their parent foil's."""
+    separate TCGPlayer product, distinct from their parent foil's.
+
+    The last_sales / last_listings clocks moved to marketplace_scrape_clocks
+    (keyed with the same foil_id) — they're per-marketplace now."""
     __tablename__ = "foil_tcg_overrides"
     __table_args__ = (
         ForeignKeyConstraint(["edition_id", "foil_id"], ["foils.edition_id", "foils.foil_id"]),
@@ -179,8 +183,30 @@ class FoilTcgOverride(Base):
     foil_id: Mapped[str] = mapped_column(Text, primary_key=True)
     product_id: Mapped[str | None] = mapped_column(Text)
     is_no_listings: Mapped[bool] = mapped_column(Boolean, default=False)
-    last_sales: Mapped[dt.date | None] = mapped_column(Date)
-    last_listings: Mapped[dt.date | None] = mapped_column(Date)
+
+
+class MarketplaceScrapeClock(Base):
+    """"Last Sales" / "Last Listings" date per marketplace, per edition and per
+    Curio-Foil override — shown in the admin Pricing detail (with the ❌ clear
+    buttons) and as the list's Sales/Listings day-count badges.
+
+    Sparse, same "row exists only when set" style as FoilTcgOverride. foil_id is
+    "" (not NULL — keeps the composite PK and ON CONFLICT upserts clean) for the
+    edition-level / main-product clock, or a variant foil_id for a Curio Foil's
+    own separate clock. marketplace is one of api_tcgplayer.MARKETPLACES; the
+    TCGPlayer scraper and its 7-day listings gate only ever touch the
+    "TCGPlayer" rows (via the back-compat wrappers in api_tcgplayer.py)."""
+    __tablename__ = "marketplace_scrape_clocks"
+    __table_args__ = (
+        CheckConstraint("field IN ('sales', 'listings')", name="marketplace_scrape_clocks_field_check"),
+    )
+
+    edition_id: Mapped[str] = mapped_column(
+        ForeignKey("editions.edition_id", ondelete="CASCADE"), primary_key=True)
+    foil_id: Mapped[str] = mapped_column(Text, primary_key=True, default="")
+    marketplace: Mapped[str] = mapped_column(Text, primary_key=True)
+    field: Mapped[str] = mapped_column(Text, primary_key=True)  # "sales" | "listings"
+    last_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
 
 
 class ThemaScore(Base):

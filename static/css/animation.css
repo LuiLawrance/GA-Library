@@ -46,6 +46,19 @@
     }
 }
 
+/* revealDown's mirror — for a menu that opens upward (see
+   .admin-pid-menu-flip-up in admin.css). */
+@keyframes revealUp {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* Modal backdrop fade — used by .inv-modal-overlay (inventory.css). */
 @keyframes overlayFade {
     from {

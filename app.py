@@ -4,9 +4,9 @@ from api_ga import _api_search, _build_collector_map, _download_card_image, _dow
     load_featured_sets_data, load_info_data, load_set_collector_data, load_set_names, load_set_searches_data, \
     load_slugs_data, load_thema_for_editions, load_update_data, mark_set_searched, set_group_id, set_search, \
     sync_featured_sets, UPDATE_THRESHOLD
-from api_tcgplayer import clear_foil_last_listings, clear_foil_last_sales, clear_last_listings, clear_last_sales, \
-    import_ids, NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_listings, get_foil_last_sales, get_foil_overrides, \
-    get_last_listings, get_last_sales, set_foil_product_id, set_product_id
+from api_tcgplayer import clear_foil_last_scraped, clear_last_scraped, MARKETPLACES, \
+    NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_scraped_map, get_foil_overrides, get_last_scraped_map, \
+    set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from db.connection_url import compose as compose_database_url, parse as parse_database_url
 from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection
@@ -18,8 +18,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
-    clear_product_ids_for_set, delete_entry, find_product_ids_by_editions, import_listings, \
-    import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, import_sales, load_listings_data, \
+    clear_product_ids_for_set, delete_entry, find_product_ids_by_editions, import_gal_pricing, \
+    import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, load_listings_data, \
     load_price_data_for_card, load_sales_data, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
@@ -1306,11 +1306,16 @@ async def api_admin_init_schema(request: Request):
     return JSONResponse(result)
 
 
-def _days_since(iso_date: str | None) -> int | None:
-    if not iso_date:
-        return None
-
-    return (date.today() - date.fromisoformat(iso_date)).days
+def _scrape_clocks(ids_entry: dict) -> dict:
+    """{"sales": {marketplace: iso}, "listings": {...}} for a get_all_ids()
+    entry (edition-level or a foils.<id> sub-entry), omitting an empty field.
+    The frontend picks the marketplace the pill is on and computes days-since."""
+    out = {}
+    for field, key in (("sales", "last_sales"), ("listings", "last_listings")):
+        clock_map = ids_entry.get(key)
+        if clock_map:
+            out[field] = clock_map
+    return out
 
 
 def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
@@ -1559,11 +1564,9 @@ async def api_admin_pricing_product_ids(request: Request):
                 "product_id": curio_override.get("product_id"),
                 # The Curio Foil's own product page is scraped independently
                 # from the edition's regular one, with its own separate
-                # last-scraped clocks (see pricing_ga.py's merge-based scrape
-                # orchestration) — sourced from the same get_all_ids() read
-                # already loaded above, no extra I/O.
-                "sales_days_since": _days_since(curio_override.get("last_sales")),
-                "listings_days_since": _days_since(curio_override.get("last_listings")),
+                # per-marketplace clocks — sourced from the same get_all_ids()
+                # read already loaded above, no extra I/O.
+                "clocks": _scrape_clocks(curio_override),
             }
 
         results.append({
@@ -1575,8 +1578,7 @@ async def api_admin_pricing_product_ids(request: Request):
             "set_name": edition_info.get("set_name"),
             "collector_number": collector_map.get(edition_id),
             "product_id": edition_ids.get("product_id"),
-            "sales_days_since": _days_since(edition_ids.get("last_sales")),
-            "listings_days_since": _days_since(edition_ids.get("last_listings")),
+            "clocks": _scrape_clocks(edition_ids),
             # The edition's own release/last-synced dates (from the Grand
             # Archive API, cached in JSON_INFO — see the sync logic in
             # api_ga.py) — shown in the Cards section's Info sub-view instead
@@ -1777,6 +1779,7 @@ async def api_admin_clear_last_updated(request: Request):
     edition_id = body.get("edition_id", "").strip()
     foil_id = body.get("foil_id", "").strip() or None
     field = body.get("field", "")
+    marketplace = body.get("marketplace", "").strip()
 
     if not edition_id:
         raise HTTPException(status_code=400, detail="edition_id is required")
@@ -1784,70 +1787,23 @@ async def api_admin_clear_last_updated(request: Request):
     if field not in ("sales", "listings"):
         raise HTTPException(status_code=400, detail="field must be 'sales' or 'listings'")
 
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=400, detail=f"marketplace must be one of {list(MARKETPLACES)}")
+
     editions_data = load_editions_data()
 
     if edition_id not in editions_data:
         raise HTTPException(status_code=404, detail="Edition not found")
 
     # foil_id present clears a Curio Foil's own separate clock instead of the
-    # edition's main one — mirrors the product-id endpoint above.
+    # edition's main one — mirrors the product-id endpoint above. Only the
+    # given marketplace's clock is cleared.
     if foil_id:
-        if field == "sales":
-            clear_foil_last_sales(edition_id, foil_id)
-        else:
-            clear_foil_last_listings(edition_id, foil_id)
+        clear_foil_last_scraped(edition_id, foil_id, field, marketplace)
     else:
-        if field == "sales":
-            clear_last_sales(edition_id)
-        else:
-            clear_last_listings(edition_id)
+        clear_last_scraped(edition_id, field, marketplace)
 
     return JSONResponse({"ok": True})
-
-
-@app.post("/api/admin/pricing/import-ids")
-async def api_admin_pricing_import_ids(request: Request):
-    require_admin(request)
-
-    body = await request.json()
-    import_data = body.get("data")
-
-    if not isinstance(import_data, dict):
-        raise HTTPException(status_code=400, detail="data must be a JSON object shaped like ID_TCGPLAYER.json")
-
-    result = import_ids(import_data)
-
-    return JSONResponse(result)
-
-
-@app.post("/api/admin/pricing/import-sales")
-async def api_admin_pricing_import_sales_json(request: Request):
-    require_admin(request)
-
-    body = await request.json()
-    import_data = body.get("data")
-
-    if not isinstance(import_data, dict):
-        raise HTTPException(status_code=400, detail="data must be a JSON object shaped like SALES.json")
-
-    result = import_sales(import_data)
-
-    return JSONResponse(result)
-
-
-@app.post("/api/admin/pricing/import-listings")
-async def api_admin_pricing_import_listings_json(request: Request):
-    require_admin(request)
-
-    body = await request.json()
-    import_data = body.get("data")
-
-    if not isinstance(import_data, dict):
-        raise HTTPException(status_code=400, detail="data must be a JSON object shaped like LISTINGS.json")
-
-    result = import_listings(import_data)
-
-    return JSONResponse(result)
 
 
 @app.get("/api/admin/pricing/{edition_id}/history")
@@ -1891,13 +1847,15 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
     edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
     curio_foil_id = _curio_foil_id_for_edition(edition_info)
 
+    # Per-marketplace {marketplace: "YYYY-MM-DD"} maps — the frontend shows the
+    # value for whichever marketplace the scope pill is on.
     return JSONResponse({
         "sales": _flatten(load_sales_data()),
         "listings": _flatten(load_listings_data()),
-        "last_sales": get_last_sales(edition_id),
-        "last_listings": get_last_listings(edition_id),
-        "curio_last_sales": get_foil_last_sales(edition_id, curio_foil_id) if curio_foil_id else None,
-        "curio_last_listings": get_foil_last_listings(edition_id, curio_foil_id) if curio_foil_id else None,
+        "last_sales": get_last_scraped_map(edition_id, "sales"),
+        "last_listings": get_last_scraped_map(edition_id, "listings"),
+        "curio_last_sales": get_foil_last_scraped_map(edition_id, curio_foil_id, "sales") if curio_foil_id else {},
+        "curio_last_listings": get_foil_last_scraped_map(edition_id, curio_foil_id, "listings") if curio_foil_id else {},
     })
 
 
@@ -2006,6 +1964,9 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
     if entry_type not in ("sales", "listings"):
         raise HTTPException(status_code=400, detail="type must be 'sales' or 'listings'")
 
+    if marketplace not in MARKETPLACES:
+        raise HTTPException(status_code=400, detail=f"marketplace must be one of {list(MARKETPLACES)}")
+
     if not foil_id:
         raise HTTPException(status_code=400, detail="foil_id is required")
 
@@ -2083,6 +2044,29 @@ async def api_admin_pricing_import_sales(edition_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Pasted text is required")
 
     result = import_pasted_sales_tcg_by_edition(edition_id, raw_text, foil_id=foil_id)
+
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return JSONResponse(result)
+
+
+@app.post("/api/admin/pricing/{edition_id}/import-gal")
+async def api_admin_pricing_import_gal(edition_id: str, request: Request):
+    require_admin(request)
+
+    editions_data = load_editions_data()
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    body = await request.json()
+    doc = body.get("data")
+
+    if not isinstance(doc, dict):
+        raise HTTPException(status_code=400, detail="data must be a GAL pricing document")
+
+    result = import_gal_pricing(edition_id, doc)
 
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"])

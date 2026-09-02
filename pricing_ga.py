@@ -55,7 +55,7 @@ TCGCSV_RARITY_CODE = {
 #
 # Both directions now follow is_db_mode(): the readers below, and every
 # writer in this module (the scrape/paste path's _store_*_tcg, add_manual_entry
-# / _append_entry, import_sales/import_listings, delete_entry). In DB mode a
+# / _append_entry, delete_entry). In DB mode a
 # writer INSERTs/DELETEs price_sales / price_listings rows directly and calls
 # db_cache.bust() so the next read reflects it; in JSON mode it edits
 # SALES.json / LISTINGS.json exactly as before.
@@ -350,147 +350,165 @@ def _append_entry_db(model, edition_id: str, foil_id: str, entry: dict) -> str:
     return card_id
 
 
-def _entry_key(entry: dict) -> tuple:
-    return (entry.get("date"), entry.get("marketplace"), entry.get("price"), entry.get("quantity"), entry.get("condition"))
+# ── GAL-format import ──
+# GAL = Grand Archive Library, this project's portable pricing shape (see the
+# gal-pricing-export-format memory / adminPidBuildGalExport in admin.js): one
+# card, one marketplace, one kind (sales | listings), a flat `entries` list.
+GAL_PRICING_FORMAT = "grand-archive-library/pricing"
 
 
-def _import_price_records(file_path: str, import_data: dict) -> dict:
-    """Backfills SALES.json/LISTINGS.json from a JSON blob shaped exactly
-    like the file itself (card_id -> edition_id -> foil_id -> [entries]) —
-    the admin console's Import Sales/Import Listings buttons, for
-    re-merging a prior export (e.g. after a local hard reset) back in.
+def _gal_entry_key(e: dict) -> tuple:
+    return (e.get("date"), e.get("marketplace"), e.get("price"), e.get("quantity"), e.get("condition"))
 
-    An entry is added only if no EXACT match (same date, marketplace,
-    price, quantity, condition) already exists for that card/edition/foil —
-    so re-running the same import twice never creates duplicates, while two
-    genuinely distinct sales/listings that happen to share a date (a normal,
-    valid occurrence — see any card with more than one sale in a day) both
-    come through untouched. Deliberately not scoped to known
-    cards/editions/foils, matching import_ids()'s own reasoning: this only
-    needs to guarantee no duplicates, not that every key already exists
-    elsewhere, so a foil_id (or edition/card) missing from the current data
-    entirely still gets its own fresh entry here rather than being skipped.
 
-    Unlike the scrape/paste path's _store_sales_tcg/_store_listings_tcg,
-    this doesn't gate on "already have a sale from today" or do any
-    foil_kind lookup — import_data is already in stored form, one row per
-    real entry, keyed directly by foil_id, not raw scraped rows that still
-    need attributing to one.
-
-    In DB mode the same exact-match dedup runs against price_sales /
-    price_listings. The one difference the schema forces: price rows FK to
-    the foils table, so an (edition_id, foil_id) pair that doesn't exist in
-    the catalog can't be inserted — those entries are counted under
-    "skipped_unknown_foil" rather than created blind."""
+def _edition_foil_ids(edition_id: str) -> tuple[str, set[str]]:
+    """(card_id, {every foil_id for this edition — top-level AND variants}).
+    Raises KeyError if the edition is unknown."""
     if is_db_mode():
-        return _import_price_records_db(_price_model(file_path), import_data)
+        with get_session() as session:
+            card_id = session.execute(
+                select(Edition.card_id).where(Edition.edition_id == edition_id)
+            ).scalar_one_or_none()
+            if card_id is None:
+                raise KeyError(edition_id)
+            foil_ids = set(session.execute(
+                select(Foil.foil_id).where(Foil.edition_id == edition_id)
+            ).scalars().all())
+        return card_id, foil_ids
 
-    target_file = new_json(file_path)
+    from api_ga import JSON_EDITIONS, JSON_INFO
 
-    with target_file.open("r", encoding="utf-8") as f:
-        current = json.load(f)
+    with new_json(JSON_EDITIONS).open("r", encoding="utf-8") as f:
+        editions_data = json.load(f)
+    card_id = editions_data[edition_id]["card_id"]
 
+    with new_json(JSON_INFO).open("r", encoding="utf-8") as f:
+        info_data = json.load(f)
+    foils = info_data[card_id]["editions"][edition_id]["foils"]
+
+    ids: set[str] = set()
+    for foil_id, foil_info in foils.items():
+        ids.add(foil_id)
+        ids.update((foil_info.get("variants") or {}).keys())
+    return card_id, ids
+
+
+def _insert_price_entries_deduped(json_path: str, card_id: str, edition_id: str,
+                                  by_foil: dict[str, list[dict]]) -> tuple[int, int]:
+    """(added, skipped_duplicate). Adds an entry only when no exact
+    (date, marketplace, price, quantity, condition) match already exists for
+    that foil."""
     added = 0
+    skipped_dup = 0
 
-    for card_id, editions in import_data.items():
-        if not isinstance(editions, dict):
-            continue
-
-        for edition_id, foils in editions.items():
-            if not isinstance(foils, dict):
-                continue
-
-            for foil_id, entries in foils.items():
-                if not isinstance(entries, list):
-                    continue
-
-                existing = current.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, [])
-                existing_keys = {_entry_key(e) for e in existing if isinstance(e, dict)}
-
-                for entry in entries:
-                    if not isinstance(entry, dict):
+    if is_db_mode():
+        model = _price_model(json_path)
+        with get_session() as session:
+            for foil_id, entries in by_foil.items():
+                existing = session.execute(
+                    select(model).where(model.edition_id == edition_id, model.foil_id == foil_id)
+                ).scalars().all()
+                seen = {_gal_entry_key(_price_entry(r)) for r in existing}
+                for e in entries:
+                    key = _gal_entry_key(e)
+                    if key in seen:
+                        skipped_dup += 1
                         continue
-
-                    key = _entry_key(entry)
-                    if key in existing_keys:
-                        continue
-
-                    existing.append({
-                        "date": entry.get("date"),
-                        "marketplace": entry.get("marketplace"),
-                        "price": entry.get("price"),
-                        "quantity": entry.get("quantity"),
-                        "condition": entry.get("condition"),
-                    })
-                    existing_keys.add(key)
+                    _add_price_row(
+                        session, model, edition_id=edition_id, foil_id=foil_id,
+                        date=date.fromisoformat(e["date"]), marketplace=e["marketplace"],
+                        price=e["price"], quantity=e["quantity"], condition=e["condition"],
+                    )
+                    seen.add(key)
                     added += 1
+        db_cache.bust()
+        return added, skipped_dup
+
+    target_file = new_json(json_path)
+    with target_file.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    for foil_id, entries in by_foil.items():
+        bucket = data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, [])
+        seen = {_gal_entry_key(x) for x in bucket if isinstance(x, dict)}
+        for e in entries:
+            key = _gal_entry_key(e)
+            if key in seen:
+                skipped_dup += 1
+                continue
+            bucket.append(e)
+            seen.add(key)
+            added += 1
 
     with target_file.open("w", encoding="utf-8") as f:
-        json.dump(current, f, indent=4, ensure_ascii=False)
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
-    return {"added": added}
+    return added, skipped_dup
 
 
-def _import_price_records_db(model, import_data: dict) -> dict:
-    added = 0
+def import_gal_pricing(edition_id: str, doc: dict) -> dict:
+    """Imports a GAL pricing document into SALES.json / LISTINGS.json (or
+    price_sales / price_listings in DB mode), scoped to `edition_id`.
+
+    Re-importing the same file is a no-op — an entry is added only when no exact
+    (date, marketplace, price, quantity, condition) match already exists for its
+    foil. Every entry is stamped with the document's own `marketplace`."""
+    if not isinstance(doc, dict) or doc.get("gal_format") != GAL_PRICING_FORMAT:
+        return {"ok": False, "error": "Not a GAL pricing document (missing gal_format)."}
+
+    kind = doc.get("type")
+    if kind not in ("sales", "listings"):
+        return {"ok": False, "error": "GAL 'type' must be 'sales' or 'listings'."}
+
+    doc_edition = (doc.get("card") or {}).get("edition_id")
+    if doc_edition and doc_edition != edition_id:
+        return {"ok": False, "error": f"This GAL file is for edition '{doc_edition}', not the selected card."}
+
+    raw_entries = doc.get("entries")
+    if not isinstance(raw_entries, list):
+        return {"ok": False, "error": "GAL 'entries' must be a list."}
+
+    marketplace = (str(doc.get("marketplace") or "")).strip() or "Manual"
+    json_path = JSON_SALES if kind == "sales" else JSON_LISTINGS
+
+    try:
+        card_id, known_foils = _edition_foil_ids(edition_id)
+    except KeyError:
+        return {"ok": False, "error": "Selected edition not found."}
+
+    skipped_unrecognized = 0
     skipped_unknown_foil = 0
+    by_foil: dict[str, list[dict]] = {}
 
-    with get_session() as session:
-        known_pairs = {
-            tuple(row) for row in session.execute(select(Foil.edition_id, Foil.foil_id))
-        }
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            skipped_unrecognized += 1
+            continue
+        foil_id = str(raw.get("foil_id") or "").strip()
+        if not foil_id or not raw.get("date"):
+            skipped_unrecognized += 1
+            continue
+        if foil_id not in known_foils:
+            skipped_unknown_foil += 1
+            continue
+        by_foil.setdefault(foil_id, []).append({
+            "date": raw["date"],
+            "marketplace": marketplace,
+            "price": raw.get("price"),
+            "quantity": raw.get("quantity"),
+            "condition": raw.get("condition") or "",
+        })
 
-        for editions in import_data.values():
-            if not isinstance(editions, dict):
-                continue
+    added, skipped_duplicate = _insert_price_entries_deduped(json_path, card_id, edition_id, by_foil)
 
-            for edition_id, foils in editions.items():
-                if not isinstance(foils, dict):
-                    continue
-
-                for foil_id, entries in foils.items():
-                    if not isinstance(entries, list):
-                        continue
-
-                    real_entries = [e for e in entries if isinstance(e, dict) and e.get("date")]
-
-                    if (edition_id, foil_id) not in known_pairs:
-                        skipped_unknown_foil += len(real_entries)
-                        continue
-
-                    existing = session.execute(
-                        select(model).where(model.edition_id == edition_id, model.foil_id == foil_id)
-                    ).scalars().all()
-                    existing_keys = {_entry_key(_price_entry(r)) for r in existing}
-
-                    for entry in real_entries:
-                        key = _entry_key(entry)
-                        if key in existing_keys:
-                            continue
-
-                        _add_price_row(
-                            session, model,
-                            edition_id=edition_id,
-                            foil_id=foil_id,
-                            date=date.fromisoformat(entry["date"]),
-                            marketplace=entry.get("marketplace"),
-                            price=entry.get("price"),
-                            quantity=entry.get("quantity"),
-                            condition=entry.get("condition"),
-                        )
-                        existing_keys.add(key)
-                        added += 1
-
-    db_cache.bust()
-    return {"added": added, "skipped_unknown_foil": skipped_unknown_foil}
-
-
-def import_sales(import_data: dict) -> dict:
-    return _import_price_records(JSON_SALES, import_data)
-
-
-def import_listings(import_data: dict) -> dict:
-    return _import_price_records(JSON_LISTINGS, import_data)
+    return {
+        "ok": True,
+        "type": kind,
+        "added": added,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_unknown_foil": skipped_unknown_foil,
+        "skipped_unrecognized": skipped_unrecognized,
+    }
 
 
 def delete_entry(edition_id: str, foil_id: str, entry_type: str, index: int) -> dict:
@@ -1045,19 +1063,16 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
 
     card_id = _append_entry(file_path, edition_id, foil_id, entry)
 
-    # A manual entry is us recording pricing data for this edition just as much
-    # as a scrape or pasted import is — stamp the same "last updated" clock so
-    # the admin console's badge (and, for listings, the refresh gate) reflect it.
-    if entry_type == "sales":
-        if is_variant:
-            api_tcgplayer.set_foil_last_sales(edition_id, foil_id, debug)
-        else:
-            api_tcgplayer.set_last_sales(edition_id, debug)
+    # A manual entry is us recording pricing data just as much as a scrape or
+    # pasted import is — stamp the "last updated" clock for THIS entry's
+    # marketplace (the pill the admin was on), so the console's Last Sales/
+    # Listings badge for that marketplace (and, for TCGPlayer listings, the
+    # 7-day refresh gate) reflect it.
+    clock_field = "sales" if entry_type == "sales" else "listings"
+    if is_variant:
+        api_tcgplayer.set_foil_last_scraped(edition_id, foil_id, clock_field, marketplace, debug=debug)
     else:
-        if is_variant:
-            api_tcgplayer.set_foil_last_listings(edition_id, foil_id, debug)
-        else:
-            api_tcgplayer.set_last_listings(edition_id, debug)
+        api_tcgplayer.set_last_scraped(edition_id, clock_field, marketplace, debug=debug)
 
     if debug:
         print(
@@ -1727,9 +1742,8 @@ def import_product_ids_from_tcgcsv(set_slug: str, group_id: str, debug: bool = F
     is filtered out before anything is written, rather than accepted on
     number alone.
 
-    Only ever fills in a product_id that's currently missing, same
-    duplicate-safety as import_ids() — an admin-confirmed ID already on file
-    is never overwritten by this.
+    Only ever fills in a product_id that's currently missing — an
+    admin-confirmed ID already on file is never overwritten by this.
 
     A collector number tcgcsv reports with no local match, whose only local
     candidate(s) don't share its rarity, or that (even after the rarity

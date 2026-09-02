@@ -1,6 +1,10 @@
 let adminActiveSection = 'pricing';
 let adminCardsView = 'pricing';
 let adminPidDetailMode = 'regular';
+// Which marketplace the Pricing view is scoped to (pill above the list, next
+// to the TCGPlayer link button). State only for now — the Sales/Listings
+// tables and Add Entry defaults get wired to this in a later overhaul step.
+let adminPidMarketplace = 'tcgplayer';
 let adminSystemLoaded = false;
 let adminUsersLoaded = false;
 let adminUsersData = [];
@@ -46,16 +50,48 @@ let adminPidAddEntryOpenType = null;
 let adminPidAddEntryFoilId = null;
 let adminPidAddEntryCondition = null;
 let adminPidAddEntryPending = false;
-let adminPidBulkPasteOpen = false;
-let adminPidBulkPastePending = false;
+let adminPidImportOpenType = null;  // 'sales' | 'listings' | null — the import (↓) popover
+let adminPidImportPending = false;
+let adminPidImportMode = 'paste';   // 'paste' | 'gal' — Sales-import sub-mode; only 'gal'
+                                    // is offered for Listings or a non-TCGPlayer pill
+let adminPidExportOpenType = null;  // 'sales' | 'listings' | null — the GAL export popover
 
 // Matches CONDITION_MAP in api_tcgplayer.py, so manual entries use the same
 // grading vocabulary as scraped TCGPlayer data.
 const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played', 'Heavily Played', 'Damaged'];
 
-// Suggested marketplace options for manual entries — the field itself still
-// accepts arbitrary free text, these are just one-click shortcuts.
-const ADMIN_PID_MARKETPLACE_OPTIONS = ['TCGPlayer', 'Manual'];
+// The Pricing view's marketplace scope pill (see switchAdminPidMarketplace).
+// Keys match the pill buttons' data-marketplace in admin.html.
+//   label       — pill/UI text.
+//   marketplace — value stored on sales/listings entries added while this pill
+//                 is active ("TCGPlayer" matches what scraped/pasted rows use).
+//   icon        — the Link button's image; null (Manual) hides the Link button.
+//   linkable    — Link button is live; false greys it out (CoreTCG's product
+//                 URLs aren't wired up yet — see openAdminPidLink).
+//   automated   — has product-ID/scraper automation; when false the list's
+//                 Product ID column collapses (see updateAdminPidProductIdVisibility).
+const ADMIN_PID_MARKETPLACES = {
+    tcgplayer: {label: 'TCGPlayer', marketplace: 'TCGPlayer', icon: '/marketplaces/TCG%20Player.png', linkable: true, automated: true},
+    coretcg: {label: 'CoreTCG', marketplace: 'CoreTCG', icon: '/marketplaces/Core%20TCG.png', linkable: false, automated: false},
+    manual: {label: 'Manual', marketplace: 'Manual', icon: null, linkable: false, automated: false},
+};
+
+function adminPidMarketplaceConfig() {
+    return ADMIN_PID_MARKETPLACES[adminPidMarketplace] || ADMIN_PID_MARKETPLACES.tcgplayer;
+}
+
+// "Last Sales" / "Last Listings" clocks are per-marketplace now — a
+// {marketplace: "YYYY-MM-DD"} map. These pull the value for whichever pill is
+// selected. `map` is e.g. adminPidDetailHistory.last_sales, or a card record's
+// clocks.sales.
+function adminPidActiveClock(map) {
+    return map ? (map[adminPidMarketplaceConfig().marketplace] || null) : null;
+}
+
+function adminPidDaysSince(iso) {
+    if (!iso) return null;
+    return Math.floor((Date.now() - new Date(iso + 'T00:00:00').getTime()) / 86400000);
+}
 
 // Matches RARITY_MAP's value order in pricing_ga.py, so the rarity filter
 // lists options from most common to rarest instead of alphabetically.
@@ -98,51 +134,33 @@ function syncAdminUrl() {
     }
 }
 
-async function switchAdminSection(section) {
-    const page = document.getElementById('admin-page');
-    if (!page || adminActiveSection === section) return;
+// Sub-nav clicks (System / Cards / Users) re-fetch the whole admin fragment
+// and re-run initAdmin() against a brand-new DOM, rather than an in-place
+// panel swap. System settings like Local Database change which Pricing-page
+// controls even render (the Refresh Sales/Listings group, the 🔍 product-ID
+// finder) and how wide the list columns are — and the measurement-based
+// layout here (pill indicators, the list's grid tracks) doesn't reliably
+// re-settle when those appear/disappear behind a still-hidden panel, so
+// switching sections used to carry stale positions that only a refresh fixed.
+//
+// This routes through app.js's navigate() rather than window.location so the
+// page's own fade (fadeSwap on #content) plays and nothing else on the shell
+// (nav bar, auth, stylesheets) reloads — a soft refresh of just this page, no
+// white flash. navigate() pushes the new path; initAdmin() reads the section
+// back off it.
+function switchAdminSection(section) {
+    if (adminActiveSection === section) return;
 
-    const content = page.querySelector('.admin-content');
-    content?.classList.add('fade-out');
-    await sleep(150);
-
-    adminActiveSection = section;
-    syncAdminUrl();
-
-    page.querySelectorAll('.admin-subnav-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.section === section);
-    });
-
-    page.querySelectorAll('.admin-section').forEach(panel => {
-        panel.classList.toggle('hidden', panel.id !== `admin-section-${section}`);
-    });
-
-    if (section === 'pricing' && !adminPidLoaded) {
-        loadAdminPricingIds();
-    }
-
-    if (section === 'users' && !adminUsersLoaded) {
-        loadAdminUsers();
-    }
-
-    if (section === 'system' && !adminSystemLoaded) {
-        loadAdminSystemSettings();
-    }
-
-    if (section === 'pricing') {
-        // Just became visible (or already was) — reposition without sliding from a
-        // stale/never-measured spot.
-        positionPillIndicator(document.querySelector('.admin-cards-subnav'));
-        positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
-    }
-
+    let path;
     if (section === 'system') {
-        document.querySelectorAll('.admin-system-option-toggle').forEach(positionPillIndicator);
+        path = '/admin/system';
+    } else if (section === 'users') {
+        path = '/admin/users';
+    } else {
+        path = `/admin/cards/${adminCardsView}`;
     }
 
-    content?.classList.remove('fade-out');
-    content?.classList.add('fade-in');
-    setTimeout(() => content?.classList.remove('fade-in'), 200);
+    navigate(path);
 }
 
 // Switches between the Cards section's own sub-views (Info / Pricing) — a
@@ -196,7 +214,8 @@ async function switchAdminCardsView(view) {
         adminPidAddEntryOpenType = null;
         adminPidAddEntryFoilId = null;
         adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
-        adminPidBulkPasteOpen = false;
+        adminPidImportOpenType = null;
+        adminPidExportOpenType = null;
         adminPidSelected = new Set();
 
         // Set ahead of both render calls below (rather than inside
@@ -2019,31 +2038,6 @@ async function pollAdminSetSearchJob(jobId, slug) {
     }
 }
 
-// Renders one Import-from-JSON button + popover for the row list header
-// (see renderAdminPidHeader) — idPrefix must be unique per instance and is
-// what ties the button/menu/textarea/status/submit-button together (see
-// toggleAdminPidImportPopover/submitAdminPidImport, which read/write these
-// same ids). submitFnName is the (unquoted) name of the onclick handler to
-// call on Import, e.g. 'submitAdminPidImportIds'.
-function adminPidImportPopoverHtml(idPrefix, title, hint, placeholder, submitFnName) {
-    return `
-        <div class="admin-pid-import-wrap">
-            <button type="button" class="admin-pid-import-btn" id="${idPrefix}-btn"
-                    onclick="event.stopPropagation(); toggleAdminPidImportPopover('${idPrefix}')" title="${escapeHtml(title)}">📥</button>
-            <div class="admin-pid-add-entry-menu admin-pid-import-menu hidden" id="${idPrefix}-menu" onclick="event.stopPropagation()">
-                <span class="admin-pid-import-hint">${escapeHtml(hint)}</span>
-                <textarea class="admin-pid-import-textarea scroll-none" id="${idPrefix}-textarea"
-                          placeholder='${placeholder}'></textarea>
-                <div class="admin-pid-import-actions">
-                    <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
-                            id="${idPrefix}-submit-btn" onclick="${submitFnName}()">Import</button>
-                    <span class="admin-pid-import-status" id="${idPrefix}-status"></span>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
 // Rebuilds just the header row (including the Set filter dropdown), without
 // touching the data rows below it — opening/closing the dropdown doesn't
 // change which rows are visible, so re-rendering all of them on every click
@@ -2079,23 +2073,6 @@ function renderAdminPidHeader() {
     const selectAllChecked = prevSelectAll ? prevSelectAll.checked : false;
     const selectAllIndeterminate = prevSelectAll ? prevSelectAll.indeterminate : false;
 
-    // Same idea for the three Import popovers (Product IDs, Sales,
-    // Listings) — an admin mid-paste shouldn't lose that text (or have the
-    // popover silently snap shut) just because something else (e.g. a
-    // background refresh job finishing) happened to trigger a header
-    // rebuild.
-    const importPopoverState = ['admin-pid-import-ids', 'admin-pid-import-sales', 'admin-pid-import-listings'].map(prefix => {
-        const menu = document.getElementById(`${prefix}-menu`);
-        const status = document.getElementById(`${prefix}-status`);
-        return {
-            prefix,
-            open: menu ? !menu.classList.contains('hidden') : false,
-            textareaValue: document.getElementById(`${prefix}-textarea`)?.value || '',
-            statusHtml: status ? status.innerHTML : '',
-            statusClass: status ? status.className : '',
-        };
-    });
-
     header.innerHTML = infoMode ? `
         <div class="admin-pid-row admin-pid-row-header admin-pid-row-info">
             <span class="admin-pid-col-name">CARD</span>
@@ -2113,25 +2090,10 @@ function renderAdminPidHeader() {
             <span class="admin-pid-col-status">
                 <input type="checkbox" class="admin-pid-curio-select-all" id="admin-pid-curio-select-all"
                        title="Toggle Curio Foil view for every visible card" onchange="toggleAllAdminPidCurioView(this)">
-                Product ID
-                ${adminPidImportPopoverHtml('admin-pid-import-ids', 'Import Product IDs from JSON',
-                    'Paste ID_TCGPLAYER.json-formatted JSON — only fills in missing product IDs, never overwrites existing ones.',
-                    '{"edition_id": {"product_id": "123456"}}', 'submitAdminPidImportIds')}
+                <span class="admin-pid-col-status-label">Product ID</span>
             </span>
-            <span class="admin-pid-col-sales">
-                Sales
-                ${adminPidImportPopoverHtml('admin-pid-import-sales', 'Import Sales from JSON',
-                    'Paste SALES.json-formatted JSON — only adds entries not already stored, so re-importing never creates duplicates.',
-                    '{"card_id": {"edition_id": {"foil_id": [{"date": "...", "marketplace": "...", "price": 0, "quantity": 1, "condition": "..."}]}}}',
-                    'submitAdminPidImportSales')}
-            </span>
-            <span class="admin-pid-col-listings">
-                Listings
-                ${adminPidImportPopoverHtml('admin-pid-import-listings', 'Import Listings from JSON',
-                    'Paste LISTINGS.json-formatted JSON — only adds entries not already stored, so re-importing never creates duplicates.',
-                    '{"card_id": {"edition_id": {"foil_id": [{"date": "...", "marketplace": "...", "price": 0, "quantity": 1, "condition": "..."}]}}}',
-                    'submitAdminPidImportListings')}
-            </span>
+            <span class="admin-pid-col-sales">Sales</span>
+            <span class="admin-pid-col-listings">Listings</span>
         </div>
     `;
 
@@ -2146,21 +2108,6 @@ function renderAdminPidHeader() {
         newSelectAll.checked = selectAllChecked;
         newSelectAll.indeterminate = selectAllIndeterminate;
     }
-
-    importPopoverState.forEach(({prefix, open, textareaValue, statusHtml, statusClass}) => {
-        const menu = document.getElementById(`${prefix}-menu`);
-        if (menu) {
-            menu.classList.toggle('hidden', !open);
-            document.getElementById(`${prefix}-btn`)?.classList.toggle('open', open);
-        }
-        const textarea = document.getElementById(`${prefix}-textarea`);
-        if (textarea) textarea.value = textareaValue;
-        const status = document.getElementById(`${prefix}-status`);
-        if (status) {
-            status.innerHTML = statusHtml;
-            status.className = statusClass;
-        }
-    });
 
     updateAdminPidCurioSelectAllState();
 }
@@ -2689,15 +2636,15 @@ function adminPidLastUpdatedFieldMarkup(e, field) {
         return `<span class="admin-pid-updated-done">${escapeHtml(status.message)}</span>`;
     }
 
-    // The Curio Foil's own product page is scraped independently from the
-    // edition's regular one (see pricing_ga.py's merge-based scrape
-    // orchestration), so it has its own separate last-scraped clock too —
-    // show that day count instead of the edition's when toggled on.
+    // The Curio Foil's own product page has its own separate per-marketplace
+    // clocks — show those instead of the edition's when toggled on. The day
+    // count is for whichever marketplace the scope pill is on (see
+    // adminPidActiveClock / switchAdminPidMarketplace, which re-renders these).
     const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
-    const days = curioView
-        ? (field === 'sales' ? e.curio.sales_days_since : e.curio.listings_days_since)
-        : (field === 'sales' ? e.sales_days_since : e.listings_days_since);
-    const title = `${field === 'sales' ? 'Sales' : 'Listings'}: ${adminPidDaysSinceLabel(days, true)}`;
+    const clocks = (curioView ? e.curio.clocks : e.clocks) || {};
+    const days = adminPidDaysSince(adminPidActiveClock(clocks[field]));
+    const mktLabel = adminPidMarketplaceConfig().label;
+    const title = `${mktLabel} ${field === 'sales' ? 'Sales' : 'Listings'}: ${adminPidDaysSinceLabel(days, true)}`;
 
     return `<span class="admin-pid-updated-idle" title="${escapeHtml(title)}">`
         + `${escapeHtml(adminPidDaysSinceLabel(days))}</span>`;
@@ -2757,16 +2704,20 @@ function updateAdminPidRefreshButton() {
     const bothBtn = document.getElementById('admin-pid-refresh-btn-both');
     if (!salesBtn || !listingsBtn || !bothBtn) return;
 
-    // The live TCGPlayer refresh controls drive a headless Chromium scraper
-    // hosted boxes like Railway can't run — shown only when this instance is
-    // local (Local DB on), independent of the storage mode. Hide the whole
-    // group (and keep it inert) otherwise.
-    const refreshAvailable = adminLocalDbOn;
+    // The live refresh controls drive a headless Chromium scraper hosted boxes
+    // like Railway can't run — shown only when this instance is local (Local DB
+    // on), independent of storage mode. The marketplace scope pill narrows it
+    // further: "Manual" isn't a marketplace at all so the group collapses
+    // away (mp.icon is null), and a marketplace with no scraper yet (CoreTCG)
+    // keeps the group visible but every button disabled. Collapse/reveal is a
+    // fade+wipe (see .admin-pid-collapsed in admin.css).
+    const mp = adminPidMarketplaceConfig();
+    const groupShown = adminLocalDbOn && !!mp.icon;
     const group = salesBtn.closest('.admin-pid-refresh-group');
-    if (group) group.classList.toggle('hidden', !refreshAvailable);
+    if (group) group.classList.toggle('admin-pid-collapsed', !groupShown);
 
     const targets = getAdminPidRefreshTargets();
-    const disabled = !refreshAvailable || targets.length === 0 || adminPidRefreshing;
+    const disabled = !groupShown || !mp.automated || targets.length === 0 || adminPidRefreshing;
     salesBtn.disabled = disabled;
     listingsBtn.disabled = disabled;
     bothBtn.disabled = disabled;
@@ -2776,147 +2727,36 @@ function updateAdminPidRefreshButton() {
         : 'Refresh Selected';
 }
 
-function updateAdminPidTcgButton() {
-    const btn = document.getElementById('admin-pid-tcg-btn');
-    if (btn) btn.disabled = !adminPidDetailSelected;
-}
+// The Link button (opens the selected card on the active marketplace). Its
+// image tracks the marketplace scope pill; "Manual" has no marketplace to link
+// out to so the button is hidden, and a not-yet-linkable marketplace (CoreTCG)
+// shows its icon but stays disabled.
+function updateAdminPidLinkButton() {
+    const btn = document.getElementById('admin-pid-link-btn');
+    if (!btn) return;
 
-// Import [Product IDs/Sales/Listings] buttons — each lives in the row
-// list's own header, right above the column it bulk-fills (Product ID,
-// Sales, Listings respectively — see renderAdminPidHeader and
-// adminPidImportPopoverHtml). idPrefix identifies which one, matching the
-// `${idPrefix}-btn`/`-menu`/`-textarea`/`-status`/`-submit-btn` ids
-// adminPidImportPopoverHtml() renders.
-function toggleAdminPidImportPopover(idPrefix) {
-    const btn = document.getElementById(`${idPrefix}-btn`);
-    const menu = document.getElementById(`${idPrefix}-menu`);
-    if (!btn || !menu) return;
+    const mp = adminPidMarketplaceConfig();
+    // Fade+wipe out when there's no marketplace to link to (Manual) — see
+    // .admin-pid-collapsed in admin.css.
+    btn.classList.toggle('admin-pid-collapsed', !mp.icon);
+    btn.disabled = !mp.linkable || !adminPidDetailSelected;
+    btn.title = mp.linkable ? mp.label : `${mp.label} — coming soon`;
 
-    const opening = menu.classList.contains('hidden');
-    menu.classList.toggle('hidden', !opening);
-    btn.classList.toggle('open', opening);
-}
-
-// Closes every OTHER open import popover than the one e.target is inside —
-// called from the page's global outside-click handler. Structural
-// (.admin-pid-import-wrap/-menu/-btn) rather than a fixed list of id
-// prefixes, so a future 4th import button doesn't need this touched too.
-function closeAdminPidImportPopoversOutside(target) {
-    document.querySelectorAll('.admin-pid-import-wrap').forEach(wrap => {
-        if (wrap.contains(target)) return;
-
-        const menu = wrap.querySelector('.admin-pid-import-menu');
-        const btn = wrap.querySelector('.admin-pid-import-btn');
-        if (menu && !menu.classList.contains('hidden')) {
-            menu.classList.add('hidden');
-            btn?.classList.remove('open');
-        }
-    });
-}
-
-// Shared submit handler for all three import popovers — differ only in
-// which textarea/status/button to read and update, which endpoint to post
-// the parsed JSON to, how to phrase a success message from that endpoint's
-// response, and (optionally) what to refresh afterward.
-async function submitAdminPidImport(idPrefix, endpoint, buildMessage, afterSuccess) {
-    const textarea = document.getElementById(`${idPrefix}-textarea`);
-    const status = document.getElementById(`${idPrefix}-status`);
-    const btn = document.getElementById(`${idPrefix}-submit-btn`);
-    const text = textarea.value.trim();
-
-    if (!text) {
-        status.textContent = 'Paste some JSON first.';
-        status.className = 'admin-pid-import-status admin-pid-refresh-error';
-        return;
-    }
-
-    let parsed;
-    try {
-        parsed = JSON.parse(text);
-    } catch (err) {
-        status.textContent = 'Invalid JSON — check for a trailing comma or unclosed brace.';
-        status.className = 'admin-pid-import-status admin-pid-refresh-error';
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Importing…';
-    status.textContent = '';
-    status.className = 'admin-pid-import-status';
-
-    try {
-        const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({data: parsed}),
-        });
-        const data = await res.json();
-
-        btn.disabled = false;
-        btn.textContent = 'Import';
-
-        if (!res.ok) {
-            status.textContent = data.detail || 'Import failed.';
-            status.className = 'admin-pid-import-status admin-pid-refresh-error';
-            return;
-        }
-
-        status.textContent = buildMessage(data);
-        textarea.value = '';
-
-        if (afterSuccess) await afterSuccess();
-    } catch (err) {
-        btn.disabled = false;
-        btn.textContent = 'Import';
-        status.textContent = 'Import failed — check your connection and try again.';
-        status.className = 'admin-pid-import-status admin-pid-refresh-error';
+    const img = btn.querySelector('.admin-pid-link-icon');
+    if (img && mp.icon) {
+        img.src = mp.icon;
+        img.alt = mp.label;
     }
 }
 
-// Backfills ID_TCGPLAYER.json (see import_ids() in api_tcgplayer.py for the
-// merge rules: only fills in missing product IDs, never overwrites an
-// existing one, never imports last_sales/last_listings). Reloads the whole
-// product-ID list afterward so newly-imported IDs (and their effect on the
-// summary line, day-count badges, etc.) show up immediately.
-function submitAdminPidImportIds() {
-    return submitAdminPidImport('admin-pid-import-ids', '/api/admin/pricing/import-ids', data => {
-        const parts = [`Added ${data.added_main} product ID(s)`];
-        if (data.added_foil) parts.push(`${data.added_foil} Curio Foil override(s)`);
-        return parts.join(', ') + '.';
-    }, loadAdminPricingIds);
-}
-
-// Backfills SALES.json/LISTINGS.json (see import_sales()/import_listings()
-// in pricing_ga.py: an entry is added only if no exact match — same date,
-// marketplace, price, quantity, condition — already exists for that
-// card/edition/foil, so re-importing the same export twice is a no-op but
-// two genuinely distinct sales/listings sharing a date both come through).
-// Refreshes the open card's own Sales/Listings tables afterward, if one's
-// open — nothing else on this list changes from a sales/listings import.
-// data.skipped_unknown_foil is DB-mode only — entries whose edition/foil
-// isn't in the catalog (price rows FK to it, so they can't be inserted blind
-// the way a JSON bucket can be).
-function adminPidImportSkippedSuffix(data) {
-    return data.skipped_unknown_foil
-        ? ` (${data.skipped_unknown_foil} skipped — unknown edition/foil)`
-        : '';
-}
-
-function submitAdminPidImportSales() {
-    return submitAdminPidImport('admin-pid-import-sales', '/api/admin/pricing/import-sales',
-        data => `Added ${data.added} sale(s)${adminPidImportSkippedSuffix(data)}.`,
-        () => adminPidDetailSelected ? loadAdminPricingDetailHistory() : null);
-}
-
-function submitAdminPidImportListings() {
-    return submitAdminPidImport('admin-pid-import-listings', '/api/admin/pricing/import-listings',
-        data => `Added ${data.added} listing(s)${adminPidImportSkippedSuffix(data)}.`,
-        () => adminPidDetailSelected ? loadAdminPricingDetailHistory() : null);
-}
-
-function openAdminPidTcgPlayer() {
+function openAdminPidLink() {
     const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
     if (!record) return;
+
+    // Non-linkable marketplaces (CoreTCG for now) render the button disabled —
+    // this guard is the belt-and-braces match for that. CoreTCG's product URLs
+    // come with the rest of that marketplace's integration in a later step.
+    if (!adminPidMarketplaceConfig().linkable) return;
 
     // When toggled to the Curio Foil view, open its own separate TCGPlayer
     // product page instead of the edition's regular one.
@@ -2992,13 +2832,11 @@ async function saveAdminProductId(input) {
     }
 }
 
-// Resets the open card's Last Sales/Last Listings clock back to never-scraped
-// — mainly useful for forcing past the 7-day listings-refresh gate
-// (_listings_gate_result) without waiting it out, or just correcting a badge
-// that shouldn't have been marked updated. Clears whichever clock the detail
-// panel is actually showing right now — the Curio Foil's own separate one if
-// toggled on, the edition's main one otherwise (same product the Last
-// Sales/Listings badge and the field below it already reflect).
+// Resets one clock — the SELECTED marketplace's Last Sales/Last Listings —
+// back to never-scraped. Mainly for forcing past the 7-day listings-refresh
+// gate (TCGPlayer only) or correcting a badge. Clears whichever clock the
+// detail panel is showing: the Curio Foil's own separate one if toggled on,
+// the edition's main one otherwise.
 async function clearAdminPidLastUpdated(field) {
     const editionId = adminPidDetailSelected;
     if (!editionId) return;
@@ -3008,26 +2846,27 @@ async function clearAdminPidLastUpdated(field) {
 
     const curioView = record.curio && adminPidCurioViewSelected.has(editionId);
     const foilId = curioView ? record.curio.foil_id : undefined;
+    const marketplace = adminPidMarketplaceConfig().marketplace;
 
     try {
         const res = await fetch('/api/admin/pricing/clear-last-updated', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({edition_id: editionId, field, foil_id: foilId}),
+            body: JSON.stringify({edition_id: editionId, field, foil_id: foilId, marketplace}),
         });
         if (!res.ok) return;
 
-        const daysSinceKey = field === 'sales' ? 'sales_days_since' : 'listings_days_since';
-        (curioView ? record.curio : record)[daysSinceKey] = null;
+        // Drop just this marketplace's key from the local row clocks.
+        const clocks = (curioView ? record.curio : record).clocks;
+        if (clocks?.[field]) delete clocks[field][marketplace];
 
         const row = document.querySelector(`#admin-pid-table .admin-pid-row[data-edition-id="${CSS.escape(editionId)}"]`);
         const cell = row?.querySelector(field === 'sales' ? '.admin-pid-col-sales' : '.admin-pid-col-listings');
         if (cell) cell.innerHTML = adminPidLastUpdatedFieldMarkup(record, field);
 
-        // Re-fetches last_sales/last_listings (and curio_last_sales/listings)
-        // fresh from the backend rather than hand-patching adminPidDetailHistory
-        // locally — already re-renders the image column + detail panel on
-        // completion, so the badge and its now-disabled clear button update too.
+        // Re-fetches the per-marketplace maps fresh — re-renders the image
+        // column + detail panel, so the stat and its now-disabled clear button
+        // update too.
         await loadAdminPricingDetailHistory();
     } catch (err) {
         // No local state changed yet if the request itself failed — safe to
@@ -3097,9 +2936,10 @@ async function findAdminProductId(editionId) {
 }
 
 async function refreshSelectedAdminPricing(target) {
-    // The Refresh buttons are hidden and disabled unless Local DB is on (see
+    // The Refresh buttons are hidden/disabled unless Local DB is on and the
+    // marketplace pill is on one with scraper automation (see
     // updateAdminPidRefreshButton) — never start the scrape otherwise.
-    if (!adminLocalDbOn) return;
+    if (!adminLocalDbOn || !adminPidMarketplaceConfig().automated) return;
 
     const requestedIds = getAdminPidRefreshTargets();
     if (adminPidRefreshing || requestedIds.length === 0) return;
@@ -3213,8 +3053,9 @@ async function refreshSelectedAdminPricing(target) {
                         // one's day counts, not both.
                         const target = scopedFoilScopes[editionId] === 'main' ? record : record.curio;
                         if (target) {
-                            if (result.sales?.ok) target.sales_days_since = 0;
-                            if (result.listings?.ok && !result.listings.gated) target.listings_days_since = 0;
+                            // A scrape is always TCGPlayer — stamp that marketplace's clock.
+                            if (result.sales?.ok) adminPidSetClockKey(target, 'sales', 'TCGPlayer');
+                            if (result.listings?.ok && !result.listings.gated) adminPidSetClockKey(target, 'listings', 'TCGPlayer');
                         }
                     }
 
@@ -3299,11 +3140,12 @@ async function selectAdminPricingDetail(editionId) {
         adminPidAddEntryOpenType = null;
         adminPidAddEntryFoilId = null;
         adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
-        adminPidBulkPasteOpen = false;
+        adminPidImportOpenType = null;
+        adminPidExportOpenType = null;
 
         setAdminPricingActiveRow(editionId);
         renderAdminPricingDetailAll();
-        updateAdminPidTcgButton();
+        updateAdminPidLinkButton();
         // getAdminPidRefreshTargets() falls back to the open detail card when no
         // row checkboxes are checked — without this, selecting a card that way
         // left Refresh Sales/Listings/Selected stuck in whatever disabled state
@@ -3380,7 +3222,8 @@ async function loadAdminPricingDetailHistory() {
         adminPidDetailHistory = data;
     } catch (err) {
         if (adminPidDetailSelected !== editionId) return;
-        adminPidDetailHistory = {sales: [], listings: [], last_sales: null, last_listings: null};
+        adminPidDetailHistory = {sales: [], listings: [], last_sales: {}, last_listings: {},
+            curio_last_sales: {}, curio_last_listings: {}};
     }
 
     renderAdminPricingDetailAll();
@@ -3389,6 +3232,57 @@ async function loadAdminPricingDetailHistory() {
 function renderAdminPricingDetailAll() {
     renderAdminPricingImageCol();
     renderAdminPricingDetail();
+}
+
+// The Card Info panel's "Last Sales" / "Last Listings" block (pricing mode) —
+// per-marketplace clocks shown for the selected scope pill, each with an ❌
+// clear button. Pulled out so switchAdminPidMarketplace can swap just this in
+// place (marketplace-dependent) without re-rendering the whole panel — see
+// syncAdminPricingImageColForMarketplace. The Curio Foil has its own separate
+// clocks (toggled view); a curio_only card's edition-level maps already hold
+// the foil's clocks server-side.
+function adminPidScrapeStatsHtml(record) {
+    const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
+    const historyLoaded = !!adminPidDetailHistory;
+    const salesMap = curioView ? adminPidDetailHistory?.curio_last_sales : adminPidDetailHistory?.last_sales;
+    const listingsMap = curioView ? adminPidDetailHistory?.curio_last_listings : adminPidDetailHistory?.last_listings;
+    const lastSales = historyLoaded ? (adminPidActiveClock(salesMap) || 'Never') : '…';
+    const lastListings = historyLoaded ? (adminPidActiveClock(listingsMap) || 'Never') : '…';
+
+    return `
+        <div class="drawer-stats admin-pid-scrape-stats">
+            <div class="drawer-stat">
+                <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Sales date"
+                        ${lastSales === 'Never' ? 'disabled' : ''}
+                        onclick="clearAdminPidLastUpdated('sales')">❌</button>
+                <span class="drawer-stat-label label label--muted label--sm">Last Sales</span>
+                <span class="drawer-stat-value">${escapeHtml(lastSales)}</span>
+            </div>
+            <div class="drawer-stat">
+                <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Listings date"
+                        ${lastListings === 'Never' ? 'disabled' : ''}
+                        onclick="clearAdminPidLastUpdated('listings')">❌</button>
+                <span class="drawer-stat-label label label--muted label--sm">Last Listings</span>
+                <span class="drawer-stat-value">${escapeHtml(lastListings)}</span>
+            </div>
+        </div>
+    `;
+}
+
+// Marketplace-pill change: swap the scrape-stats block in place and animate the
+// Product ID row's wipe, without the flicker of a full renderAdminPricingImageCol()
+// (which would also reload the card image). No-op outside pricing mode / with
+// no card selected.
+function syncAdminPricingImageColForMarketplace() {
+    if (adminCardsView === 'info' || !adminPidDetailSelected) return;
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    if (!record) return;
+
+    const statsEl = document.querySelector('#admin-pricing-image-col .admin-pid-scrape-stats');
+    if (statsEl) statsEl.outerHTML = adminPidScrapeStatsHtml(record);
+
+    const pidRow = document.querySelector('#admin-pricing-image-col .admin-pid-detail-pid-row');
+    pidRow?.classList.toggle('admin-pid-detail-pid-row-collapsed', !adminPidMarketplaceConfig().automated);
 }
 
 function renderAdminPricingImageCol() {
@@ -3432,40 +3326,14 @@ function renderAdminPricingImageCol() {
         `;
         pidRowHtml = '';
     } else {
-        // The Curio Foil's own product page is scraped/refreshed
-        // independently from the edition's regular one (see pricing_ga.py's
-        // merge-based scrape orchestration), so it has its own separate
-        // last-scraped clocks too — show those instead of the edition's when
-        // toggled to Curio Foil view.
         const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
-        const historyLoaded = !!adminPidDetailHistory;
-        const lastSales = historyLoaded
-            ? ((curioView ? adminPidDetailHistory.curio_last_sales : adminPidDetailHistory.last_sales) || 'Never')
-            : '…';
-        const lastListings = historyLoaded
-            ? ((curioView ? adminPidDetailHistory.curio_last_listings : adminPidDetailHistory.last_listings) || 'Never')
-            : '…';
-
-        statsHtml = `
-            <div class="drawer-stats admin-pid-scrape-stats">
-                <div class="drawer-stat">
-                    <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Sales date"
-                            ${lastSales === 'Never' ? 'disabled' : ''}
-                            onclick="clearAdminPidLastUpdated('sales')">❌</button>
-                    <span class="drawer-stat-label label label--muted label--sm">Last Sales</span>
-                    <span class="drawer-stat-value">${escapeHtml(lastSales)}</span>
-                </div>
-                <div class="drawer-stat">
-                    <button type="button" class="admin-pid-clear-last-btn" title="Clear Last Listings date"
-                            ${lastListings === 'Never' ? 'disabled' : ''}
-                            onclick="clearAdminPidLastUpdated('listings')">❌</button>
-                    <span class="drawer-stat-label label label--muted label--sm">Last Listings</span>
-                    <span class="drawer-stat-value">${escapeHtml(lastListings)}</span>
-                </div>
-            </div>
-        `;
+        statsHtml = adminPidScrapeStatsHtml(record);
+        // Product ID is a TCGPlayer concept — collapse the whole row (label +
+        // field + ✨ toggle) on the other marketplaces. The class drives a CSS
+        // wipe; switchAdminPidMarketplace toggles it on the live element so the
+        // change animates, and it's applied here too for a correct first paint.
         pidRowHtml = `
-            <div class="admin-pid-detail-pid-row">
+            <div class="admin-pid-detail-pid-row${adminPidMarketplaceConfig().automated ? '' : ' admin-pid-detail-pid-row-collapsed'}">
                 <label class="admin-pid-detail-label label label--muted">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
                 ${adminPidProductIdFieldHtml(record)}
             </div>
@@ -3532,9 +3400,16 @@ function renderAdminPricingDetail() {
     const curioView = !!curioFoilId && adminPidCurioViewSelected.has(record.edition_id);
     const filterByCurio = rows => !curioFoilId ? rows : rows.filter(r => curioView ? r.foil_id === curioFoilId : r.foil_id !== curioFoilId);
 
+    // The Sales/Listings tables show only the marketplace the scope pill is on.
+    // Compared case-insensitively, and a missing marketplace counts as "Manual"
+    // (what the backend defaults a blank one to on write).
+    const selectedMarketplace = adminPidMarketplaceConfig().marketplace.toLowerCase();
+    const filterByMarketplace = rows => rows.filter(r => (r.marketplace || 'Manual').toLowerCase() === selectedMarketplace);
+    const filterRows = rows => filterByMarketplace(filterByCurio(rows));
+
     const historyLoaded = !!adminPidDetailHistory;
-    const salesRows = historyLoaded ? filterByCurio(adminPidDetailHistory.sales) : [];
-    const listingsRows = historyLoaded ? filterByCurio(adminPidDetailHistory.listings) : [];
+    const salesRows = historyLoaded ? filterRows(adminPidDetailHistory.sales) : [];
+    const listingsRows = historyLoaded ? filterRows(adminPidDetailHistory.listings) : [];
     // A curio_only card (no toggle at all — see e.curio_only's comment)
     // still has all of its history belonging to that one Curio Foil, so the
     // suffix shows unconditionally for it, same as toggled-on curio view.
@@ -3545,7 +3420,8 @@ function renderAdminPricingDetail() {
             <div class="admin-pid-detail-section-header">
                 <span class="admin-pid-detail-section-title">Sales${curioTitleSuffix}</span>
                 <div class="admin-pid-section-actions">
-                    ${adminPidBulkPasteTriggerHtml()}
+                    ${adminPidImportTriggerHtml('sales')}
+                    ${adminPidExportTriggerHtml('sales', salesRows)}
                     ${adminPidAddEntryTriggerHtml('sales')}
                 </div>
             </div>
@@ -3554,27 +3430,47 @@ function renderAdminPricingDetail() {
         <div class="admin-pid-detail-section" id="admin-pid-section-listings">
             <div class="admin-pid-detail-section-header">
                 <span class="admin-pid-detail-section-title">Listings${curioTitleSuffix}</span>
-                ${adminPidAddEntryTriggerHtml('listings')}
+                <div class="admin-pid-section-actions">
+                    ${adminPidImportTriggerHtml('listings')}
+                    ${adminPidExportTriggerHtml('listings', listingsRows)}
+                    ${adminPidAddEntryTriggerHtml('listings')}
+                </div>
             </div>
             ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded, 'listings')}
         </div>
     `;
 
-    // Lifts each ancestor's own overflow clipping while its popup (bulk-paste or
-    // add-entry) is open so the dropdown isn't cut off, without needing any
+    // Lifts each ancestor's own overflow clipping while a section-action popup
+    // (import / export / add-entry) is open so it isn't cut off, without any
     // JS-computed positioning — the popup itself stays on plain CSS positioning
     // (see .admin-pid-add-entry-menu), since this page's global `zoom` scale
     // doesn't compose correctly with manually-set position values. Three levels
     // need lifting: the section, the detail panel, and .admin-pricing-layout
     // (the list/image/detail column row) — a popup nested deep enough (e.g. the
     // marketplace dropdown inside the add-entry popup) reaches past all three.
-    const salesPopoverOpen = adminPidBulkPasteOpen || adminPidAddEntryOpenType === 'sales';
-    const listingsPopoverOpen = adminPidAddEntryOpenType === 'listings';
+    const salesPopoverOpen = adminPidImportOpenType === 'sales' || adminPidAddEntryOpenType === 'sales' || adminPidExportOpenType === 'sales';
+    const listingsPopoverOpen = adminPidImportOpenType === 'listings' || adminPidAddEntryOpenType === 'listings' || adminPidExportOpenType === 'listings';
     const anyPopoverOpen = salesPopoverOpen || listingsPopoverOpen;
     panel.classList.toggle('admin-pid-popover-open', anyPopoverOpen);
     panel.closest('.admin-pricing-layout')?.classList.toggle('admin-pid-popover-open', anyPopoverOpen);
     document.getElementById('admin-pid-section-sales')?.classList.toggle('admin-pid-popover-open', salesPopoverOpen);
     document.getElementById('admin-pid-section-listings')?.classList.toggle('admin-pid-popover-open', listingsPopoverOpen);
+
+    // A section-action popover (import / export / add-entry) opens downward
+    // by default; flip it upward if that would run it past the viewport bottom
+    // (the Listings section sits low enough for the tall export popover to
+    // clip). Class toggle only — no JS-set coordinates, which don't compose
+    // with the page's `zoom` (see the overflow-lift comment above).
+    const openMenu = panel.querySelector('.admin-pid-detail-section-header .admin-pid-add-entry-menu');
+    if (openMenu) {
+        openMenu.classList.remove('admin-pid-menu-flip-up');
+        if (openMenu.getBoundingClientRect().bottom > window.innerHeight - 12) {
+            openMenu.classList.add('admin-pid-menu-flip-up');
+        }
+    }
+
+    // Seat the import popover's paste/GAL segmented-control highlight on first paint.
+    positionPillIndicator(document.getElementById('admin-pid-import-mode-toggle'));
 }
 
 // Info mode's third panel (renderAdminPricingDetail's own track, next to the
@@ -3719,6 +3615,104 @@ function switchAdminPidDetailMode(mode) {
     renderAdminPricingDetail();
 }
 
+// Marketplace scope pill (TCGPlayer / CoreTCG / Manual) above the card list.
+// Drives the Link button (its icon; hidden on Manual, disabled on CoreTCG),
+// the Refresh Sales/Listings group (hidden on Manual, disabled on CoreTCG),
+// the list's Product ID column collapse (only TCGPlayer has scraper
+// automation), the marketplace stamped on new Sales/Listings entries, and
+// which marketplace's Sales/Listings the detail panel shows (see
+// renderAdminPricingDetail).
+async function switchAdminPidMarketplace(marketplace) {
+    if (adminPidMarketplace === marketplace) return;
+    adminPidMarketplace = marketplace;
+
+    document.querySelectorAll('#admin-pid-marketplace-toggle .admin-pid-marketplace-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.marketplace === marketplace);
+    });
+    positionPillIndicator(document.getElementById('admin-pid-marketplace-toggle'));
+    updateAdminPidLinkButton();
+    updateAdminPidRefreshButton();
+    updateAdminPidProductIdVisibility({animate: true});
+
+    // The Last Sales / Last Listings clocks are per-marketplace, so the list's
+    // Sales/Listings day-count badges change with the pill — repaint the
+    // on-screen ones (each cell is a cheap innerHTML swap, same as the
+    // curio-toggle row patch). Off-screen rows re-render when scrolled/filtered.
+    refreshVisibleAdminPidClockBadges();
+    // Card Info panel: swap the "Last Sales"/"Last Listings" stat in place and
+    // wipe the Product ID row open/closed (TCGPlayer-only).
+    syncAdminPricingImageColForMarketplace();
+
+    // Fade the Sales/Listings panel across the marketplace swap — same panel,
+    // same kind of content swap as the Curio Foil toggle, so it reuses that
+    // fade (curio-fade-out/in). Nothing to fade with no card selected.
+    const detail = document.getElementById('admin-pricing-detail');
+    if (adminPidDetailSelected && detail) {
+        await fadeSwap(detail, () => renderAdminPricingDetail(), {
+            outClass: 'curio-fade-out',
+            inClass: 'curio-fade-in',
+            outMs: 300,
+            inMs: 350,
+        });
+    } else {
+        renderAdminPricingDetail();
+    }
+}
+
+// Repaints just the Sales/Listings day-count cells of the currently-mounted
+// rows — used when the marketplace pill changes (the clocks are per-marketplace)
+// without a full renderAdminPidRows(), which would rebuild every row.
+function refreshVisibleAdminPidClockBadges() {
+    document.querySelectorAll('#admin-pid-table .admin-pid-row').forEach(row => {
+        const record = adminPidData.find(e => e.edition_id === row.dataset.editionId);
+        if (!record) return;
+        const salesCell = row.querySelector('.admin-pid-col-sales');
+        if (salesCell) salesCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'sales');
+        const listingsCell = row.querySelector('.admin-pid-col-listings');
+        if (listingsCell) listingsCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'listings');
+    });
+}
+
+// Only marketplaces with product-ID/scraper automation (TCGPlayer for now)
+// need the list's Product ID column — for the rest it collapses to just its
+// curio-foil ✨ toggles (the input, auto-detect button and header label all
+// hide). What's hidden and the collapsed track width are CSS (.admin-pid-hide-pid
+// in admin.css); the :not(.admin-cards-mode-info) guard there keeps Info mode's
+// own reduced layout untouched.
+//
+// animate:true eases the grid-template-columns change (rather than snapping)
+// through animateGridColumnsGroup (animation.js) — the header row and every
+// data row is its own grid, so they're resized together on one clock. Only the
+// on-screen rows are handed to it; animating grid tracks across the whole list
+// (hundreds of rows) janks, and off-screen rows are snapped by the CSS rule
+// before they can be scrolled into view anyway.
+function updateAdminPidProductIdVisibility({animate = false} = {}) {
+    const section = document.getElementById('admin-section-pricing');
+    if (!section) return;
+
+    const collapsed = !adminPidMarketplaceConfig().automated;
+    if (section.classList.contains('admin-pid-hide-pid') === collapsed) return;
+
+    const mutate = () => section.classList.toggle('admin-pid-hide-pid', collapsed);
+
+    if (!animate || adminCardsView === 'info') {
+        mutate();
+        return;
+    }
+
+    const scroll = section.querySelector('.admin-pid-table-scroll');
+    const vb = scroll?.getBoundingClientRect();
+    const onScreenRows = vb
+        ? [...section.querySelectorAll('#admin-pid-table .admin-pid-row')].filter(row => {
+            const rb = row.getBoundingClientRect();
+            return rb.bottom > vb.top && rb.top < vb.bottom;
+        })
+        : [];
+
+    const headerRow = section.querySelector('#admin-pid-table-header .admin-pid-row-header');
+    animateGridColumnsGroup([headerRow, ...onScreenRows], mutate);
+}
+
 function adminPidAddEntryTriggerHtml(type) {
     const isOpen = adminPidAddEntryOpenType === type;
 
@@ -3732,7 +3726,10 @@ function adminPidAddEntryTriggerHtml(type) {
 
 function toggleAdminPidAddEntry(type) {
     adminPidAddEntryOpenType = adminPidAddEntryOpenType === type ? null : type;
-    if (adminPidAddEntryOpenType !== null) adminPidBulkPasteOpen = false;
+    if (adminPidAddEntryOpenType !== null) {
+        adminPidImportOpenType = null;
+        adminPidExportOpenType = null;
+    }
     renderAdminPricingDetail();
 }
 
@@ -3742,139 +3739,373 @@ function closeAdminPidAddEntry() {
     renderAdminPricingDetail();
 }
 
-function adminPidBulkPasteTriggerHtml() {
-    const isOpen = adminPidBulkPasteOpen;
-
+// ── Import (↓) — a GAL JSON doc for either section, plus, for Sales on the
+// TCGPlayer pill, a raw TCGPlayer sales-history-table paste (the ~5-row
+// scrape-cap workaround). When both modes apply, a compact paste/GAL pill sits
+// in the popover's action row next to the Import button.
+function adminPidImportTriggerHtml(type) {
+    const isOpen = adminPidImportOpenType === type;
+    const pasteAvailable = adminPidImportPasteAvailable(type);
     return `
-        <div class="admin-pid-add-entry-wrap admin-pid-bulk-paste-wrap">
-            <button class="admin-pid-add-entry-toggle ${isOpen ? 'open' : ''}" title="Paste bulk sales from TCGPlayer"
-                    onclick="toggleAdminPidBulkPaste()">&#9113;</button>
-            ${isOpen ? adminPidBulkPasteFormHtml() : ''}
+        <div class="admin-pid-add-entry-wrap admin-pid-import-wrap">
+            <button class="admin-pid-add-entry-toggle admin-pid-add-entry-toggle-io ${isOpen ? 'open' : ''}"
+                    title="Import ${type} (${pasteAvailable ? 'TCGPlayer paste or GAL JSON' : 'GAL JSON'})"
+                    onclick="toggleAdminPidImport('${type}')">&darr;</button>
+            ${isOpen ? adminPidImportFormHtml(type) : ''}
         </div>
     `;
 }
 
-function toggleAdminPidBulkPaste() {
-    adminPidBulkPasteOpen = !adminPidBulkPasteOpen;
-    if (adminPidBulkPasteOpen) adminPidAddEntryOpenType = null;
-    renderAdminPricingDetail();
-}
-
-function closeAdminPidBulkPaste() {
-    if (!adminPidBulkPasteOpen) return;
-    adminPidBulkPasteOpen = false;
-    renderAdminPricingDetail();
-}
-
-function adminPidBulkPasteFormHtml() {
-    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
-    const curioView = record?.curio && adminPidCurioViewSelected.has(adminPidDetailSelected);
-
+// The paste/GAL segmented control (shared .pill-toggle), sitting in the import
+// popover's action row. Kept in sync by setAdminPidImportMode() in place — never
+// a full re-render, which would re-run the popover's reveal animation and flash.
+function adminPidImportModeToggleHtml() {
+    const mode = adminPidImportMode;
     return `
-        <div class="admin-pid-add-entry-menu admin-pid-bulk-paste-menu">
-            <span class="admin-pid-bulk-paste-hint">
-                Highlight and copy the sales history table straight off TCGPlayer, then paste it here —
-                works around the ~5-row cap when scraping while logged out.
-                ${curioView ? ' Imports to the Curio Foil, not the regular product.' : ''}
+        <div class="admin-pid-import-mode-toggle pill-toggle" id="admin-pid-import-mode-toggle">
+            <span class="pill-indicator"></span>
+            <button type="button" class="admin-pid-import-mode-btn pill-toggle-btn ${mode === 'paste' ? 'active' : ''}"
+                    data-mode="paste" title="Paste a TCGPlayer sales-history table"
+                    onclick="setAdminPidImportMode('paste')">Paste</button>
+            <button type="button" class="admin-pid-import-mode-btn pill-toggle-btn ${mode === 'gal' ? 'active' : ''}"
+                    data-mode="gal" title="Paste a GAL JSON document"
+                    onclick="setAdminPidImportMode('gal')">GAL</button>
+        </div>
+    `;
+}
+
+function toggleAdminPidImport(type) {
+    adminPidImportOpenType = adminPidImportOpenType === type ? null : type;
+    if (adminPidImportOpenType !== null) {
+        adminPidAddEntryOpenType = null;
+        adminPidExportOpenType = null;
+        // Default a freshly opened Sales popover to the paste tab when it's
+        // available (TCGPlayer pill), otherwise GAL.
+        adminPidImportMode = adminPidImportPasteAvailable(type) ? 'paste' : 'gal';
+    }
+    renderAdminPricingDetail();
+}
+
+// Switch paste ⇄ GAL without re-rendering — swap the popover's hint + placeholder
+// and move the pill highlight in place, so the popover never flashes. The hint's
+// two modes are different lengths, so animate the popover between the two heights
+// (animateBoxResize) rather than letting it jump.
+function setAdminPidImportMode(mode) {
+    if ((mode !== 'paste' && mode !== 'gal') || adminPidImportMode === mode) return;
+    adminPidImportMode = mode;
+
+    const type = adminPidImportOpenType;
+    const menu = document.querySelector('.admin-pid-import-menu');
+    const toggle = document.getElementById('admin-pid-import-mode-toggle');
+
+    const applyMode = () => {
+        toggle?.querySelectorAll('.admin-pid-import-mode-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.mode === mode));
+
+        const hintEl = menu?.querySelector('.admin-pid-import-hint');
+        if (hintEl) hintEl.innerHTML = adminPidImportHint(type, mode);
+
+        const textarea = document.getElementById('admin-pid-import-textarea');
+        if (textarea) textarea.placeholder = adminPidImportPlaceholder(mode);
+
+        const status = document.getElementById('admin-pid-import-status');
+        if (status) { status.textContent = ''; status.className = 'admin-pid-add-entry-status'; }
+    };
+
+    if (menu) animateBoxResize(menu, applyMode, {duration: 220});
+    else applyMode();
+
+    positionPillIndicator(toggle);
+}
+
+function closeAdminPidImport() {
+    if (adminPidImportOpenType === null) return;
+    adminPidImportOpenType = null;
+    renderAdminPricingDetail();
+}
+
+// ── GAL-format export ──
+// A read-only popover (Sales / Listings section header) printing the currently
+// shown rows — for the selected card, marketplace, and Curio-Foil scope — as a
+// GAL (Grand Archive Library) JSON document to copy or download. GAL is this
+// project's own portable pricing shape (see adminPidBuildGalExport).
+function adminPidExportTriggerHtml(type, rows) {
+    const isOpen = adminPidExportOpenType === type;
+    return `
+        <div class="admin-pid-add-entry-wrap admin-pid-export-wrap">
+            <button class="admin-pid-add-entry-toggle admin-pid-add-entry-toggle-io ${isOpen ? 'open' : ''}"
+                    title="Export as GAL JSON" onclick="toggleAdminPidExport('${type}')">&uarr;</button>
+            ${isOpen ? adminPidExportFormHtml(type, rows) : ''}
+        </div>
+    `;
+}
+
+function toggleAdminPidExport(type) {
+    adminPidExportOpenType = adminPidExportOpenType === type ? null : type;
+    if (adminPidExportOpenType !== null) {
+        adminPidImportOpenType = null;
+        adminPidAddEntryOpenType = null;
+    }
+    renderAdminPricingDetail();
+}
+
+function closeAdminPidExport() {
+    if (adminPidExportOpenType === null) return;
+    adminPidExportOpenType = null;
+    renderAdminPricingDetail();
+}
+
+// The GAL format (v1): a self-describing JSON document scoped to one card + one
+// marketplace + one kind (sales | listings). Kept flat and human-editable — no
+// nested card/edition/foil buckets — since the scope is fixed by these fields.
+// `entries` is the price history rows AS SHOWN (marketplace + Curio-Foil
+// filtered). This shape is the one to import against too, whenever that lands.
+function adminPidBuildGalExport(type, rows) {
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    const foilKindById = {};
+    (adminPidDetailFoils || []).forEach(f => { foilKindById[f.foil_id] = f.kind; });
+
+    return {
+        gal_format: 'grand-archive-library/pricing',
+        gal_version: 1,
+        type,
+        marketplace: adminPidMarketplaceConfig().marketplace,
+        card: record ? {
+            name: record.name,
+            card_id: record.card_id,
+            edition_id: record.edition_id,
+            set_prefix: record.set_prefix || null,
+        } : null,
+        exported_at: new Date().toISOString(),
+        entries: (rows || []).map(r => ({
+            date: r.date,
+            foil: r.foil_kind || foilKindById[r.foil_id] || null,
+            foil_id: r.foil_id,
+            condition: r.condition || null,
+            price: r.price,
+            quantity: r.quantity,
+        })),
+    };
+}
+
+function adminPidExportFormHtml(type, rows) {
+    const json = JSON.stringify(adminPidBuildGalExport(type, rows), null, 2);
+    const mkt = adminPidMarketplaceConfig().label;
+    return `
+        <div class="admin-pid-add-entry-menu admin-pid-export-menu">
+            <span class="admin-pid-import-hint">
+                GAL format — the ${(rows || []).length} ${mkt} ${type} shown below. Copy or download to save them.
             </span>
-            <textarea class="admin-pid-bulk-paste-textarea scroll-none" id="admin-pid-bulk-paste-textarea"
-                      placeholder="7/9/26&#10;NM&#10;1&#9;$0.05"></textarea>
+            <textarea class="admin-pid-import-textarea scroll-none" id="admin-pid-export-textarea"
+                      readonly>${escapeHtml(json)}</textarea>
             <div class="admin-pid-add-entry-actions">
-                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-bulk-paste-btn"
-                        onclick="submitAdminPidBulkPasteSales()">Import</button>
-                <span class="admin-pid-add-entry-status" id="admin-pid-bulk-paste-status"></span>
+                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                        onclick="copyAdminPidExport()">Copy</button>
+                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                        onclick="downloadAdminPidExport('${type}')">Download</button>
+                <span class="admin-pid-add-entry-status" id="admin-pid-export-status"></span>
             </div>
         </div>
     `;
 }
 
-async function submitAdminPidBulkPasteSales() {
-    const editionId = adminPidDetailSelected;
-    if (!editionId || adminPidBulkPastePending) return;
+async function copyAdminPidExport() {
+    const textarea = document.getElementById('admin-pid-export-textarea');
+    const status = document.getElementById('admin-pid-export-status');
+    if (!textarea) return;
 
-    const btn = document.getElementById('admin-pid-bulk-paste-btn');
-    const status = document.getElementById('admin-pid-bulk-paste-status');
-    const textarea = document.getElementById('admin-pid-bulk-paste-textarea');
-    const text = textarea.value.trim();
+    let ok = true;
+    try {
+        await navigator.clipboard.writeText(textarea.value);
+    } catch (err) {
+        textarea.focus();
+        textarea.select();
+        try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    }
+
+    if (status) {
+        status.textContent = ok ? 'Copied.' : 'Copy failed — select the text manually.';
+        status.className = `admin-pid-add-entry-status admin-pid-refresh-${ok ? 'done' : 'error'}`;
+    }
+}
+
+function downloadAdminPidExport(type) {
+    const textarea = document.getElementById('admin-pid-export-textarea');
+    if (!textarea) return;
+
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    const slug = (record?.name || 'card').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'card';
+    const mkt = adminPidMarketplaceConfig().marketplace.toLowerCase();
+
+    const blob = new Blob([textarea.value], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${slug}-${mkt}-${type}.gal.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// A TCGPlayer sales-table paste only makes sense for Sales on the TCGPlayer pill
+// — it writes TCGPlayer-scoped rows and stamps the TCGPlayer clock.
+function adminPidImportPasteAvailable(type) {
+    return type === 'sales' && adminPidMarketplaceConfig().marketplace === 'TCGPlayer';
+}
+
+function adminPidImportHint(type, mode) {
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    const curioView = record?.curio && adminPidCurioViewSelected.has(adminPidDetailSelected);
+
+    if (mode === 'paste') {
+        return `Copy the sales-history table straight off TCGPlayer and paste it here — the ~5-row
+                scrape-cap workaround.${curioView ? ' Rows are attributed to the Curio Foil.' : ''}`;
+    }
+    return type === 'sales'
+        ? `Paste a <b>GAL JSON</b> doc exported from this or another card's Sales.`
+        : `Paste a <b>GAL JSON</b> doc exported from this or another card's Listings.`;
+}
+
+function adminPidImportPlaceholder(mode) {
+    return mode === 'paste'
+        ? '8/31/26\nNM\nNear Mint\n3\t$19.00\n…'
+        : '{"gal_format": "grand-archive-library/pricing", …}';
+}
+
+function adminPidImportFormHtml(type) {
+    const pasteAvailable = adminPidImportPasteAvailable(type);
+    const mode = pasteAvailable ? adminPidImportMode : 'gal';
+
+    return `
+        <div class="admin-pid-add-entry-menu admin-pid-import-menu">
+            <span class="admin-pid-import-hint">${adminPidImportHint(type, mode)}</span>
+            <textarea class="admin-pid-import-textarea scroll-none" id="admin-pid-import-textarea"
+                      placeholder='${adminPidImportPlaceholder(mode)}'></textarea>
+            <div class="admin-pid-add-entry-actions admin-pid-import-actions">
+                <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-import-btn"
+                        onclick="submitAdminPidImport('${type}')">Import</button>
+                ${pasteAvailable ? adminPidImportModeToggleHtml() : ''}
+                <span class="admin-pid-add-entry-status" id="admin-pid-import-status"></span>
+            </div>
+        </div>
+    `;
+}
+
+// A GAL doc if the text parses as JSON carrying a `gal_format` key; null otherwise.
+function adminPidParseGalDoc(text) {
+    try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object' && parsed.gal_format) return parsed;
+    } catch (e) { /* not JSON */ }
+    return null;
+}
+
+async function submitAdminPidImport(type) {
+    const editionId = adminPidDetailSelected;
+    if (!editionId || adminPidImportPending) return;
+
+    const btn = document.getElementById('admin-pid-import-btn');
+    const status = document.getElementById('admin-pid-import-status');
+    const text = document.getElementById('admin-pid-import-textarea').value.trim();
+
+    const setStatus = (msg, kind) => {
+        const s = document.getElementById('admin-pid-import-status');
+        if (s) { s.textContent = msg; s.className = `admin-pid-add-entry-status admin-pid-refresh-${kind}`; }
+    };
+
+    // The popover's pill toggle is the source of truth for the mode; paste is
+    // only ever offered for Sales on the TCGPlayer pill.
+    const mode = adminPidImportPasteAvailable(type) ? adminPidImportMode : 'gal';
 
     if (!text) {
-        status.textContent = 'Paste some sales data first.';
-        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+        setStatus(mode === 'paste' ? 'Paste a TCGPlayer sales table first.' : 'Paste GAL JSON first.', 'error');
         return;
     }
 
-    adminPidBulkPastePending = true;
+    const galDoc = mode === 'gal' ? adminPidParseGalDoc(text) : null;
+
+    if (mode === 'gal' && !galDoc) {
+        setStatus('That doesn’t look like a GAL JSON document.', 'error');
+        return;
+    }
+    if (mode === 'paste' && adminPidParseGalDoc(text)) {
+        setStatus('That’s GAL JSON — switch to the GAL tab.', 'error');
+        return;
+    }
+
+    adminPidImportPending = true;
     btn.disabled = true;
     btn.textContent = 'Importing…';
-    status.textContent = '';
-    status.className = 'admin-pid-add-entry-status';
+    setStatus('', 'done');
 
-    // Segregated the same way refresh/manual-add already are (see
-    // refreshSelectedAdminPricing, adminPidAddEntryFoilOptions): pasted rows
-    // come from whichever product's page the admin actually copied them from,
-    // so toggled-on attributes every row to the Curio Foil, never mixing it
-    // with the edition's regular nonfoil/foil data.
     const record = adminPidData.find(e => e.edition_id === editionId);
     const curioView = record?.curio && adminPidCurioViewSelected.has(editionId);
+    // A TCGPlayer paste is attributed to whichever product page it was copied
+    // from — the Curio Foil when toggled on. (GAL entries carry their own foil_id.)
     const foilId = curioView ? record.curio.foil_id : undefined;
 
+    const endpoint = galDoc
+        ? `/api/admin/pricing/${editionId}/import-gal`
+        : `/api/admin/pricing/${editionId}/import-sales`;
+    const payload = galDoc ? {data: galDoc} : {text, foil_id: foilId};
+
     try {
-        const res = await fetch(`/api/admin/pricing/${editionId}/import-sales`, {
+        const res = await fetch(endpoint, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({text, foil_id: foilId}),
+            body: JSON.stringify(payload),
         });
         const data = await res.json();
 
-        adminPidBulkPastePending = false;
+        adminPidImportPending = false;
         if (adminPidDetailSelected !== editionId) return;
 
+        const freshBtn = document.getElementById('admin-pid-import-btn');
+        if (freshBtn) { freshBtn.disabled = false; freshBtn.textContent = 'Import'; }
+
         if (!res.ok) {
-            btn.disabled = false;
-            btn.textContent = 'Import';
-            status.textContent = data.detail || 'Failed to import sales.';
-            status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+            setStatus(data.detail || 'Import failed.', 'error');
             return;
         }
 
-        const parts = [`Imported ${data.stored} sale(s)`];
-        if (data.skipped_duplicate) parts.push(`${data.skipped_duplicate} already recorded`);
-        if (data.skipped_today) parts.push(`${data.skipped_today} from today excluded`);
-        if (data.skipped_unrecognized) parts.push(`${data.skipped_unrecognized} unrecognized variant(s)`);
-        if (data.parse_errors && data.parse_errors.length) parts.push(`${data.parse_errors.length} line(s) unparsed`);
+        let parts;
+        if (galDoc) {
+            parts = [`Imported ${data.added} ${data.type === 'sales' ? 'sale' : 'listing'}(s)`];
+            if (data.skipped_duplicate) parts.push(`${data.skipped_duplicate} already recorded`);
+            if (data.skipped_unknown_foil) parts.push(`${data.skipped_unknown_foil} unknown foil`);
+            if (data.skipped_unrecognized) parts.push(`${data.skipped_unrecognized} unusable`);
+        } else {
+            parts = [`Imported ${data.stored} sale(s)`];
+            if (data.skipped_duplicate) parts.push(`${data.skipped_duplicate} already recorded`);
+            if (data.skipped_today) parts.push(`${data.skipped_today} from today excluded`);
+            if (data.skipped_unrecognized) parts.push(`${data.skipped_unrecognized} unrecognized variant(s)`);
+            if (data.parse_errors && data.parse_errors.length) parts.push(`${data.parse_errors.length} line(s) unparsed`);
+        }
 
-        // A successful import (res.ok) always reached the point in
-        // import_pasted_sales_tcg_by_edition() that stamps last_sales, even if
-        // every entry turned out to be a duplicate — keep the row's badge in sync.
-        const record = adminPidData.find(r => r.edition_id === editionId);
-        if (record) {
-            record.sales_days_since = 0;
-            renderAdminPidRows();
+        // A TCGPlayer paste always stamps the TCGPlayer sales clock (even on an
+        // all-duplicate import). A GAL import doesn't touch the scrape clocks.
+        if (!galDoc) {
+            const fresh = adminPidData.find(r => r.edition_id === editionId);
+            if (fresh) {
+                adminPidSetClockKey(foilId ? fresh.curio : fresh, 'sales', 'TCGPlayer');
+                renderAdminPidRows();
+            }
         }
 
         await loadAdminPricingDetailHistory();
 
-        const freshStatus = document.getElementById('admin-pid-bulk-paste-status');
-        if (freshStatus) {
-            freshStatus.textContent = parts.join(' · ');
-            freshStatus.className = `admin-pid-add-entry-status admin-pid-refresh-${data.stored > 0 ? 'done' : 'error'}`;
-        }
+        const added = galDoc ? data.added : data.stored;
+        setStatus(parts.join(' · '), added > 0 ? 'done' : 'error');
 
-        const freshTextarea = document.getElementById('admin-pid-bulk-paste-textarea');
-        if (freshTextarea) freshTextarea.value = '';
-
-        const freshBtn = document.getElementById('admin-pid-bulk-paste-btn');
-        if (freshBtn) {
-            freshBtn.disabled = false;
-            freshBtn.textContent = 'Import';
-        }
+        const freshTextarea = document.getElementById('admin-pid-import-textarea');
+        if (freshTextarea && added > 0) freshTextarea.value = '';
     } catch (err) {
-        adminPidBulkPastePending = false;
+        adminPidImportPending = false;
         if (adminPidDetailSelected !== editionId) return;
-        btn.disabled = false;
-        btn.textContent = 'Import';
-        status.textContent = 'Request failed.';
-        status.className = 'admin-pid-add-entry-status admin-pid-refresh-error';
+        const freshBtn = document.getElementById('admin-pid-import-btn');
+        if (freshBtn) { freshBtn.disabled = false; freshBtn.textContent = 'Import'; }
+        setStatus('Request failed.', 'error');
     }
 }
 
@@ -3882,6 +4113,16 @@ function adminPidTodayIso() {
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Locally stamps one marketplace's Last Sales/Listings clock to today on a
+// card record (or record.curio) after a scrape / manual add / paste succeeds,
+// so the row badge updates without a full reload. `field` is 'sales'/'listings'.
+function adminPidSetClockKey(target, field, marketplace) {
+    if (!target) return;
+    if (!target.clocks) target.clocks = {};
+    if (!target.clocks[field]) target.clocks[field] = {};
+    target.clocks[field][marketplace] = adminPidTodayIso();
 }
 
 function adminPidAddEntryFormHtml(type) {
@@ -3925,7 +4166,6 @@ function adminPidAddEntryFormHtml(type) {
             </div>
             <input type="date" class="admin-pid-add-entry-input" id="admin-pid-add-date" value="${adminPidTodayIso()}" max="${adminPidTodayIso()}">
             ${conditionDropdown}
-            ${adminPidMarketplaceFieldHtml()}
             <div class="admin-pid-add-entry-actions">
                 <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-add-entry-btn"
                         onclick="submitAdminPricingManualEntry('${type}')" ${foilsLoaded ? '' : 'disabled'}>Add</button>
@@ -4005,62 +4245,6 @@ function closeAdminPidConditionDropdown() {
     closeAdminPidDropdown('admin-pid-condition-dropdown-menu', 'admin-pid-condition-dropdown-btn');
 }
 
-// Marketplace field — styled like the foil/condition dropdowns above (shares
-// their .admin-pid-dropdown-* CSS), but unlike those it's a real text input,
-// not a hidden-value + label pair: picking an option just fills the input,
-// and the admin can still type anything else over it.
-function adminPidMarketplaceFieldHtml() {
-    // Reads the value back out via this.dataset rather than interpolating it
-    // into the onclick string directly — escapeHtml() only HTML-escapes (so
-    // "Merlin's" becomes Merlin&#39;s), and the browser decodes that entity
-    // back to a literal ' before the onclick text is parsed as JS, which
-    // would terminate the string early and break the handler.
-    const optionsHtml = ADMIN_PID_MARKETPLACE_OPTIONS.map(m => `
-        <div class="admin-pid-dropdown-option" data-value="${escapeHtml(m)}"
-             onclick="selectAdminPidMarketplaceOption(this.dataset.value)">
-            ${escapeHtml(m)}
-        </div>
-    `).join('');
-
-    return `
-        <div class="admin-pid-dropdown-wrap" id="admin-pid-marketplace-dropdown-wrap">
-            <div class="admin-pid-dropdown-btn btn btn--ghost btn--mono" id="admin-pid-marketplace-dropdown-btn">
-                <input type="text" class="admin-pid-marketplace-input" id="admin-pid-add-marketplace"
-                       placeholder="Marketplace" value="TCGPlayer" onfocus="openAdminPidMarketplaceDropdown()">
-                <span class="admin-pid-dropdown-arrow dropdown-arrow"
-                      onclick="toggleAdminPidDropdown('admin-pid-marketplace-dropdown-menu', 'admin-pid-marketplace-dropdown-btn')">&#8249;</span>
-            </div>
-            <div class="admin-pid-dropdown-menu menu hidden" id="admin-pid-marketplace-dropdown-menu">
-                ${optionsHtml}
-            </div>
-        </div>
-    `;
-}
-
-function openAdminPidMarketplaceDropdown() {
-    document.getElementById('admin-pid-marketplace-dropdown-menu')?.classList.remove('hidden');
-    document.getElementById('admin-pid-marketplace-dropdown-btn')?.classList.add('open');
-}
-
-function closeAdminPidMarketplaceDropdown() {
-    closeAdminPidDropdown('admin-pid-marketplace-dropdown-menu', 'admin-pid-marketplace-dropdown-btn');
-}
-
-function selectAdminPidMarketplaceOption(value) {
-    const input = document.getElementById('admin-pid-add-marketplace');
-    if (input) input.value = value;
-
-    document.querySelectorAll('#admin-pid-marketplace-dropdown-menu .admin-pid-dropdown-option').forEach(opt => {
-        opt.classList.toggle('selected', opt.dataset.value === value);
-    });
-
-    // Stays open after picking an option — closing here (even briefly, before
-    // input.focus() below reopens it via its own onfocus) produced a visible
-    // flicker. It now only closes on an actual outside click, same as the
-    // other dropdowns in this menu.
-    input?.focus();
-}
-
 async function submitAdminPricingManualEntry(type) {
     const editionId = adminPidDetailSelected;
     if (!editionId || adminPidAddEntryPending) return;
@@ -4072,7 +4256,6 @@ async function submitAdminPricingManualEntry(type) {
     const qtyInput = document.getElementById('admin-pid-add-qty');
     const dateInput = document.getElementById('admin-pid-add-date');
     const conditionInput = document.getElementById('admin-pid-add-condition');
-    const marketplaceInput = document.getElementById('admin-pid-add-marketplace');
 
     const price = parseFloat(priceInput.value);
     const quantity = parseInt(qtyInput.value, 10) || 1;
@@ -4112,7 +4295,9 @@ async function submitAdminPricingManualEntry(type) {
                 quantity,
                 date: dateInput.value,
                 condition: conditionInput.value.trim(),
-                marketplace: marketplaceInput.value.trim() || 'Manual',
+                // Stamped from the marketplace scope pill, not a per-entry field
+                // — see ADMIN_PID_MARKETPLACES / switchAdminPidMarketplace.
+                marketplace: adminPidMarketplaceConfig().marketplace,
             })
         });
         const data = await res.json();
@@ -4128,13 +4313,13 @@ async function submitAdminPricingManualEntry(type) {
             return;
         }
 
-        // Matches add_manual_entry() in pricing_ga.py, which now stamps
-        // last_sales/last_listings for a manual entry the same as a scrape or
-        // pasted import would — keep the row's badge in sync with that.
+        // Matches add_manual_entry() in pricing_ga.py, which stamps the
+        // SELECTED marketplace's clock (foil-scoped in Curio Foil view) — keep
+        // the row's badge in sync with that.
         const record = adminPidData.find(r => r.edition_id === editionId);
         if (record) {
-            if (type === 'sales') record.sales_days_since = 0;
-            else record.listings_days_since = 0;
+            const curioView = record.curio && adminPidCurioViewSelected.has(editionId);
+            adminPidSetClockKey(curioView ? record.curio : record, type, adminPidMarketplaceConfig().marketplace);
             renderAdminPidRows();
         }
 
@@ -4250,8 +4435,12 @@ function initAdmin() {
     adminUserDetailDecks = null;
     adminPidLoaded = false;
     adminPidData = [];
-    adminDbModeOn = false;
-    adminLocalDbOn = false;
+    // adminDbModeOn / adminLocalDbOn are deliberately NOT reset — a sub-nav
+    // click is a soft re-render (see switchAdminSection), so the last value
+    // read from the System page or a prior pricing load is still accurate and
+    // lets updateAdminPidRefreshButton() below hide/show the Refresh group
+    // before first paint instead of flashing it. loadAdminSystemSettings /
+    // loadAdminPricingIds re-confirm it from the server moments later anyway.
     adminPidSelected = new Set();
     adminSetsSelectedSlug = null;
     adminPidRefreshStatus = {};
@@ -4265,12 +4454,15 @@ function initAdmin() {
     adminPidDetailHistory = null;
     adminPidDetailFoils = null;
     adminPidDetailMode = 'regular';
+    adminPidMarketplace = 'tcgplayer';
     adminPidAddEntryOpenType = null;
     adminPidAddEntryFoilId = null;
     adminPidAddEntryCondition = null;
     adminPidAddEntryPending = false;
-    adminPidBulkPasteOpen = false;
-    adminPidBulkPastePending = false;
+    adminPidImportOpenType = null;
+    adminPidImportPending = false;
+    adminPidImportMode = 'paste';
+    adminPidExportOpenType = null;
     _resetAdminDbAutosaveState();
 
     // Renders the deep-linked section/sub-view directly — no fade/resize
@@ -4291,12 +4483,20 @@ function initAdmin() {
         btn.classList.toggle('active', btn.dataset.view === adminCardsView);
     });
     cardsSection?.classList.toggle('admin-cards-mode-info', adminCardsView === 'info');
+    cardsSection?.querySelectorAll('.admin-pid-marketplace-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.marketplace === adminPidMarketplace);
+    });
+    updateAdminPidProductIdVisibility();
 
     document.querySelector('.footer')?.classList.add('footer-hidden');
-    updateAdminPidTcgButton();
+    updateAdminPidLinkButton();
+    // Hide/show the Refresh group up front from the retained adminLocalDbOn
+    // (see the reset block above) so it doesn't flash on the way in.
+    updateAdminPidRefreshButton();
     updateAdminUserRoleButtons();
     positionPillIndicator(document.querySelector('.admin-cards-subnav'));
     positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
+    positionPillIndicator(document.getElementById('admin-pid-marketplace-toggle'));
     document.querySelectorAll('.admin-system-option-toggle').forEach(positionPillIndicator);
 
     if (adminActiveSection === 'system') {
@@ -4310,11 +4510,10 @@ function initAdmin() {
 
 document.addEventListener('click', e => {
     if (!e.target.closest('.admin-pid-add-entry-wrap')) closeAdminPidAddEntry();
-    if (!e.target.closest('.admin-pid-bulk-paste-wrap')) closeAdminPidBulkPaste();
-    closeAdminPidImportPopoversOutside(e.target);
+    if (!e.target.closest('.admin-pid-import-wrap')) closeAdminPidImport();
+    if (!e.target.closest('.admin-pid-export-wrap')) closeAdminPidExport();
     if (!e.target.closest('#admin-pid-foil-dropdown-wrap')) closeAdminPidFoilDropdown();
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
-    if (!e.target.closest('#admin-pid-marketplace-dropdown-wrap')) closeAdminPidMarketplaceDropdown();
     if (!e.target.closest('.admin-pid-col-rarity .set-dropdown-wrap')) closeAdminPidRarityFilter();
     if (!e.target.closest('.admin-pid-col-set .set-dropdown-wrap')) closeAdminPidSetFilter();
     if (!e.target.closest('#admin-system-db-ssl-wrap')) closeAdminPidDropdown('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn');

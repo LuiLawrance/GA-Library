@@ -270,10 +270,25 @@
                                 <div class="admin-pid-summary" id="admin-pid-summary"></div>
                                 <div class="admin-pid-progress hidden" id="admin-pid-progress"></div>
                             </div>
-                            <button class="admin-pid-tcg-btn" id="admin-pid-tcg-btn" onclick="openAdminPidTcgPlayer()"
-                                    title="TCG Player" disabled>
-                                <img src="/marketplaces/TCG%20Player.png" alt="TCG Player" class="admin-pid-tcg-icon">
-                            </button>
+                            <div class="admin-pid-list-actions">
+                                <button class="admin-pid-link-btn" id="admin-pid-link-btn" onclick="openAdminPidLink()"
+                                        title="TCG Player" disabled>
+                                    <img src="/marketplaces/TCG%20Player.png" alt="TCG Player" class="admin-pid-link-icon">
+                                </button>
+                                <!-- Marketplace scope pill — TCGPlayer / CoreTCG / Manual. Drives the
+                                     Link button, the Product ID column collapse, the marketplace
+                                     stamped on new Sales/Listings entries, and which marketplace's
+                                     Sales/Listings the detail panel shows (adminPidMarketplace in admin.js). -->
+                                <div class="admin-pid-marketplace-toggle pill-toggle" id="admin-pid-marketplace-toggle">
+                                    <span class="pill-indicator"></span>
+                                    <button type="button" class="admin-pid-marketplace-toggle-btn pill-toggle-btn active"
+                                            data-marketplace="tcgplayer" onclick="switchAdminPidMarketplace('tcgplayer')">TCGPlayer</button>
+                                    <button type="button" class="admin-pid-marketplace-toggle-btn pill-toggle-btn"
+                                            data-marketplace="coretcg" onclick="switchAdminPidMarketplace('coretcg')">CoreTCG</button>
+                                    <button type="button" class="admin-pid-marketplace-toggle-btn pill-toggle-btn"
+                                            data-marketplace="manual" onclick="switchAdminPidMarketplace('manual')">Manual</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="admin-pid-controls-cell-image"></div>
                         <div class="admin-pid-controls-cell-detail">
@@ -284,7 +299,13 @@
                                 <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn" data-mode="discord"
                                         onclick="switchAdminPidDetailMode('discord')">Discord</button>
                             </div>
-                            <div class="admin-pid-refresh-group">
+                            <!-- Collapsed by default; updateAdminPidRefreshButton() reveals it
+                                 only when Local Database is on (this instance can run the
+                                 scraper) and the marketplace pill isn't on "Manual". Starting
+                                 collapsed avoids a flash-then-hide on every Cards load where
+                                 Local DB is off. .admin-pid-collapsed (not .hidden) so show/hide
+                                 fades and wipes rather than snapping. -->
+                            <div class="admin-pid-refresh-group admin-pid-collapsed">
                                 <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-sales"
                                         onclick="refreshSelectedAdminPricing('sales')" disabled>Refresh Sales</button>
                                 <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-listings"

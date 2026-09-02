@@ -651,7 +651,7 @@
     position: relative;
 }
 
-/* Modeled on .admin-pid-tcg-btn (see admin.css) at a smaller scale to fit
+/* Modeled on .admin-pid-link-btn (see admin.css) at a smaller scale to fit
    this section header alongside its label. */
 /* Shared .btn .btn--icon (components.css) at 26px. */
 .pricing-tcg-btn {
