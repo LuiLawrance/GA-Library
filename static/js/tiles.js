@@ -750,51 +750,39 @@ function attachInvOverlay(tile, cardId, editionId, cardName) {
 
 // ── Scroll wheel on quantity inputs ──
 
-// Heuristic: only accept discrete mouse-wheel notches, reject trackpad gestures.
-// Per-event checks alone leak: trackpad momentum ramps up into large integer
-// deltas that mimic wheel notches. So events are grouped into "bursts" (gap of
-// less than WHEEL_BURST_GAP_MS between events) and the whole burst inherits the
-// classification of how it started. A trackpad flick's momentum tail therefore
-// stays blocked, while each spaced mouse notch opens a fresh, cleanly
-// classified burst.
-const WHEEL_BURST_GAP_MS = 200;
-let _wheelBurstLast = 0;
-let _wheelBurstIsTrackpad = false;
-
-function _looksLikeTrackpad(e) {
-    if (e.ctrlKey) return true;                    // pinch-zoom gesture
-    if (e.deltaMode !== 0) return false;           // LINE/PAGE mode = real wheel
-    if (e.deltaX !== 0) return true;               // horizontal drift = trackpad
-    if (!Number.isInteger(e.deltaY)) return true;  // fractional = trackpad
-    return Math.abs(e.deltaY) < 50;                // small steps = trackpad
-}
-
-function isMouseWheelEvent(e) {
-    const now = performance.now();
-    const inBurst = (now - _wheelBurstLast) < WHEEL_BURST_GAP_MS;
-    _wheelBurstLast = now;
-
-    if (!inBurst) {
-        // New gesture — classify from its opening event
-        _wheelBurstIsTrackpad = _looksLikeTrackpad(e);
-    } else if (!_wheelBurstIsTrackpad && _looksLikeTrackpad(e)) {
-        // Trackpad evidence mid-burst poisons the whole burst
-        _wheelBurstIsTrackpad = true;
-    }
-
-    return !_wheelBurstIsTrackpad;
-}
+// We deliberately do NOT try to tell a mouse wheel apart from a trackpad — that
+// classification can't be done reliably from wheel deltas (hi-res / free-spin
+// wheels, low OS line-counts and zoomed pages all emit small, often fractional
+// deltaY that looks identical to a trackpad). Instead we accumulate deltaY and
+// step by at most ±1 each time the accumulated distance crosses a threshold,
+// resetting on direction change or after a pause. One standard wheel notch is
+// ~100px, so a notch moves quantity by 1; a fast trackpad flick moves it by 1
+// per ~WHEEL_STEP_PX rather than by dozens, so there's no need to reject it.
+const WHEEL_STEP_PX = 90;      // accumulated deltaY needed to move quantity by 1
+const WHEEL_RESET_MS = 400;    // gap after which the accumulator resets
+let _wheelAccum = 0;
+let _wheelAccumLast = 0;
 
 document.addEventListener('wheel', e => {
-    // Burst tracking runs on EVERY wheel event, page-wide — otherwise a
-    // trackpad scroll that starts outside the input and drifts over it
-    // mid-momentum would open a fresh burst and misclassify as a mouse.
-    const accepted = isMouseWheelEvent(e);
-
     if (!e.target.matches('.inv-tile-qty-input')) return;
     e.preventDefault();
 
-    if (!accepted) return;
+    if (e.ctrlKey) return;  // pinch-zoom gesture, not a quantity change
+
+    // Normalise to pixels: Firefox reports wheel notches in LINE (≈16px) or
+    // PAGE units, Blink/WebKit in pixels.
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
+    const deltaPx = e.deltaY * unit;
+
+    const now = performance.now();
+    if (now - _wheelAccumLast > WHEEL_RESET_MS || Math.sign(deltaPx) !== Math.sign(_wheelAccum)) {
+        _wheelAccum = 0;
+    }
+    _wheelAccumLast = now;
+    _wheelAccum += deltaPx;
+
+    if (Math.abs(_wheelAccum) < WHEEL_STEP_PX) return;
+    _wheelAccum = 0;  // consume the step; further scrolling re-accumulates
 
     const input = e.target;
     const current = parseInt(input.value) || 0;
