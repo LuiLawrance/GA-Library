@@ -652,13 +652,16 @@ async def api_card_detail(card_id: str):
 @app.get("/api/me")
 async def api_me(request: Request):
     user = get_current_user(request)
+    auth_type = get_user_auth_type(user) if user else None
 
-    if not user:
+    # `user` is just the JWT subject — it can name an account that no longer
+    # exists (a stale cookie after a data wipe). Treat that as logged out.
+    if not user or auth_type is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     return JSONResponse({
         "username": user,
-        "auth_type": get_user_auth_type(user),
+        "auth_type": auth_type,
         **user_needs_setup(user),
     })
 

@@ -318,22 +318,32 @@ def user_get_profile(username: str) -> dict | None:
     }
 
 
+_NO_SETUP = {"must_set_omnidex": False, "must_set_password": False}
+
+
 def user_needs_setup(username: str) -> dict:
     """{must_set_omnidex, must_set_password} — an admin can clear either from
     the Admin -> Users panel, which forces the user to re-enter it before they
     can use anything (the account-setup gate in app.js, plus a server-side
-    middleware check)."""
+    middleware check).
+
+    Returns all-False for an unknown user — e.g. a stale auth cookie left over
+    after the data was wiped. Without this, a fresh install with such a cookie
+    would show the setup gate for a phantom account.
+    """
     if is_db_mode():
         with get_session() as session:
             user = session.get(UserModel, username)
             if not user:
-                return {"must_set_omnidex": False, "must_set_password": False}
+                return dict(_NO_SETUP)
             return {
                 "must_set_omnidex": user.omnidex_id is None,
                 "must_set_password": user.password_hash == "",
             }
 
-    info = _load_users_data().get(username, {})
+    info = _load_users_data().get(username)
+    if info is None:
+        return dict(_NO_SETUP)
     return {
         "must_set_omnidex": not info.get("omnidex_id"),
         "must_set_password": not info.get("password"),
