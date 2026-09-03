@@ -156,6 +156,13 @@ async function navigate(path, pushState = true) {
         setTimeout(setupDgaFooterScroll, 100);
     }
 
+    if (pathname === '/decks') {
+        if (typeof window.initDecks === 'function') {
+            await window.initDecks();
+        }
+        setTimeout(setupDgaFooterScroll, 100);
+    }
+
     if (pathname === '/admin' || pathname.startsWith('/admin/')) {
         if (typeof window.initAdmin === 'function') {
             window.initAdmin();

@@ -10,6 +10,11 @@ let dgaAddModalEditionId = null;
 let dgaAddModalPreSection = null;
 let dgaAddAcIndex = -1;
 
+// ── Banner search modal state ──
+let dgaBannerTargetDeck = null;
+let dgaBannerModalEditionId = null;
+let dgaBannerAcIndex = -1;
+
 // ═══════════════════════════════════════
 // DECK CONTEXT MENU
 // ═══════════════════════════════════════
@@ -20,9 +25,20 @@ function dgaOpenContextMenu(e, deckName) {
     dgaCtxTargetDeck = deckName;
     const menu = document.getElementById('dga-context-menu');
 
-    // Only offer Clear Banner when the deck has one
+    // Set Banner and Clear Banner are mutually exclusive — only offer the one
+    // that applies to the deck's current state, to keep the menu shorter.
+    const hasBanner = !!gaDecks[deckName]?.banner;
+    const setBtn = document.getElementById('dga-ctx-set-banner');
     const clearBtn = document.getElementById('dga-ctx-clear-banner');
-    if (clearBtn) clearBtn.style.display = gaDecks[deckName]?.banner ? '' : 'none';
+    if (setBtn) setBtn.style.display = hasBanner ? 'none' : '';
+    if (clearBtn) clearBtn.style.display = hasBanner ? '' : 'none';
+
+    // Same mutual-exclusivity pattern for Make Public / Make Private.
+    const isPublic = !!gaDecks[deckName]?.public;
+    const makePublicBtn = document.getElementById('dga-ctx-make-public');
+    const makePrivateBtn = document.getElementById('dga-ctx-make-private');
+    if (makePublicBtn) makePublicBtn.style.display = isPublic ? 'none' : '';
+    if (makePrivateBtn) makePrivateBtn.style.display = isPublic ? '' : 'none';
 
     menu.classList.remove('hidden');
     const x = Math.min(e.clientX, window.innerWidth - 180);
@@ -49,9 +65,34 @@ async function dgaCtxClearBanner() {
     }
 }
 
+async function dgaCtxSetPublic(value) {
+    if (!dgaCtxTargetDeck) return;
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({public: value})
+        });
+        if (!res.ok) return;
+        if (gaDecks[name]) gaDecks[name].public = value;
+        renderDeckGrid();
+    } catch {
+        console.error('Failed to update deck visibility');
+    }
+}
+
 function dgaCloseContextMenu() {
     document.getElementById('dga-context-menu').classList.add('hidden');
     dgaCtxTargetDeck = null;
+}
+
+function dgaCtxOpenBannerSearch() {
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    if (!name) return;
+    openDeckBannerModal(name);
 }
 
 document.addEventListener('click', e => {
@@ -320,12 +361,13 @@ function buildDeckTile(name, entry, index, total) {
     tile.style.animationDelay = `${delay}ms`;
 
     const fmt = entry.format ? `<span class="dga-tile-format">${entry.format}</span>` : '';
+    const pub = entry.public ? `<span class="dga-tile-public" title="Listed on the public Decks page">Public</span>` : '';
     const desc = entry.desc ? `<div class="dga-tile-desc">${entry.desc}</div>` : '';
     const count = entry.card_count || 0;
 
     tile.innerHTML = `
         <div class="dga-tile-icon">⬡</div>
-        <div class="dga-tile-name">${name}${fmt}</div>
+        <div class="dga-tile-name">${name}${fmt}${pub}</div>
         <div class="dga-tile-desc">${entry.desc || ''}</div>
         <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
 
@@ -1178,6 +1220,18 @@ function openDeckSettingsModal() {
     document.getElementById('dga-settings-desc').value = entry.desc || '';
     document.getElementById('dga-settings-error').classList.add('hidden');
     document.getElementById('dga-settings-modal').classList.remove('hidden');
+    // After the modal is unhidden so the pill track has real layout for
+    // positionPillIndicator to measure — offsetWidth is 0 while display:none.
+    setDgaPublicValue(!!entry.public);
+}
+
+function setDgaPublicValue(value) {
+    document.getElementById('dga-settings-public').value = value;
+    const toggle = document.getElementById('dga-settings-public-toggle');
+    toggle.querySelectorAll('.pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'true') === value);
+    });
+    positionPillIndicator(toggle);
 }
 
 function closeDeckSettingsModal() {
@@ -1417,6 +1471,7 @@ async function submitDeckSettings() {
     const newName = document.getElementById('dga-settings-name').value.trim();
     const format = document.getElementById('dga-settings-format').value.trim();
     const desc = document.getElementById('dga-settings-desc').value.trim();
+    const isPublic = document.getElementById('dga-settings-public').value === 'true';
     const errEl = document.getElementById('dga-settings-error');
 
     if (!newName) {
@@ -1434,7 +1489,7 @@ async function submitDeckSettings() {
         const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: newName, format, desc})
+            body: JSON.stringify({name: newName, format, desc, public: isPublic})
         });
         if (!res.ok) {
             errEl.textContent = 'Failed to update deck.';
@@ -1444,7 +1499,7 @@ async function submitDeckSettings() {
 
         const existing = gaDecks[activeDeck];
         delete gaDecks[activeDeck];
-        gaDecks[newName] = {...existing, format, desc};
+        gaDecks[newName] = {...existing, format, desc, public: isPublic};
         const oldName = activeDeck;
         activeDeck = newName;
 
@@ -2064,6 +2119,247 @@ function handleDgaAddCardKeydown(e) {
 document.addEventListener('click', e => {
     if (!document.getElementById('dga-add-modal')) return;
     if (!e.target.closest('#dga-add-card-search') && !e.target.closest('#dga-add-card-autocomplete')) hideDgaAddAc();
+}, true);
+
+// ═══════════════════════════════════════
+// SET BANNER MODAL (deck grid → search a specific card edition)
+// ═══════════════════════════════════════
+
+function openDeckBannerModal(deckName) {
+    dgaBannerTargetDeck = deckName;
+    dgaBannerModalEditionId = null;
+
+    document.getElementById('dga-banner-search').value = '';
+    const results = document.getElementById('dga-banner-results');
+    results.style.gridTemplateColumns = ''; // a prior search may have left this widened
+    results.classList.remove('has-scroll');
+    results.innerHTML = `
+        <div class="inv-search-placeholder" style="padding:30px 0">
+            <span class="inv-empty-icon">⬡</span><p>Search for a card to set as the banner.</p>
+        </div>`;
+    document.getElementById('dga-banner-step-search').classList.remove('hidden');
+    document.getElementById('dga-banner-step-confirm').classList.add('hidden');
+    document.getElementById('dga-banner-back-btn').classList.add('hidden');
+    document.querySelector('#dga-banner-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
+    document.getElementById('dga-banner-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('dga-banner-search').focus(), 60);
+}
+
+function closeDeckBannerModal() {
+    document.getElementById('dga-banner-modal').classList.add('hidden');
+    hideDgaBannerAc();
+    resetBoxResize(document.querySelector('#dga-banner-modal .inv-modal-wide'));
+    dgaBannerTargetDeck = null;
+}
+
+function dgaAnimateBannerModalResize(mutate) {
+    animateBoxResize(document.querySelector('#dga-banner-modal .inv-modal-wide'), mutate);
+}
+
+function dgaBannerBackToSearch() {
+    if (document.getElementById('dga-banner-step-confirm').classList.contains('hidden')) return;
+    dgaAnimateBannerModalResize(() => {
+        document.getElementById('dga-banner-step-confirm').classList.add('hidden');
+        document.getElementById('dga-banner-step-search').classList.remove('hidden');
+        document.getElementById('dga-banner-back-btn').classList.add('hidden');
+        document.querySelector('#dga-banner-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
+    });
+}
+
+async function searchDgaBannerCards() {
+    const query = document.getElementById('dga-banner-search')?.value?.trim();
+    const results = document.getElementById('dga-banner-results');
+    if (!results || !query) return;
+
+    const resetResultsGrid = () => {
+        results.style.gridTemplateColumns = '';
+        results.classList.remove('has-scroll');
+    };
+
+    dgaAnimateBannerModalResize(() => {
+        resetResultsGrid();
+        results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Searching...</p></div>`;
+    });
+
+    try {
+        // all_prints=1 — unlike Add Card, a banner needs a specific printing,
+        // not a random edition of the card (see api_cards_search in app.py).
+        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}&all_prints=1`);
+        const data = await res.json();
+
+        if (!data.cards?.length) {
+            dgaAnimateBannerModalResize(() => {
+                resetResultsGrid();
+                results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>${data.message || 'No cards found.'}</p></div>`;
+            });
+            return;
+        }
+
+        const cards = [...data.cards].sort((a, b) => {
+            if (a.name !== b.name) return a.name.localeCompare(b.name);
+            return (a.collector_number || '').localeCompare(b.collector_number || '', undefined, {numeric: true});
+        });
+
+        dgaAnimateBannerModalResize(() => {
+            results.innerHTML = '';
+            const cols = Math.min(cards.length, 5);
+            results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
+            results.classList.toggle('has-scroll', cards.length >= 6);
+
+            cards.forEach((card, i) => {
+                const tile = document.createElement('div');
+                tile.className = 'inv-search-tile tile-hoverable';
+                tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
+                const setLabel = dgaCardSetLabel(card);
+                const captionParts = [setLabel, card.collector_number ? `#${card.collector_number}` : ''].filter(Boolean);
+                tile.innerHTML = `
+                    <div class="edition-tile-wrap tile-zoom">
+                        <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
+                        <div class="card-tile-dim"></div>
+                        <div class="inv-search-tile-add tile-action-btn">🖼</div>
+                    </div>
+                    <div class="dga-banner-tile-caption">
+                        <div class="dga-banner-tile-name">${card.name}</div>
+                        <div class="dga-banner-tile-set">${captionParts.join(' · ')}</div>
+                    </div>`;
+                tile.onclick = () => dgaGoToBannerConfirm(card.name, card.edition_id, setLabel);
+                tile.addEventListener('animationend', () => tile.classList.add('animated'));
+                results.appendChild(tile);
+            });
+        });
+    } catch {
+        dgaAnimateBannerModalResize(() => {
+            resetResultsGrid();
+            results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Search failed.</p></div>`;
+        });
+    }
+}
+
+function dgaGoToBannerConfirm(cardName, editionId, setLabel = '') {
+    dgaBannerModalEditionId = editionId;
+
+    document.getElementById('dga-banner-modal-name').textContent = cardName;
+    const setEl = document.getElementById('dga-banner-modal-set');
+    if (setEl) setEl.textContent = setLabel;
+    document.getElementById('dga-banner-modal-img').src = editionId ? `/images/${editionId}.jpg` : '';
+
+    dgaAnimateBannerModalResize(() => {
+        document.getElementById('dga-banner-step-search').classList.add('hidden');
+        document.getElementById('dga-banner-step-confirm').classList.remove('hidden');
+        document.getElementById('dga-banner-back-btn').classList.remove('hidden');
+        document.querySelector('#dga-banner-modal .inv-modal-wide').classList.add('inv-modal-foil-step');
+    });
+}
+
+async function submitDgaBanner() {
+    if (!dgaBannerModalEditionId || !dgaBannerTargetDeck) return;
+
+    const deckName = dgaBannerTargetDeck;
+    const editionId = dgaBannerModalEditionId;
+    const btn = document.getElementById('dga-banner-modal-submit');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(deckName)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({banner: editionId})
+        });
+
+        if (res.ok) {
+            btn.disabled = false;
+            btn.textContent = 'Set as Banner';
+
+            if (gaDecks[deckName]) gaDecks[deckName].banner = editionId;
+
+            closeDeckBannerModal();
+            renderDeckGrid();
+        } else {
+            btn.textContent = 'Error';
+            setTimeout(() => {
+                btn.textContent = 'Set as Banner';
+                btn.disabled = false;
+            }, 1500);
+        }
+    } catch {
+        btn.textContent = 'Failed';
+        setTimeout(() => {
+            btn.textContent = 'Set as Banner';
+            btn.disabled = false;
+        }, 1500);
+    }
+}
+
+// ── Autocomplete ──
+
+async function fetchDgaBannerSuggestions(value) {
+    const list = document.getElementById('dga-banner-autocomplete');
+    if (value.length < 2) {
+        hideDgaBannerAc();
+        return;
+    }
+    try {
+        const res = await fetch(`/api/cards/suggest?q=${encodeURIComponent(value)}`);
+        const data = await res.json();
+        if (!data.suggestions?.length) {
+            hideDgaBannerAc();
+            return;
+        }
+        dgaBannerAcIndex = -1;
+        list.innerHTML = '';
+        data.suggestions.forEach(name => {
+            const item = document.createElement('div');
+            item.className = 'autocomplete-item';
+            item.textContent = name;
+            item.onclick = () => {
+                document.getElementById('dga-banner-search').value = name;
+                hideDgaBannerAc();
+                searchDgaBannerCards();
+            };
+            list.appendChild(item);
+        });
+        list.classList.remove('hidden');
+    } catch {
+        hideDgaBannerAc();
+    }
+}
+
+function hideDgaBannerAc() {
+    const list = document.getElementById('dga-banner-autocomplete');
+    if (list) {
+        list.classList.add('hidden');
+        list.innerHTML = '';
+    }
+    dgaBannerAcIndex = -1;
+}
+
+function handleDgaBannerKeydown(e) {
+    const list = document.getElementById('dga-banner-autocomplete');
+    const items = list?.querySelectorAll('.autocomplete-item') || [];
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        dgaBannerAcIndex = Math.min(dgaBannerAcIndex + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('selected', i === dgaBannerAcIndex));
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        dgaBannerAcIndex = Math.max(dgaBannerAcIndex - 1, -1);
+        items.forEach((el, i) => el.classList.toggle('selected', i === dgaBannerAcIndex));
+    } else if (e.key === 'Enter') {
+        if (dgaBannerAcIndex >= 0 && items[dgaBannerAcIndex]) {
+            document.getElementById('dga-banner-search').value = items[dgaBannerAcIndex].textContent;
+        }
+        hideDgaBannerAc();
+        searchDgaBannerCards();
+    } else if (e.key === 'Escape') {
+        hideDgaBannerAc();
+        closeDeckBannerModal();
+    }
+}
+
+document.addEventListener('click', e => {
+    if (!document.getElementById('dga-banner-modal')) return;
+    if (!e.target.closest('#dga-banner-search') && !e.target.closest('#dga-banner-autocomplete')) hideDgaBannerAc();
 }, true);
 
 

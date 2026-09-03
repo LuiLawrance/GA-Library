@@ -3709,6 +3709,7 @@ def _deck_index_load_db(username: str) -> dict:
                 "banner": row.banner,
                 "symbol": row.symbol,
                 "tags": row.tags,
+                "public": row.is_public,
                 "created": row.created_at.isoformat() if row.created_at else None,
                 "modified": row.modified_at.isoformat() if row.modified_at else None,
             }
@@ -3729,6 +3730,7 @@ def _deck_index_save_db(username: str, data: dict) -> None:
             modified = date.fromisoformat(entry["modified"]) if entry.get("modified") else None
             index_fields = {
                 "banner": entry.get("banner"), "symbol": entry.get("symbol"), "tags": entry.get("tags"),
+                "is_public": entry.get("public", False),
                 "created_at": created, "modified_at": modified,
             }
             stmt = pg_insert(Deck).values(username=username, name=name, **index_fields).on_conflict_do_update(
@@ -3812,6 +3814,62 @@ def _make_deck_data(desc: str, fmt: str) -> dict:
     }
 
 
+def _deck_detail_payload(deck_data: dict) -> dict:
+    slug_data = load_slugs_data()
+    info_data = load_info_data()
+    name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
+    edition_map = {}
+    for cards in deck_data["sections"].values():
+        for card_id in cards:
+            if card_id not in edition_map:
+                eid = _pick_edition(card_id, info_data)
+                if eid:
+                    edition_map[card_id] = eid
+    return {**deck_data, "name_map": name_map, "edition_map": edition_map}
+
+
+def _public_decks_list() -> list[dict]:
+    """Every deck marked public, across all users — feeds the public /decks
+    browse page. Unlike _user_decks_list (one user's decks), this fans out
+    over every user, so each entry also carries its owner's username."""
+    if is_db_mode():
+        with get_session() as session:
+            rows = session.execute(select(Deck).where(Deck.is_public == True)).scalars().all()
+        decks = []
+        for row in rows:
+            deck_data = _deck_load_db(row.username, row.name)
+            count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
+            decks.append({
+                "name": row.name,
+                "username": row.username,
+                "format": row.format or "",
+                "desc": row.desc or "",
+                "banner": row.banner,
+                "card_count": count,
+            })
+        decks.sort(key=lambda d: d["name"].lower())
+        return decks
+
+    decks = []
+    for user in user_list():
+        username = user["username"]
+        for name, entry in _deck_index_load(username).items():
+            if not entry.get("public"):
+                continue
+            deck_data = _deck_load(username, name)
+            count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
+            decks.append({
+                "name": name,
+                "username": username,
+                "format": (deck_data or {}).get("format", entry.get("format", "")),
+                "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
+                "banner": entry.get("banner"),
+                "card_count": count,
+            })
+    decks.sort(key=lambda d: d["name"].lower())
+    return decks
+
+
 def _resolve_card_id(name: str, slug_data: dict) -> str | None:
     # Use the same slug normalization card search uses for exact local matches
     slug = _format_search(name)
@@ -3866,7 +3924,7 @@ async def api_deck_create(request: Request):
     if name in index:
         raise HTTPException(status_code=400, detail="Deck already exists")
     created = date.today().isoformat()
-    index[name] = {"banner": None, "symbol": None, "tags": None,
+    index[name] = {"banner": None, "symbol": None, "tags": None, "public": False,
                    "created": created, "modified": created}
     _deck_index_save(user, index)
     _deck_save(user, name, _make_deck_data(desc, fmt))
@@ -4008,6 +4066,23 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
     return JSONResponse({"ok": True, "found": False})
 
 
+@app.get("/api/decks/public")
+async def api_public_decks_list():
+    return JSONResponse({"decks": _public_decks_list()})
+
+
+@app.get("/api/decks/public/{username}/{deck_name}")
+async def api_public_deck_get(username: str, deck_name: str):
+    index = _deck_index_load(username)
+    entry = index.get(deck_name)
+    if entry is None or not entry.get("public"):
+        raise HTTPException(status_code=404, detail="Deck not found")
+    deck_data = _deck_load(username, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return JSONResponse({**_deck_detail_payload(deck_data), "username": username, "banner": entry.get("banner")})
+
+
 @app.get("/api/decks/{deck_name}")
 async def api_deck_get(deck_name: str, request: Request):
     user = get_current_user(request)
@@ -4016,17 +4091,7 @@ async def api_deck_get(deck_name: str, request: Request):
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-    slug_data = load_slugs_data()
-    info_data = load_info_data()
-    name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
-    edition_map = {}
-    for cards in deck_data["sections"].values():
-        for card_id in cards:
-            if card_id not in edition_map:
-                eid = _pick_edition(card_id, info_data)
-                if eid:
-                    edition_map[card_id] = eid
-    return JSONResponse({**deck_data, "name_map": name_map, "edition_map": edition_map})
+    return JSONResponse(_deck_detail_payload(deck_data))
 
 
 @app.patch("/api/decks/{deck_name}")
@@ -4063,6 +4128,8 @@ async def api_deck_patch(deck_name: str, request: Request):
     if "banner" in body:
         banner = body["banner"]
         index[deck_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
+    if "public" in body:
+        index[deck_name]["public"] = bool(body["public"])
     index[deck_name]["modified"] = date.today().isoformat()
     _deck_index_save(user, index)
     if "format" in body or "desc" in body:

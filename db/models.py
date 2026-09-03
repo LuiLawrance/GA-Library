@@ -331,6 +331,7 @@ class Deck(Base):
     banner: Mapped[str | None] = mapped_column(Text)
     symbol: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSONB)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.date | None] = mapped_column(Date)
     modified_at: Mapped[dt.date | None] = mapped_column(Date)
 

@@ -144,6 +144,61 @@
     padding: 2px 6px;
 }
 
+/* Same shape/weight as .dga-tile-format, just in --success green. */
+.dga-tile-public {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--success);
+    background: rgba(59, 165, 93, 0.1);
+    border: 1px solid rgba(59, 165, 93, 0.2);
+    border-radius: 3px;
+    padding: 2px 6px;
+}
+
+.dga-public-field {
+    margin-top: 4px;
+}
+
+/* .inv-field-group's default align-items: stretch already carries this
+   inline-flex track to the field group's full width, matching the Name/
+   Format/Description inputs above it — each button then grows to fill its
+   even half rather than hugging its own label. See the shared .pill-toggle
+   comment (components.css) for the base look. */
+.dga-public-toggle .pill-toggle-btn {
+    flex: 1;
+    text-align: center;
+    font-size: 0.78rem;
+    padding: 5px 14px;
+}
+
+/* Distinguishes same-card tiles in the Set Banner search — it asks for
+   every printing (all_prints=1) rather than one random edition, since the
+   whole point is picking a specific one. */
+.dga-banner-tile-caption {
+    margin-top: 6px;
+    text-align: center;
+}
+
+.dga-banner-tile-name {
+    font-size: 0.72rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.dga-banner-tile-set {
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .dga-tile-desc {
     font-family: var(--font-mono);
     font-size: 0.68rem;

@@ -1,0 +1,31 @@
+/* Public "Decks" browse page — layout/tile visuals ride on decks_ga.css
+   (dga-* classes), which is loaded globally. Only page-specific bits live here. */
+
+.pd-tile-owner {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--text-muted);
+    opacity: 0.8;
+}
+
+.pd-detail-owner {
+    opacity: 0.8;
+}
+
+.pd-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 48px 0;
+    color: var(--text-muted);
+    grid-column: 1 / -1;
+}
+
+/* .dga-deck-grid's own 32px page padding is redundant once it's nested
+   inside a section block, which already sits in .dga-card-grid's padding —
+   this strips it back down to just the grid/gap sizing. */
+.pd-section-deck-grid {
+    padding: 0;
+    overflow: visible;
+}

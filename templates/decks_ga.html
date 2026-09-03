@@ -15,8 +15,17 @@
         <button class="inv-context-item" onclick="dgaCtxEditDesc()">
             <span class="inv-context-icon">≡</span> Edit Description
         </button>
+        <button class="inv-context-item" id="dga-ctx-set-banner" onclick="dgaCtxOpenBannerSearch()">
+            <span class="inv-context-icon">🖼</span> Set Banner
+        </button>
         <button class="inv-context-item" id="dga-ctx-clear-banner" onclick="dgaCtxClearBanner()">
             <span class="inv-context-icon">🖼</span> Clear Banner
+        </button>
+        <button class="inv-context-item" id="dga-ctx-make-public" onclick="dgaCtxSetPublic(true)">
+            <span class="inv-context-icon">🌐</span> Make Public
+        </button>
+        <button class="inv-context-item" id="dga-ctx-make-private" onclick="dgaCtxSetPublic(false)">
+            <span class="inv-context-icon">🔒</span> Make Private
         </button>
         <div class="inv-context-divider"></div>
         <button class="inv-context-item inv-context-item-danger" onclick="dgaCtxDelete()">
@@ -201,6 +210,17 @@
                     <label class="inv-field-label label label--muted">Description</label>
                     <input class="inv-text-input" id="dga-settings-desc" maxlength="100" placeholder="..." type="text">
                 </div>
+                <div class="inv-field-group dga-public-field">
+                    <label class="inv-field-label label label--muted">Visibility</label>
+                    <div class="pill-toggle dga-public-toggle" id="dga-settings-public-toggle">
+                        <span class="pill-indicator"></span>
+                        <button type="button" class="pill-toggle-btn active" data-value="false"
+                                onclick="setDgaPublicValue(false)">Private</button>
+                        <button type="button" class="pill-toggle-btn" data-value="true"
+                                onclick="setDgaPublicValue(true)">Public</button>
+                    </div>
+                    <input type="hidden" id="dga-settings-public" value="false">
+                </div>
             </div>
             <div class="inv-modal-error hidden" id="dga-settings-error"></div>
             <div class="inv-modal-actions">
@@ -279,6 +299,58 @@
                             </div>
                             <button class="inv-modal-submit" id="dga-add-modal-submit" onclick="submitDgaAddCard()">
                                 Add to Deck
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Set Banner modal — search a specific card edition to use as the deck's banner ── -->
+    <div class="inv-modal-overlay overlay hidden" id="dga-banner-modal" onclick="closeDeckBannerModal()">
+        <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
+            <div class="inv-modal-header inv-add-modal-header">
+                <button class="inv-btn-back-arrow hidden" id="dga-banner-back-btn" onclick="dgaBannerBackToSearch()">‹</button>
+                <span class="inv-modal-title">Set Banner</span>
+                <button class="inv-modal-close" onclick="closeDeckBannerModal()">✕</button>
+            </div>
+
+            <!-- Search step -->
+            <div id="dga-banner-step-search">
+                <div class="inv-add-search-wrap">
+                    <div class="autocomplete-wrap" style="flex:1">
+                        <input autocomplete="off" class="inv-text-input" id="dga-banner-search"
+                               oninput="fetchDgaBannerSuggestions(this.value)"
+                               onkeydown="handleDgaBannerKeydown(event)"
+                               placeholder="Search cards..."
+                               type="text">
+                        <div class="autocomplete-list hidden" id="dga-banner-autocomplete"></div>
+                    </div>
+                    <button class="btn-search btn btn--primary" onclick="searchDgaBannerCards()">Search</button>
+                </div>
+                <div class="inv-add-results scroll-none" id="dga-banner-results">
+                    <div class="inv-search-placeholder" style="padding:30px 0">
+                        <span class="inv-empty-icon">⬡</span>
+                        <p>Search for a card to set as the banner.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Confirm step: specific edition selected -->
+            <div class="hidden" id="dga-banner-step-confirm">
+                <div class="inv-foil-step-body">
+                    <img alt="" class="inv-modal-img-large" id="dga-banner-modal-img" src="">
+                    <div class="inv-foil-step-right">
+                        <div class="inv-foil-step-top">
+                            <div>
+                                <div class="inv-modal-title" id="dga-banner-modal-name"></div>
+                                <div class="inv-modal-set" id="dga-banner-modal-set"></div>
+                            </div>
+                        </div>
+                        <div class="inv-foil-step-bottom">
+                            <button class="inv-modal-submit" id="dga-banner-modal-submit" onclick="submitDgaBanner()">
+                                Set as Banner
                             </button>
                         </div>
                     </div>

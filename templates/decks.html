@@ -1,4 +1,69 @@
-<div class="hero">
-    <span class="hero-label label">Decks</span>
-    <p class="hero-sub">Coming soon.</p>
+<div class="dga-page page" id="pd-page">
+
+    <!-- ── Public decks list view ──
+         No page-level header — grouped into .dga-section-block sections
+         (the same pattern a deck's own card grid and an Inventory bin use),
+         so more sections (e.g. by format, featured) can be added later
+         alongside "All Decks" without a layout change. -->
+    <div class="dga-list-view" id="pd-list-view">
+        <div class="dga-card-grid-wrap scroll-thin">
+            <div class="dga-card-grid" id="pd-sections"></div>
+        </div>
+    </div>
+
+    <!-- ── Public deck read-only detail view ── -->
+    <div class="dga-detail-view hidden" id="pd-detail-view">
+        <div class="dga-detail-header detail-header">
+            <div class="dga-detail-back" onclick="closePublicDeckDetail()">
+                <span class="dga-back-arrow">←</span>
+                <span>Decks</span>
+            </div>
+            <div class="dga-detail-title-row">
+                <div>
+                    <div class="dga-detail-title-wrap">
+                        <span class="dga-detail-name" id="pd-detail-name"></span>
+                        <span class="dga-detail-format" id="pd-detail-format"></span>
+                    </div>
+                    <div class="dga-detail-meta-group">
+                        <span class="dga-detail-meta" id="pd-detail-desc"></span>
+                    </div>
+                    <div class="dga-detail-meta-group">
+                        <span class="dga-detail-meta pd-detail-owner" id="pd-detail-owner"></span>
+                    </div>
+                </div>
+                <div class="dga-detail-header-right">
+                    <div class="dga-detail-counts" id="pd-detail-counts"></div>
+                </div>
+            </div>
+        </div>
+        <div class="dga-cards-body">
+            <div class="dga-card-grid-wrap scroll-thin">
+                <div class="dga-card-grid" id="pd-card-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Card drawer ──
+         A direct child of .dga-page (not nested in .dga-cards-body) so it
+         sizes against the full page height, matching Admin/Prices — see
+         .dga-page in decks_ga.css. -->
+    <div class="card-drawer hidden" id="card-drawer">
+        <div class="drawer-inner">
+            <div id="drawer-content"></div>
+        </div>
+    </div>
+    <div class="drawer-sidebar hidden" id="drawer-sidebar">
+        <button class="drawer-sidebar-close" onclick="closeCardDrawer()">✕</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info"
+                onclick="switchDrawerTab('info', 'card-drawer')" title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                title="Thema">🏷️
+        </button>
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+                title="Pricing">💵
+        </button>
+    </div>
+
 </div>
