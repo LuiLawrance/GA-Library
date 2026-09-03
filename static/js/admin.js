@@ -66,13 +66,17 @@ const ADMIN_PID_CONDITIONS = ['Near Mint', 'Lightly Played', 'Moderately Played'
 //   marketplace — value stored on sales/listings entries added while this pill
 //                 is active ("TCGPlayer" matches what scraped/pasted rows use).
 //   icon        — the Link button's image; null (Manual) hides the Link button.
-//   linkable    — Link button is live; false greys it out (CoreTCG's product
-//                 URLs aren't wired up yet — see openAdminPidLink).
+//   linkable    — Link button is live; false greys it out (only Manual now, and
+//                 it's hidden anyway for having no icon — see openAdminPidLink).
+//   linkUrl     — a fixed URL the Link button opens as-is (CoreTCG has no
+//                 per-card product pages, just one Grand Archive product list).
+//                 When absent the button builds a per-card URL (TCGPlayer).
 //   automated   — has product-ID/scraper automation; when false the list's
 //                 Product ID column collapses (see updateAdminPidProductIdVisibility).
 const ADMIN_PID_MARKETPLACES = {
     tcgplayer: {label: 'TCGPlayer', marketplace: 'TCGPlayer', icon: '/marketplaces/TCG%20Player.png', linkable: true, automated: true},
-    coretcg: {label: 'CoreTCG', marketplace: 'CoreTCG', icon: '/marketplaces/Core%20TCG.png', linkable: false, automated: false},
+    coretcg: {label: 'CoreTCG', marketplace: 'CoreTCG', icon: '/marketplaces/Core%20TCG.png', linkable: true, automated: false,
+              linkUrl: 'https://coretcg.com/Products/0/74/0/Grand-Archive?games=74&producttypes=0'},
     manual: {label: 'Manual', marketplace: 'Manual', icon: null, linkable: false, automated: false},
 };
 
@@ -2727,10 +2731,10 @@ function updateAdminPidRefreshButton() {
         : 'Refresh Selected';
 }
 
-// The Link button (opens the selected card on the active marketplace). Its
-// image tracks the marketplace scope pill; "Manual" has no marketplace to link
-// out to so the button is hidden, and a not-yet-linkable marketplace (CoreTCG)
-// shows its icon but stays disabled.
+// The Link button (opens the active marketplace — TCGPlayer builds a per-card
+// URL, CoreTCG opens its fixed Grand Archive sets index). Its image tracks the
+// marketplace scope pill; "Manual" has no marketplace to link out to so the
+// button is hidden. A non-linkable marketplace shows its icon but stays disabled.
 function updateAdminPidLinkButton() {
     const btn = document.getElementById('admin-pid-link-btn');
     if (!btn) return;
@@ -2740,7 +2744,8 @@ function updateAdminPidLinkButton() {
     // .admin-pid-collapsed in admin.css.
     btn.classList.toggle('admin-pid-collapsed', !mp.icon);
     btn.disabled = !mp.linkable || !adminPidDetailSelected;
-    btn.title = mp.linkable ? mp.label : `${mp.label} — coming soon`;
+    btn.title = !mp.linkable ? `${mp.label} — coming soon`
+        : mp.linkUrl ? `${mp.label} — Grand Archive products` : mp.label;
 
     const img = btn.querySelector('.admin-pid-link-icon');
     if (img && mp.icon) {
@@ -2753,10 +2758,17 @@ function openAdminPidLink() {
     const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
     if (!record) return;
 
-    // Non-linkable marketplaces (CoreTCG for now) render the button disabled —
-    // this guard is the belt-and-braces match for that. CoreTCG's product URLs
-    // come with the rest of that marketplace's integration in a later step.
-    if (!adminPidMarketplaceConfig().linkable) return;
+    const mp = adminPidMarketplaceConfig();
+    // The button is rendered disabled for a non-linkable marketplace — this is
+    // the belt-and-braces match for that.
+    if (!mp.linkable) return;
+
+    // A marketplace with a fixed link (CoreTCG → its Grand Archive product list)
+    // opens it as-is; it has no per-card product pages to build a URL from.
+    if (mp.linkUrl) {
+        window.open(mp.linkUrl, '_blank', 'noopener');
+        return;
+    }
 
     // When toggled to the Curio Foil view, open its own separate TCGPlayer
     // product page instead of the edition's regular one.
