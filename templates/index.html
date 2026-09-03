@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="/static/css/inventory.css">
     <link rel="stylesheet" href="/static/css/decks_ga.css">
     <link rel="stylesheet" href="/static/css/admin.css">
+    <link rel="stylesheet" href="/static/css/profile.css">
 </head>
 <body>
 
@@ -28,9 +29,17 @@
 <div class="topbar">
     <a href="/" class="topbar-brand" data-link>GA Library</a>
     <div class="topbar-right">
-        <span id="topbar-user" class="topbar-user hidden"></span>
+        <div id="topbar-user-menu" class="topbar-user-menu hidden">
+            <button id="topbar-user-btn" class="topbar-user" onclick="toggleUserMenu(event)">
+                <span id="topbar-user-name"></span>
+                <span class="dropdown-arrow">&#8249;</span>
+            </button>
+            <div id="topbar-user-dropdown" class="menu topbar-user-dropdown hidden">
+                <a href="/profile" class="topbar-user-item" data-link>Profile</a>
+                <button type="button" class="topbar-user-item" onclick="handleLogout()">Logout</button>
+            </div>
+        </div>
         <a id="topbar-login-btn" class="btn-login btn btn--ghost" data-link href="/login">Login</a>
-        <button id="topbar-logout-btn" class="btn-login btn btn--ghost hidden" onclick="handleLogout()">Logout</button>
     </div>
 </div>
 
@@ -55,6 +64,37 @@
 <footer class="footer">
     A Lawrance Lui project
 </footer>
+
+<!-- Blocking account-setup gate — shown when an admin has cleared this user's
+     Omnidex ID and/or password (see maybeShowAccountSetup in app.js). No way
+     to dismiss it; the backend also 403s other API calls until it's done. -->
+<div id="account-setup-modal" class="setup-overlay hidden">
+    <div class="setup-card">
+        <div class="setup-header">
+            <span class="setup-label label">Account setup required</span>
+            <h2 class="setup-title" id="setup-title">Set your Omnidex ID</h2>
+        </div>
+        <p class="setup-desc" id="setup-desc"></p>
+        <div class="setup-error error-msg" id="setup-error"></div>
+
+        <div class="setup-step" id="setup-step-omnidex">
+            <label class="label label--muted label--sm" for="setup-omnidex-input">Omnidex ID</label>
+            <input type="text" id="setup-omnidex-input" inputmode="numeric" autocomplete="off"
+                   placeholder="Your Omnidex ID number"
+                   onkeydown="if (event.key === 'Enter') submitAccountSetup()">
+        </div>
+
+        <div class="setup-step hidden" id="setup-step-password">
+            <label class="label label--muted label--sm" for="setup-password-input">New password</label>
+            <input type="password" id="setup-password-input" autocomplete="new-password">
+            <label class="label label--muted label--sm" for="setup-password-confirm">Confirm password</label>
+            <input type="password" id="setup-password-confirm" autocomplete="new-password"
+                   onkeydown="if (event.key === 'Enter') submitAccountSetup()">
+        </div>
+
+        <button class="btn btn--primary setup-submit" id="setup-submit" onclick="submitAccountSetup()">Continue</button>
+    </div>
+</div>
 
 <!-- Global delete-confirmation modal -->
 <div id="app-confirm-modal" class="inv-modal-overlay overlay hidden" onclick="appConfirmResolve(false)">
@@ -88,6 +128,7 @@
 <script src="/static/js/inventory.js"></script>
 <script src="/static/js/decks_ga.js"></script>
 <script src="/static/js/admin.js"></script>
+<script src="/static/js/profile.js"></script>
 <script src="/static/js/app.js"></script>
 
 </body>

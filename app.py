@@ -27,7 +27,24 @@ from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
 from sqlalchemy import create_engine, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from user import RANK_ORDER, user_create, user_delete, user_get_auth_type, user_list, user_login, user_set_role
+from user import (
+    RANK_ORDER,
+    user_admin_reset_omnidex,
+    user_admin_reset_password,
+    user_create,
+    user_delete,
+    user_find_by_omnidex,
+    user_get_auth_type,
+    user_get_profile,
+    user_list,
+    user_login,
+    user_needs_setup,
+    user_reset,
+    user_set_admin_note,
+    user_set_bio,
+    user_set_omnidex_id,
+    user_set_role,
+)
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 
@@ -149,6 +166,35 @@ def require_admin(request: Request) -> str:
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return user
+
+
+# API paths a user with a pending account-setup (Omnidex / password cleared by
+# an admin) may still call — everything they need to complete the setup, plus
+# session basics. Everything else under /api/ is 403'd until they're done.
+_SETUP_ALLOWED_API = (
+    "/api/me",
+    "/api/logout",
+    "/api/login",
+    "/api/register",
+    "/api/profile/omnidex",
+    "/api/profile/set-password",
+)
+
+
+@app.middleware("http")
+async def enforce_account_setup(request: Request, call_next):
+    path = request.url.path
+
+    # Only gate API calls; the SPA shell, fragments and static assets must
+    # load so the blocking setup modal can render.
+    if path.startswith("/api/") and not path.startswith(_SETUP_ALLOWED_API):
+        user = get_current_user(request)
+        if user:
+            flags = user_needs_setup(user)
+            if flags["must_set_omnidex"] or flags["must_set_password"]:
+                return JSONResponse({"detail": "Account setup required"}, status_code=403)
+
+    return await call_next(request)
 
 
 _STATIC_ASSET_RE = re.compile(r'(src|href)="(/static/[^"]+)"')
@@ -610,7 +656,180 @@ async def api_me(request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    return JSONResponse({"username": user, "auth_type": get_user_auth_type(user)})
+    return JSONResponse({
+        "username": user,
+        "auth_type": get_user_auth_type(user),
+        **user_needs_setup(user),
+    })
+
+
+# ── Self-service profile (any signed-in user, about their own account) ──
+
+def _require_login(request: Request) -> str:
+    user = get_current_user(request)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return user
+
+
+PROFILE_BIO_MAX = 2000
+
+# An Omnidex ID is a plain number the user copies from their Omnidex account.
+_OMNIDEX_ID_RE = re.compile(r"^\d{1,20}$")
+
+
+def _profile_payload(username: str) -> dict | None:
+    """The profile blob shared by the self page (/api/profile) and the public
+    page (/api/users/{omnidex_id}) — identity, bio, Omnidex ID, stats, and the
+    deck / bin lists. Contains nothing account-sensitive (no password hash,
+    no settings), so it's safe to serve publicly."""
+    profile = user_get_profile(username)
+
+    if profile is None:
+        return None
+
+    bins = _user_bins_list(username)
+    decks = _user_decks_list(username)
+
+    profile["bins"] = bins
+    profile["decks"] = decks
+    profile["stats"] = {
+        "bins": len(bins),
+        "cards": sum(b["card_count"] for b in bins),
+        "decks": len(decks),
+    }
+
+    return profile
+
+
+@app.get("/api/profile")
+async def api_profile(request: Request):
+    user = _require_login(request)
+
+    profile = _profile_payload(user)
+
+    if profile is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return JSONResponse(profile)
+
+
+@app.get("/api/users/{omnidex_id}")
+async def api_public_profile(omnidex_id: str):
+    """Read-only public view of a user's profile, looked up by Omnidex ID —
+    no auth required, no account-management surface (see _profile_payload)."""
+    username = user_find_by_omnidex(omnidex_id.strip())
+
+    if username is None:
+        raise HTTPException(status_code=404, detail="No user with that Omnidex ID")
+
+    profile = _profile_payload(username)
+
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No user with that Omnidex ID")
+
+    return JSONResponse(profile)
+
+
+@app.get("/api/omnidex-taken/{omnidex_id}")
+async def api_omnidex_taken(omnidex_id: str):
+    """Whether an Omnidex ID is already registered — the sign-up form checks
+    this before submitting. (user_create re-checks server-side regardless.)"""
+    return JSONResponse({"taken": user_find_by_omnidex(omnidex_id.strip()) is not None})
+
+
+@app.post("/api/profile/bio")
+async def api_profile_set_bio(request: Request):
+    user = _require_login(request)
+
+    body = await request.json()
+    bio = (body.get("bio") or "").strip()
+
+    if len(bio) > PROFILE_BIO_MAX:
+        raise HTTPException(status_code=400, detail=f"Bio must be {PROFILE_BIO_MAX} characters or fewer")
+
+    user_set_bio(user, bio)
+
+    return JSONResponse({"bio": bio})
+
+
+@app.post("/api/profile/omnidex")
+async def api_profile_set_omnidex(request: Request):
+    """Set the caller's Omnidex ID — only while it's currently unset (chosen at
+    registration, or cleared by an admin). Backs the account-setup gate."""
+    user = _require_login(request)
+
+    body = await request.json()
+    omnidex_id = (body.get("omnidex_id") or "").strip()
+
+    if not _OMNIDEX_ID_RE.match(omnidex_id):
+        raise HTTPException(status_code=400, detail="Omnidex ID must be a number (up to 20 digits)")
+
+    profile = user_get_profile(user)
+    if profile and profile.get("omnidex_id"):
+        raise HTTPException(status_code=400, detail="Your Omnidex ID is already set")
+
+    try:
+        user_set_omnidex_id(user, omnidex_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return JSONResponse({"omnidex_id": omnidex_id})
+
+
+@app.post("/api/profile/password")
+async def api_profile_change_password(request: Request):
+    user = _require_login(request)
+
+    body = await request.json()
+    current_password = body.get("current_password") or ""
+    new_password = body.get("new_password") or ""
+
+    if not new_password:
+        raise HTTPException(status_code=400, detail="New password cannot be empty")
+
+    if user_login(user, current_password) is None:
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    user_reset(user, new_password)
+
+    return JSONResponse({"message": "Password updated"})
+
+
+@app.post("/api/profile/set-password")
+async def api_profile_set_password(request: Request):
+    """First-time password set for an account whose password an admin cleared —
+    no current-password check (there isn't one). Backs the account-setup gate."""
+    user = _require_login(request)
+
+    if not user_needs_setup(user)["must_set_password"]:
+        raise HTTPException(status_code=400, detail="Password is already set")
+
+    body = await request.json()
+    new_password = body.get("new_password") or ""
+
+    if not new_password:
+        raise HTTPException(status_code=400, detail="Password cannot be empty")
+
+    user_reset(user, new_password)
+
+    return JSONResponse({"message": "Password set"})
+
+
+@app.delete("/api/profile")
+async def api_profile_delete(request: Request):
+    user = _require_login(request)
+
+    if get_user_auth_type(user) == "owner":
+        raise HTTPException(status_code=400, detail="The owner account cannot be self-deleted")
+
+    user_delete(user)
+
+    resp = JSONResponse({"deleted": user})
+    resp.delete_cookie("token")
+    return resp
 
 
 @app.get("/api/sets")
@@ -1465,6 +1684,56 @@ async def api_admin_delete_user(username: str, request: Request):
     return JSONResponse({"deleted": username})
 
 
+def _require_manageable_target(request: Request, username: str, verb: str) -> None:
+    """Shared guard for the per-user admin actions (delete / reset omni /
+    reset password): caller must be an admin, target must exist, must not be
+    the caller, and must rank strictly below the caller."""
+    admin = require_admin(request)
+
+    target_auth_type = user_get_auth_type(username)
+    if target_auth_type is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if username == admin:
+        raise HTTPException(status_code=400, detail=f"Cannot {verb} your own account")
+
+    if RANK_ORDER.index(target_auth_type) <= RANK_ORDER.index(user_get_auth_type(admin)):
+        raise HTTPException(status_code=400, detail=f"Cannot {verb} a user at or above your own rank")
+
+
+ADMIN_NOTE_MAX = 4000
+
+
+@app.post("/api/admin/users/{username}/note")
+async def api_admin_user_note(username: str, request: Request):
+    require_admin(request)
+    _require_existing_user(username)
+
+    body = await request.json()
+    note = (body.get("note") or "")
+
+    if len(note) > ADMIN_NOTE_MAX:
+        raise HTTPException(status_code=400, detail=f"Note must be {ADMIN_NOTE_MAX} characters or fewer")
+
+    user_set_admin_note(username, note)
+
+    return JSONResponse({"note": note})
+
+
+@app.post("/api/admin/users/{username}/reset-omnidex")
+async def api_admin_reset_omnidex(username: str, request: Request):
+    _require_manageable_target(request, username, "reset the Omni ID of")
+    user_admin_reset_omnidex(username)
+    return JSONResponse({"username": username, "omnidex_id": None})
+
+
+@app.post("/api/admin/users/{username}/reset-password")
+async def api_admin_reset_password(username: str, request: Request):
+    _require_manageable_target(request, username, "reset the password of")
+    user_admin_reset_password(username)
+    return JSONResponse({"username": username, "password_reset": True})
+
+
 def _require_existing_user(username: str) -> None:
     if user_get_auth_type(username) is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1479,13 +1748,10 @@ def _bin_card_count(bin_info: dict) -> int:
     return total
 
 
-@app.get("/api/admin/users/{username}/inventory")
-async def api_admin_user_inventory(username: str, request: Request):
-    require_admin(request)
-    _require_existing_user(username)
-
-    bins_data = _inv_load(username)
-
+def _user_bins_list(username: str) -> list[dict]:
+    """Every inventory bin for a user as {name, section_count, card_count, desc,
+    banner, default}, name-sorted — feeds both the admin profile panel and the
+    self-service Profile page's Bins menu."""
     bins = [
         {
             "name": name,
@@ -1495,22 +1761,18 @@ async def api_admin_user_inventory(username: str, request: Request):
             "banner": bin_info.get("banner"),
             "default": bool(bin_info.get("default")),
         }
-        for name, bin_info in bins_data.items()
+        for name, bin_info in _inv_load(username).items()
     ]
     bins.sort(key=lambda b: b["name"].lower())
+    return bins
 
-    return JSONResponse({"bins": bins})
 
-
-@app.get("/api/admin/users/{username}/decks")
-async def api_admin_user_decks(username: str, request: Request):
-    require_admin(request)
-    _require_existing_user(username)
-
-    index = _deck_index_load(username)
-
+def _user_decks_list(username: str) -> list[dict]:
+    """Every deck for a user as {name, format, desc, banner, card_count},
+    name-sorted — feeds both the admin profile panel and the self-service
+    Profile page's Decks menu."""
     decks = []
-    for name, entry in index.items():
+    for name, entry in _deck_index_load(username).items():
         deck_data = _deck_load(username, name)
         count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
         decks.append({
@@ -1521,8 +1783,37 @@ async def api_admin_user_decks(username: str, request: Request):
             "card_count": count,
         })
     decks.sort(key=lambda d: d["name"].lower())
+    return decks
 
-    return JSONResponse({"decks": decks})
+
+@app.get("/api/admin/users/{username}")
+async def api_admin_user(username: str, request: Request):
+    """Identity fields for the Admin → Users profile panel — role, Omnidex ID,
+    bio, join date. (Inventory / decks have their own endpoints below.)"""
+    require_admin(request)
+
+    profile = user_get_profile(username)
+
+    if profile is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return JSONResponse(profile)
+
+
+@app.get("/api/admin/users/{username}/inventory")
+async def api_admin_user_inventory(username: str, request: Request):
+    require_admin(request)
+    _require_existing_user(username)
+
+    return JSONResponse({"bins": _user_bins_list(username)})
+
+
+@app.get("/api/admin/users/{username}/decks")
+async def api_admin_user_decks(username: str, request: Request):
+    require_admin(request)
+    _require_existing_user(username)
+
+    return JSONResponse({"decks": _user_decks_list(username)})
 
 
 @app.get("/api/admin/pricing/product-ids")
@@ -2132,7 +2423,9 @@ async def api_sets_search(prefix: str):
 
 
 @app.post("/api/login")
-async def api_login(username: str = Form(...), password: str = Form(...)):
+async def api_login(username: str = Form(...), password: str = Form("")):
+    # password defaults to "" — FastAPI's Form(...) rejects an empty field as
+    # missing, and an account whose password an admin reset logs in blank.
     user = user_login(username, password)
 
     if not user:
@@ -2140,7 +2433,11 @@ async def api_login(username: str = Form(...), password: str = Form(...)):
 
     token = create_token(username)
 
-    resp = JSONResponse({"username": username, "auth_type": get_user_auth_type(username)})
+    resp = JSONResponse({
+        "username": username,
+        "auth_type": get_user_auth_type(username),
+        **user_needs_setup(username),
+    })
     resp.set_cookie(
         key="token",
         value=token,
@@ -2159,9 +2456,18 @@ async def api_logout():
 
 
 @app.post("/api/register")
-async def api_register(username: str = Form(...), password: str = Form(...)):
+async def api_register(
+    username: str = Form(...),
+    password: str = Form(...),
+    omnidex_id: str = Form(...),
+):
+    omnidex_id = omnidex_id.strip()
+
+    if not _OMNIDEX_ID_RE.match(omnidex_id):
+        raise HTTPException(status_code=400, detail="Omnidex ID must be a number (up to 20 digits)")
+
     try:
-        user_create(username, password)
+        user_create(username, password, omnidex_id=omnidex_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -2254,6 +2560,16 @@ async def inventory_page():
     return serve_index()
 
 
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page():
+    return serve_index()
+
+
+# The public profile is a client-side hash route — /#<omnidex_id> — so it
+# needs no server route: the "#" fragment never reaches the server, and any
+# "/" load already serves the SPA shell. app.js reads the hash and renders it.
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
     return serve_index()
@@ -2339,6 +2655,12 @@ async def fragment_login():
 @app.get("/fragments/prices", response_class=HTMLResponse)
 async def fragment_prices():
     with open("templates/prices.html", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+@app.get("/fragments/profile", response_class=HTMLResponse)
+async def fragment_profile():
+    with open("templates/profile.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 

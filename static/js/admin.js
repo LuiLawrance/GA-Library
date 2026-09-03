@@ -9,6 +9,7 @@ let adminSystemLoaded = false;
 let adminUsersLoaded = false;
 let adminUsersData = [];
 let adminUserDetailSelected = null;
+let adminUserDetailProfile = null;
 let adminUserDetailInventory = null;
 let adminUserDetailDecks = null;
 let adminPidLoaded = false;
@@ -1136,18 +1137,23 @@ function renderAdminUserRows() {
     const viewerIndex = RANK_ORDER.indexOf(adminUsersData.find(u => u.username === currentUser)?.auth_type);
 
     const rows = filtered.map(u => {
-        const canDelete = viewerIndex >= 0 && u.username !== currentUser && RANK_ORDER.indexOf(u.auth_type) > viewerIndex;
-        const deleteBtn = canDelete
-            ? `<button type="button" class="admin-pid-detail-delete-btn" title="Delete user"
-                   onclick="event.stopPropagation(); deleteAdminUser('${escapeHtml(u.username)}')">&times;</button>`
+        const canManage = viewerIndex >= 0 && u.username !== currentUser && RANK_ORDER.indexOf(u.auth_type) > viewerIndex;
+        const un = escapeHtml(u.username);
+        const menuBtn = canManage
+            ? `<button type="button" class="admin-user-row-menu-btn" title="Actions"
+                   onclick="event.stopPropagation(); toggleAdminUserRowMenu(event, '${un}')">
+                   <span class="dropdown-arrow">&#8249;</span>
+               </button>`
             : '';
+        // Right-click anywhere on a manageable row also opens the action menu.
+        const rowContext = canManage ? `oncontextmenu="openAdminUserRowMenuFromRow(event, '${un}')"` : '';
 
         return `
             <div class="admin-user-row ${u.username === adminUserDetailSelected ? 'admin-user-row-active' : ''}"
-                 onclick="selectAdminUserDetail('${escapeHtml(u.username)}')">
-                <span class="admin-user-col-name">${escapeHtml(u.username)}</span>
+                 onclick="selectAdminUserDetail('${un}')" ${rowContext}>
+                <span class="admin-user-col-name">${un}</span>
                 <span class="admin-user-col-role">${escapeHtml(u.auth_type || '—')}</span>
-                <span class="admin-user-col-delete">${deleteBtn}</span>
+                <span class="admin-user-col-delete">${menuBtn}</span>
             </div>
         `;
     }).join('');
@@ -1155,6 +1161,132 @@ function renderAdminUserRows() {
     table.innerHTML = rows || '<div class="admin-pid-empty">No users match.</div>';
     syncAdminUserHeaderScrollbarOffset();
 }
+
+// ── Per-user row action menu (Reset Omni / Reset Password / Delete) ──
+// One shared, position:fixed menu (in admin.html) so it escapes the narrow
+// user list's overflow clipping. Anchored to whichever ‹ arrow was clicked.
+let _adminUserRowMenuFor = null;
+
+function _adminUserRowMenuOpen(username) {
+    const menu = document.getElementById('admin-user-row-menu');
+    return menu && _adminUserRowMenuFor === username && !menu.classList.contains('hidden');
+}
+
+// Shared open: place the menu's top-right corner at viewport point (right,
+// top), clamped on-screen. `btn` (optional) gets the .open arrow state.
+// getBoundingClientRect() reports post-`zoom` coords while inline top/left are
+// pre-`zoom`, so divide by the root zoom (1 in a normal browser).
+function _openAdminUserRowMenu(username, right, top, btn) {
+    const menu = document.getElementById('admin-user-row-menu');
+    if (!menu) return;
+
+    closeAdminUserRowMenu();
+    _adminUserRowMenuFor = username;
+    menu.dataset.username = username;
+    menu.classList.remove('hidden');
+
+    const z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    const vw = (window.innerWidth || 99999) / z;
+    const vh = (window.innerHeight || 99999) / z;
+    const r = right / z;
+    const t = top / z;
+
+    const left = Math.min(Math.max(4, Math.round(r - menu.offsetWidth)), vw - menu.offsetWidth - 4);
+    const clampedTop = Math.min(Math.round(t), vh - menu.offsetHeight - 4);
+    menu.style.left = `${Math.max(4, left)}px`;
+    menu.style.top = `${Math.max(4, clampedTop)}px`;
+
+    if (btn) {
+        btn.classList.add('open');
+        btn.closest('.admin-user-row')?.classList.add('admin-user-row-menu-open');
+    }
+}
+
+// Both triggers — the ‹ arrow click and a right-click anywhere on the row —
+// open the menu directly below the arrow button.
+function _openAdminUserRowMenuUnderArrow(username, btn) {
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    _openAdminUserRowMenu(username, r.right, r.bottom + 4, btn);
+}
+
+function toggleAdminUserRowMenu(e, username) {
+    if (_adminUserRowMenuOpen(username)) {
+        closeAdminUserRowMenu();
+        return;
+    }
+    _openAdminUserRowMenuUnderArrow(username, e.currentTarget);
+}
+
+function openAdminUserRowMenuFromRow(e, username) {
+    e.preventDefault();
+    if (_adminUserRowMenuOpen(username)) {
+        closeAdminUserRowMenu();
+        return;
+    }
+    _openAdminUserRowMenuUnderArrow(username, e.currentTarget.querySelector?.('.admin-user-row-menu-btn'));
+}
+
+function closeAdminUserRowMenu() {
+    const menu = document.getElementById('admin-user-row-menu');
+    menu?.classList.add('hidden');
+    _adminUserRowMenuFor = null;
+    document.querySelectorAll('.admin-user-row-menu-btn.open').forEach(b => b.classList.remove('open'));
+    document.querySelectorAll('.admin-user-row-menu-open').forEach(r => r.classList.remove('admin-user-row-menu-open'));
+}
+
+function adminUserRowMenuAction(action) {
+    const username = document.getElementById('admin-user-row-menu')?.dataset.username;
+    closeAdminUserRowMenu();
+    if (!username) return;
+    if (action === 'reset-omnidex') resetAdminUserOmnidex(username);
+    else if (action === 'reset-password') resetAdminUserPassword(username);
+    else if (action === 'delete') deleteAdminUser(username);
+}
+
+async function resetAdminUserOmnidex(username) {
+    const ok = await appConfirm(
+        `Clear the Omni ID for "${username}"? They'll be forced to enter a new one the next time they log in.`,
+        {title: 'Reset Omni ID', confirmLabel: 'Reset Omni'}
+    );
+    if (!ok) return;
+    await _adminUserActionRequest(username, 'reset-omnidex', 'Failed to reset Omni ID.');
+}
+
+async function resetAdminUserPassword(username) {
+    const ok = await appConfirm(
+        `Clear the password for "${username}"? They'll log in with a blank password, then be forced to set a new one.`,
+        {title: 'Reset Password', confirmLabel: 'Reset Password'}
+    );
+    if (!ok) return;
+    await _adminUserActionRequest(username, 'reset-password', 'Failed to reset password.');
+}
+
+async function _adminUserActionRequest(username, action, failMsg) {
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/${action}`, {method: 'POST'});
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.detail || failMsg);
+            return;
+        }
+        // Refresh the detail panel if this user is open.
+        if (adminUserDetailSelected === username) await loadAdminUserProfile();
+    } catch (err) {
+        alert('Request failed.');
+    }
+}
+
+// Close the row menu on outside click, Escape, or list scroll.
+document.addEventListener('click', e => {
+    if (!e.target.closest('#admin-user-row-menu') && !e.target.closest('.admin-user-row-menu-btn')) {
+        closeAdminUserRowMenu();
+    }
+});
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeAdminUserRowMenu();
+});
+document.addEventListener('scroll', () => closeAdminUserRowMenu(), true);
 
 // Mirrors syncAdminPidHeaderScrollbarOffset() — the header row lives outside
 // the scrollable body, so when a scrollbar appears it eats into the body's
@@ -1188,6 +1320,7 @@ async function deleteAdminUser(username) {
 
         if (adminUserDetailSelected === username) {
             adminUserDetailSelected = null;
+            adminUserDetailProfile = null;
             adminUserDetailInventory = null;
             adminUserDetailDecks = null;
             renderAdminUserProfileCol();
@@ -1301,6 +1434,7 @@ async function selectAdminUserDetail(username) {
     await sleep(150);
 
     adminUserDetailSelected = username;
+    adminUserDetailProfile = null;
     adminUserDetailInventory = null;
     adminUserDetailDecks = null;
 
@@ -1318,7 +1452,58 @@ async function selectAdminUserDetail(username) {
         detail?.classList.remove('fade-in');
     }, 200);
 
-    await Promise.all([loadAdminUserInventory(), loadAdminUserDecks()]);
+    await Promise.all([loadAdminUserProfile(), loadAdminUserInventory(), loadAdminUserDecks()]);
+}
+
+async function loadAdminUserProfile() {
+    const username = adminUserDetailSelected;
+    if (!username) return;
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`);
+        if (!res.ok) throw new Error('Failed to load user');
+        const data = await res.json();
+
+        if (adminUserDetailSelected !== username) return;
+        adminUserDetailProfile = data;
+    } catch (err) {
+        if (adminUserDetailSelected !== username) return;
+        adminUserDetailProfile = {};
+    }
+
+    renderAdminUserProfileCol();
+}
+
+async function saveAdminUserNote() {
+    const username = adminUserDetailSelected;
+    const textarea = document.getElementById('admin-user-note');
+    const btn = document.getElementById('admin-user-note-save');
+    const hint = document.getElementById('admin-user-note-hint');
+    if (!username || !textarea) return;
+
+    const note = textarea.value;
+    btn.disabled = true;
+    if (hint) { hint.textContent = ''; hint.classList.remove('admin-user-note-hint-error'); }
+
+    try {
+        const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/note`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({note}),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Save failed');
+
+        if (adminUserDetailProfile) adminUserDetailProfile.admin_note = data.note;
+        if (hint) hint.textContent = 'Saved.';
+    } catch (err) {
+        if (hint) {
+            hint.textContent = err.message || 'Save failed.';
+            hint.classList.add('admin-user-note-hint-error');
+        }
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 async function loadAdminUserInventory() {
@@ -1361,6 +1546,13 @@ async function loadAdminUserDecks() {
     renderAdminUserDetail();
 }
 
+// ISO timestamp -> "September 2, 2026" (falls back to the raw string).
+function adminFormatDate(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleDateString(undefined, {year: 'numeric', month: 'long', day: 'numeric'});
+}
+
 function renderAdminUserProfileCol() {
     const col = document.getElementById('admin-user-profile-col');
     if (!col) return;
@@ -1382,12 +1574,49 @@ function renderAdminUserProfileCol() {
     const cardCount = binsLoaded ? adminUserDetailInventory.reduce((sum, b) => sum + b.card_count, 0) : null;
     const deckCount = decksLoaded ? adminUserDetailDecks.length : null;
 
+    const profileLoaded = !!adminUserDetailProfile;
+    // Omnidex ID rides along as a small number after the username.
+    const omnidexTrailing = profileLoaded && adminUserDetailProfile.omnidex_id
+        ? `<span class="admin-user-omnidex" title="Omnidex ID">#${escapeHtml(adminUserDetailProfile.omnidex_id)}</span>`
+        : '';
+    const memberSinceBlock = profileLoaded && adminUserDetailProfile.created_at
+        ? `<div class="admin-user-meta">
+            <span class="admin-user-meta-label label label--muted label--sm">Member since</span>
+            <span class="admin-user-since-date">${escapeHtml(adminFormatDate(adminUserDetailProfile.created_at))}</span>
+        </div>`
+        : '';
+    const bio = profileLoaded
+        ? (adminUserDetailProfile.bio
+            ? escapeHtml(adminUserDetailProfile.bio)
+            : '<span class="admin-user-meta-empty">No bio</span>')
+        : '…';
+
+    const noteBlock = profileLoaded
+        ? `<div class="admin-user-meta admin-user-note-block">
+            <span class="admin-user-meta-label label label--muted label--sm">Notes</span>
+            <textarea class="admin-user-note-input scroll-thin" id="admin-user-note" rows="3"
+                      maxlength="4000" placeholder="Admin notes on this user…"
+                      oninput="adminUserDetailProfile.admin_note = this.value">${escapeHtml(adminUserDetailProfile.admin_note || '')}</textarea>
+            <div class="admin-user-note-actions">
+                <span class="admin-user-note-hint" id="admin-user-note-hint"></span>
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                        id="admin-user-note-save" onclick="saveAdminUserNote()">Save</button>
+            </div>
+        </div>`
+        : '';
+
     col.innerHTML = `
         <div class="admin-pid-detail-header">
-            <span class="admin-user-profile-name">${escapeHtml(record.username)}</span>
+            <span class="admin-user-profile-name">${escapeHtml(record.username)}${omnidexTrailing}</span>
             <span class="admin-user-profile-role">${escapeHtml(record.auth_type || '—')}</span>
         </div>
-        <div class="drawer-stats">
+        <div class="admin-user-meta">
+            <span class="admin-user-meta-label label label--muted label--sm">Bio</span>
+            <p class="admin-user-meta-bio">${bio}</p>
+        </div>
+        ${memberSinceBlock}
+        ${noteBlock}
+        <div class="drawer-stats admin-user-stats">
             <div class="drawer-stat">
                 <span class="drawer-stat-label label label--muted label--sm">Bins</span>
                 <span class="drawer-stat-value">${binCount ?? '…'}</span>

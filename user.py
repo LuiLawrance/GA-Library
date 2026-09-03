@@ -5,7 +5,10 @@ from deck_ga import deck_init
 from inv_ga import inv_init
 from pathlib import Path
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from util_file import new_json
+
+from datetime import datetime, timezone
 
 import bcrypt
 import json
@@ -34,13 +37,22 @@ def _save_users_data(data: dict) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
-def user_create(username: str, password: str, debug: bool = False) -> None:
+def user_create(username: str, password: str, omnidex_id: str | None = None, debug: bool = False) -> None:
+    """omnidex_id is supplied at registration (see api_register); it must be
+    unique across all users, and is write-once — there's no way to change it
+    afterward. Format validation happens in the caller."""
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    omnidex_id = omnidex_id or None
 
     if is_db_mode():
         with get_session() as session:
             if session.get(UserModel, username):
                 raise ValueError(f"Username already taken: {username}")
+
+            if omnidex_id and session.execute(
+                select(UserModel.username).where(UserModel.omnidex_id == omnidex_id)
+            ).first():
+                raise ValueError("That Omnidex ID is already taken")
 
             is_first_user = session.execute(select(UserModel.username).limit(1)).first() is None
 
@@ -49,6 +61,9 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
                 password_hash=hashed.decode("utf-8"),
                 auth_type="owner" if is_first_user else "user",
                 notes=[],
+                bio="",
+                omnidex_id=omnidex_id,
+                admin_note="",
             ))
 
         # Inventory/decks/wishlist aren't DB-wired yet (see the migration
@@ -64,10 +79,17 @@ def user_create(username: str, password: str, debug: bool = False) -> None:
     if username in users_data:
         raise ValueError(f"Username already taken: {username}")
 
+    if omnidex_id and any(info.get("omnidex_id") == omnidex_id for info in users_data.values()):
+        raise ValueError("That Omnidex ID is already taken")
+
     users_data[username] = {
         "auth_type": "owner" if not users_data else "user",
         "password": hashed.decode("utf-8"),
-        "notes": []
+        "notes": [],
+        "bio": "",
+        "omnidex_id": omnidex_id,
+        "admin_note": "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
     _save_users_data(users_data)
@@ -154,6 +176,12 @@ def user_login(username: str, password: str, debug: bool = False) -> str | None:
             print(f"User not found: {username}")
         return None
 
+    # An admin-cleared password is stored as "" — it only accepts a blank
+    # password, and the user is forced to set a new one right after login
+    # (see user_needs_setup / the account-setup gate in app.js).
+    if hashed == b"":
+        return username if password == "" else None
+
     if not bcrypt.checkpw(password.encode("utf-8"), hashed):
         if debug:
             print(f"Invalid password for user: {username}")
@@ -206,6 +234,26 @@ def user_get_auth_type(username: str) -> str | None:
     return _load_users_data().get(username, {}).get("auth_type")
 
 
+def user_find_by_omnidex(omnidex_id: str) -> str | None:
+    """Username for a given Omnidex ID, or None. Omnidex IDs are unique, so
+    this is the lookup behind the public /@<omnidex_id> profile route."""
+    if not omnidex_id:
+        return None
+
+    if is_db_mode():
+        with get_session() as session:
+            row = session.execute(
+                select(UserModel.username).where(UserModel.omnidex_id == omnidex_id)
+            ).first()
+            return row.username if row else None
+
+    return next(
+        (username for username, info in _load_users_data().items()
+         if info.get("omnidex_id") == omnidex_id),
+        None,
+    )
+
+
 def user_list() -> list[dict]:
     """[{username, auth_type}, ...] for every user — feeds the Admin Users panel."""
     if is_db_mode():
@@ -229,3 +277,153 @@ def user_set_role(username: str, auth_type: str) -> None:
     users_data = _load_users_data()
     users_data[username]["auth_type"] = auth_type
     _save_users_data(users_data)
+
+
+def user_get_profile(username: str) -> dict | None:
+    """{username, auth_type, bio, omnidex_id, admin_note, created_at} — feeds
+    the self-service Profile page and the Admin -> Users panel.
+
+    created_at is an ISO string in DB mode and for JSON users created since the
+    field was added — None for older JSON accounts that predate it. omnidex_id
+    is None until the user sets it. admin_note is admin-only free text.
+    """
+    if is_db_mode():
+        with get_session() as session:
+            user = session.get(UserModel, username)
+
+            if not user:
+                return None
+
+            return {
+                "username": user.username,
+                "auth_type": user.auth_type,
+                "bio": user.bio or "",
+                "omnidex_id": user.omnidex_id,
+                "admin_note": user.admin_note or "",
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+            }
+
+    info = _load_users_data().get(username)
+
+    if info is None:
+        return None
+
+    return {
+        "username": username,
+        "auth_type": info.get("auth_type"),
+        "bio": info.get("bio", ""),
+        "omnidex_id": info.get("omnidex_id"),
+        "admin_note": info.get("admin_note", ""),
+        "created_at": info.get("created_at"),
+    }
+
+
+def user_needs_setup(username: str) -> dict:
+    """{must_set_omnidex, must_set_password} — an admin can clear either from
+    the Admin -> Users panel, which forces the user to re-enter it before they
+    can use anything (the account-setup gate in app.js, plus a server-side
+    middleware check)."""
+    if is_db_mode():
+        with get_session() as session:
+            user = session.get(UserModel, username)
+            if not user:
+                return {"must_set_omnidex": False, "must_set_password": False}
+            return {
+                "must_set_omnidex": user.omnidex_id is None,
+                "must_set_password": user.password_hash == "",
+            }
+
+    info = _load_users_data().get(username, {})
+    return {
+        "must_set_omnidex": not info.get("omnidex_id"),
+        "must_set_password": not info.get("password"),
+    }
+
+
+def user_set_bio(username: str, bio: str) -> None:
+    if is_db_mode():
+        with get_session() as session:
+            user = session.get(UserModel, username)
+            user.bio = bio
+        return
+
+    users_data = _load_users_data()
+    users_data[username]["bio"] = bio
+    _save_users_data(users_data)
+
+
+def user_set_admin_note(username: str, note: str) -> None:
+    if is_db_mode():
+        with get_session() as session:
+            user = session.get(UserModel, username)
+            user.admin_note = note
+        return
+
+    users_data = _load_users_data()
+    users_data[username]["admin_note"] = note
+    _save_users_data(users_data)
+
+
+def user_set_omnidex_id(username: str, omnidex_id: str) -> None:
+    """Assign a user's Omnidex ID (used by the account-setup gate when an admin
+    has cleared it). Raises ValueError if another account already uses that ID.
+    The write-once rule — can only be set while currently unset — is enforced
+    by the caller (app.py)."""
+    if is_db_mode():
+        with get_session() as session:
+            clash = session.execute(
+                select(UserModel.username).where(UserModel.omnidex_id == omnidex_id)
+            ).first()
+
+            if clash and clash.username != username:
+                raise ValueError("That Omnidex ID is already taken")
+
+            user = session.get(UserModel, username)
+            user.omnidex_id = omnidex_id
+
+            try:
+                session.flush()
+            except IntegrityError:
+                raise ValueError("That Omnidex ID is already taken")
+
+        return
+
+    users_data = _load_users_data()
+
+    for other, info in users_data.items():
+        if other != username and info.get("omnidex_id") == omnidex_id:
+            raise ValueError("That Omnidex ID is already taken")
+
+    users_data[username]["omnidex_id"] = omnidex_id
+    _save_users_data(users_data)
+
+
+def user_admin_reset_omnidex(username: str) -> None:
+    """Clear a user's Omnidex ID — they must re-enter one on next login."""
+    if is_db_mode():
+        with get_session() as session:
+            user = session.get(UserModel, username)
+            if user:
+                user.omnidex_id = None
+        return
+
+    users_data = _load_users_data()
+    if username in users_data:
+        users_data[username]["omnidex_id"] = None
+        _save_users_data(users_data)
+
+
+def user_admin_reset_password(username: str) -> None:
+    """Clear a user's password to "" — they log in with a blank password, then
+    must set a new one before doing anything (see user_login / user_needs_setup)."""
+    if is_db_mode():
+        with get_session() as session:
+            user = session.get(UserModel, username)
+            if user:
+                user.password_hash = ""
+        return
+
+    users_data = _load_users_data()
+    if username in users_data:
+        users_data[username]["password"] = ""
+        _save_users_data(users_data)

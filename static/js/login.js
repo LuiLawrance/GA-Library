@@ -24,13 +24,15 @@ async function handleSubmit() {
 
 async function handleLogin() {
     const username = document.getElementById('username').value.trim();
+    // No password check — an admin-reset account logs in with a blank one and
+    // hits the account-setup gate.
     const password = document.getElementById('password').value;
     const errorMsg = document.getElementById('error-msg');
 
     errorMsg.classList.remove('visible');
 
-    if (!username || !password) {
-        errorMsg.textContent = 'Please fill in all fields.';
+    if (!username) {
+        errorMsg.textContent = 'Please enter your username.';
         errorMsg.classList.add('visible');
         return;
     }
@@ -51,7 +53,7 @@ async function handleLogin() {
             currentUser = data.username;
             isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
             setLoggedIn(currentUser);
-            navigate('/');
+            if (typeof maybeShowAccountSetup !== 'function' || !maybeShowAccountSetup(data)) navigate('/');
         } else {
             errorMsg.textContent = 'Invalid username or password.';
             errorMsg.classList.add('visible');
@@ -66,11 +68,12 @@ async function handleRegister() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
     const confirm = document.getElementById('confirm-password').value;
+    const omnidexId = document.getElementById('omnidex-id').value.trim();
     const errorMsg = document.getElementById('error-msg');
 
     errorMsg.classList.remove('visible');
 
-    if (!username || !password) {
+    if (!username || !password || !omnidexId) {
         errorMsg.textContent = 'Please fill in all fields.';
         errorMsg.classList.add('visible');
         return;
@@ -82,9 +85,27 @@ async function handleRegister() {
         return;
     }
 
+    if (!/^\d{1,20}$/.test(omnidexId)) {
+        errorMsg.textContent = 'Omnidex ID must be a number.';
+        errorMsg.classList.add('visible');
+        return;
+    }
+
+    // Guard: an Omnidex ID can only belong to one account. (api/register
+    // re-checks server-side; this just fails fast with a clear message.)
+    try {
+        const check = await fetch(`/api/omnidex-taken/${encodeURIComponent(omnidexId)}`);
+        if (check.ok && (await check.json()).taken) {
+            errorMsg.textContent = 'That Omnidex ID is already registered.';
+            errorMsg.classList.add('visible');
+            return;
+        }
+    } catch { /* offline check failed — the server-side check still applies */ }
+
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
+    params.append('omnidex_id', omnidexId);
 
     try {
         const res = await fetch('/api/register', {

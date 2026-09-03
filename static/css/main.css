@@ -86,11 +86,62 @@ body {
     gap: 12px;
 }
 
+.topbar-user-menu {
+    position: relative;
+}
+
 .topbar-user {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-family: var(--font-mono);
     font-size: 0.78rem;
     color: var(--text-muted);
     letter-spacing: 0.05em;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 2px;
+    transition: color 0.2s;
+}
+
+.topbar-user:hover,
+.topbar-user.open {
+    color: var(--text);
+}
+
+.topbar-user .dropdown-arrow {
+    font-size: 0.9rem;
+}
+
+.topbar-user-dropdown {
+    right: 0;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+}
+
+.topbar-user-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    text-decoration: none;
+    background: none;
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.topbar-user-item:hover {
+    background: var(--bg-hover);
+    color: var(--text);
 }
 
 /* .btn-login is the shared .btn .btn--ghost (components.css) — its size and
@@ -284,6 +335,7 @@ body {
     max-height: 0;
     opacity: 0;
     padding: 0 32px;
+    border-top-width: 0;
 }
 
 /* ── Global confirm modal ── */
@@ -303,4 +355,75 @@ body {
     filter: grayscale(0.6) brightness(0.7);
     cursor: not-allowed;
     pointer-events: none;
+}
+
+/* ── Account-setup gate ──
+   Full-screen, non-dismissible: shown when an admin has cleared this user's
+   Omnidex ID and/or password. */
+.setup-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(2px);
+}
+
+.setup-card {
+    width: 100%;
+    max-width: 380px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+}
+
+.setup-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.setup-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+}
+
+.setup-desc {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.setup-step {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.setup-step + .setup-step {
+    margin-top: 4px;
+}
+
+.setup-error {
+    display: none;
+}
+
+.setup-error.visible {
+    display: block;
+}
+
+.setup-submit {
+    width: 100%;
+    padding: 11px 20px;
+    font-size: 0.9rem;
 }

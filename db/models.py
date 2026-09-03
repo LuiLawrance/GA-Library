@@ -46,6 +46,13 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     auth_type: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    bio: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Free-text notes admins keep on a user (Admin -> Users panel). Distinct
+    # from `notes` above (an unused JSONB list from the initial schema).
+    admin_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # User-supplied Omnidex ID. NULL until the user sets it; unique across all
+    # users; immutable once set (enforced in app.py, not the schema).
+    omnidex_id: Mapped[str | None] = mapped_column(Text, unique=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=dt.datetime.utcnow)
 
 

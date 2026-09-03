@@ -28,10 +28,13 @@ const routes = {
     '/admin/cards/pricing': '/fragments/admin',
     '/admin/users': '/fragments/admin',
     '/admin/system': '/fragments/admin',
+    '/profile': '/fragments/profile',
 };
 
 async function navigate(path, pushState = true) {
     const content = document.getElementById('content');
+
+    closeUserMenu();
 
     let pathname;
     await fadeSwap(content, async () => {
@@ -65,7 +68,10 @@ async function navigate(path, pushState = true) {
             a.classList.toggle('active', active);
         });
 
-        const fragment = routes[pathname] || routes['/'];
+        // "/@<omnidex_id>" is how the public profile is routed internally
+        // (the user-facing URL is the hash "/#<omnidex_id>" — see
+        // routeCurrentLocation). Same fragment as /profile; profile.js branches.
+        const fragment = routes[pathname] || (pathname.startsWith('/@') ? '/fragments/profile' : routes['/']);
         const res = await fetch(fragment);
         const html = await res.text();
 
@@ -74,8 +80,11 @@ async function navigate(path, pushState = true) {
 
     loginMode = 'login';
 
-    // Reset footer visibility when navigating
-    document.querySelector('.footer').classList.remove('footer-hidden');
+    // Reset footer visibility when navigating — then hide it outright on the
+    // profile pages (/profile and the public /#<omnidex_id>), which manage
+    // their own scrolling and have no use for it.
+    document.querySelector('.footer').classList.toggle(
+        'footer-hidden', pathname === '/profile' || pathname.startsWith('/@'));
 
     if (pathname === '/cards') {
         selectedSets.clear();
@@ -158,6 +167,52 @@ async function navigate(path, pushState = true) {
             await window.initPrices();
         }
     }
+
+    if (pathname === '/profile') {
+        if (!currentUser) {
+            navigate('/login');
+            return;
+        }
+        if (typeof window.initProfile === 'function') {
+            await window.initProfile();
+        }
+    }
+
+    if (pathname.startsWith('/@')) {
+        // Public profile (reached via the "/#<omnidex_id>" hash route).
+        // initPublicProfile resolves the ID and redirects to /profile if it's
+        // the signed-in user's own.
+        const omnidexId = decodeURIComponent(pathname.slice(2));
+        if (typeof window.initPublicProfile === 'function') {
+            await window.initPublicProfile(omnidexId);
+        }
+    }
+
+    _renderedLocation = window.location.pathname + window.location.search + window.location.hash;
+}
+
+// ── Location routing ──
+// Normal pages use History-API pathname routing; the public profile is a
+// hash route (/#<omnidex_id>) so its share links need no server config. This
+// dispatches either way, and dedupes the back/forward case where popstate and
+// hashchange both fire for the same destination.
+let _renderedLocation = null;
+
+function publicProfileHashId() {
+    const m = window.location.hash.match(/^#(\d{1,20})$/);
+    return m ? m[1] : null;
+}
+
+async function routeCurrentLocation() {
+    const loc = window.location.pathname + window.location.search + window.location.hash;
+    if (loc === _renderedLocation) return;
+
+    const omnidexId = publicProfileHashId();
+    if (omnidexId) {
+        await navigate('/@' + omnidexId, false);
+    } else {
+        await navigate(window.location.pathname + window.location.search, false);
+    }
 }
 
 function sleep(ms) {
@@ -224,6 +279,7 @@ async function checkAuth() {
             currentUser = data.username;
             isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
             setLoggedIn(currentUser);
+            maybeShowAccountSetup(data);
         } else {
             currentUser = null;
             isAdmin = false;
@@ -236,11 +292,120 @@ async function checkAuth() {
     }
 }
 
+// ── Blocking account-setup gate ──
+// An admin can clear a user's Omnidex ID and/or password (Admin -> Users). On
+// their next /api/me or /api/login the response carries must_set_* flags; this
+// puts up a non-dismissible modal that has to be completed before anything
+// else. The backend also 403s other /api/ calls until it's done.
+let _setupNeeds = {omnidex: false, password: false};
+
+function accountSetupPending(data) {
+    return !!(data && (data.must_set_omnidex || data.must_set_password));
+}
+
+function maybeShowAccountSetup(data) {
+    const modal = document.getElementById('account-setup-modal');
+    if (!modal) return false;
+
+    if (!accountSetupPending(data)) {
+        modal.classList.add('hidden');
+        return false;
+    }
+
+    _setupNeeds = {omnidex: !!data.must_set_omnidex, password: !!data.must_set_password};
+    document.getElementById('setup-error').classList.remove('visible');
+    modal.classList.remove('hidden');
+    renderAccountSetupStep();
+    return true;
+}
+
+function renderAccountSetupStep() {
+    const onOmnidex = _setupNeeds.omnidex;
+    document.getElementById('setup-step-omnidex').classList.toggle('hidden', !onOmnidex);
+    document.getElementById('setup-step-password').classList.toggle('hidden', onOmnidex);
+    document.getElementById('setup-title').textContent =
+        onOmnidex ? 'Set your Omnidex ID' : 'Set a new password';
+    document.getElementById('setup-desc').textContent = onOmnidex
+        ? 'An admin cleared your Omnidex ID. Enter a valid one to continue.'
+        : 'An admin reset your password. Choose a new one to continue.';
+    setTimeout(() => {
+        document.getElementById(onOmnidex ? 'setup-omnidex-input' : 'setup-password-input')?.focus();
+    }, 50);
+}
+
+function setupError(msg) {
+    const el = document.getElementById('setup-error');
+    el.textContent = msg;
+    el.classList.add('visible');
+}
+
+async function submitAccountSetup() {
+    document.getElementById('setup-error').classList.remove('visible');
+    const btn = document.getElementById('setup-submit');
+    btn.disabled = true;
+    try {
+        if (_setupNeeds.omnidex) {
+            await submitSetupOmnidex();
+        } else {
+            await submitSetupPassword();
+        }
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function submitSetupOmnidex() {
+    const omnidex_id = document.getElementById('setup-omnidex-input').value.trim();
+    if (!/^\d{1,20}$/.test(omnidex_id)) {
+        setupError('Omnidex ID must be a number (up to 20 digits).');
+        return;
+    }
+    const res = await fetch('/api/profile/omnidex', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({omnidex_id}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        setupError(data.detail || 'Could not save your Omnidex ID.');
+        return;
+    }
+    _setupNeeds.omnidex = false;
+    if (_setupNeeds.password) {
+        renderAccountSetupStep();
+    } else {
+        window.location.reload();
+    }
+}
+
+async function submitSetupPassword() {
+    const pw = document.getElementById('setup-password-input').value;
+    const confirm = document.getElementById('setup-password-confirm').value;
+    if (!pw) {
+        setupError('Password cannot be empty.');
+        return;
+    }
+    if (pw !== confirm) {
+        setupError('Passwords do not match.');
+        return;
+    }
+    const res = await fetch('/api/profile/set-password', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({new_password: pw}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        setupError(data.detail || 'Could not set your password.');
+        return;
+    }
+    window.location.reload();
+}
+
 function setLoggedIn(username) {
-    document.getElementById('topbar-user').textContent = username;
-    document.getElementById('topbar-user').classList.remove('hidden');
+    document.getElementById('topbar-user-name').textContent = username;
+    document.getElementById('topbar-user-menu').classList.remove('hidden');
     document.getElementById('topbar-login-btn').classList.add('hidden');
-    document.getElementById('topbar-logout-btn').classList.remove('hidden');
     document.getElementById('nav-inventory').classList.remove('hidden');
     document.getElementById('nav-decks-ga').classList.remove('hidden');
     document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin);
@@ -250,9 +415,9 @@ function setLoggedIn(username) {
 }
 
 function setLoggedOut() {
-    document.getElementById('topbar-user').classList.add('hidden');
+    closeUserMenu();
+    document.getElementById('topbar-user-menu').classList.add('hidden');
     document.getElementById('topbar-login-btn').classList.remove('hidden');
-    document.getElementById('topbar-logout-btn').classList.add('hidden');
     document.getElementById('nav-inventory').classList.add('hidden');
     document.getElementById('nav-decks-ga').classList.add('hidden');
     document.getElementById('nav-admin').classList.add('hidden');
@@ -261,12 +426,36 @@ function setLoggedOut() {
 }
 
 async function handleLogout() {
+    closeUserMenu();
     await fetch('/api/logout', {method: 'POST'});
     currentUser = null;
     isAdmin = false;
     setLoggedOut();
     navigate('/');
 }
+
+// ── Top-bar user dropdown ──
+function toggleUserMenu(e) {
+    e?.stopPropagation();
+    const menu = document.getElementById('topbar-user-dropdown');
+    const btn = document.getElementById('topbar-user-btn');
+    if (!menu || !btn) return;
+
+    const isOpen = !menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', isOpen);
+    btn.classList.toggle('open', !isOpen);
+}
+
+function closeUserMenu() {
+    document.getElementById('topbar-user-dropdown')?.classList.add('hidden');
+    document.getElementById('topbar-user-btn')?.classList.remove('open');
+}
+
+// Close the dropdown on any click outside it (the toggle itself stops
+// propagation, so this only fires for genuine outside clicks).
+document.addEventListener('click', e => {
+    if (!e.target.closest('#topbar-user-menu')) closeUserMenu();
+});
 
 // ── Login / Register ──
 function toggleMode() {
@@ -295,13 +484,15 @@ async function handleSubmit() {
 
 async function handleLogin() {
     const username = document.getElementById('username').value.trim();
+    // No password check here — an account whose password an admin reset logs
+    // in with a blank one, then hits the account-setup gate.
     const password = document.getElementById('password').value;
     const errorMsg = document.getElementById('error-msg');
 
     errorMsg.classList.remove('visible');
 
-    if (!username || !password) {
-        errorMsg.textContent = 'Please fill in all fields.';
+    if (!username) {
+        errorMsg.textContent = 'Please enter your username.';
         errorMsg.classList.add('visible');
         return;
     }
@@ -322,7 +513,7 @@ async function handleLogin() {
             currentUser = data.username;
             isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
             setLoggedIn(currentUser);
-            navigate('/');
+            if (!maybeShowAccountSetup(data)) navigate('/');
         } else {
             errorMsg.textContent = 'Invalid username or password.';
             errorMsg.classList.add('visible');
@@ -337,11 +528,12 @@ async function handleRegister() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
     const confirm = document.getElementById('confirm-password').value;
+    const omnidexId = document.getElementById('omnidex-id').value.trim();
     const errorMsg = document.getElementById('error-msg');
 
     errorMsg.classList.remove('visible');
 
-    if (!username || !password) {
+    if (!username || !password || !omnidexId) {
         errorMsg.textContent = 'Please fill in all fields.';
         errorMsg.classList.add('visible');
         return;
@@ -353,9 +545,27 @@ async function handleRegister() {
         return;
     }
 
+    if (!/^\d{1,20}$/.test(omnidexId)) {
+        errorMsg.textContent = 'Omnidex ID must be a number.';
+        errorMsg.classList.add('visible');
+        return;
+    }
+
+    // Guard: an Omnidex ID can only belong to one account. (api/register
+    // re-checks server-side; this just fails fast with a clear message.)
+    try {
+        const check = await fetch(`/api/omnidex-taken/${encodeURIComponent(omnidexId)}`);
+        if (check.ok && (await check.json()).taken) {
+            errorMsg.textContent = 'That Omnidex ID is already registered.';
+            errorMsg.classList.add('visible');
+            return;
+        }
+    } catch { /* offline check failed — the server-side check still applies */ }
+
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
+    params.append('omnidex_id', omnidexId);
 
     try {
         const res = await fetch('/api/register', {
@@ -383,14 +593,19 @@ document.addEventListener('click', e => {
 
     if (!link) return;
 
+    const href = link.getAttribute('href');
+
+    // Hash links (e.g. a public-profile "#<omnidex_id>") — let the browser
+    // set the hash and let the hashchange handler route it.
+    if (href.startsWith('#')) return;
+
     e.preventDefault();
-    navigate(link.getAttribute('href'));
+    navigate(href);
 });
 
-// ── Browser back/forward ──
-window.addEventListener('popstate', () => {
-    navigate(window.location.pathname + window.location.search, false);
-});
+// ── Browser back/forward + hash edits ──
+window.addEventListener('popstate', routeCurrentLocation);
+window.addEventListener('hashchange', routeCurrentLocation);
 
 // ── Enter key ──
 document.addEventListener('keydown', e => {
@@ -405,10 +620,25 @@ document.addEventListener('keydown', e => {
     }
 });
 
+// If an admin clears your Omni/password while you're mid-session, the next
+// gated API call comes back 403 "Account setup required" — re-check auth so
+// the setup gate pops up rather than the page just erroring out.
+const _appOrigFetch = window.fetch;
+window.fetch = function (...args) {
+    return _appOrigFetch.apply(this, args).then(res => {
+        if (res.status === 403) {
+            res.clone().json().then(d => {
+                if (d && d.detail === 'Account setup required') checkAuth();
+            }).catch(() => {});
+        }
+        return res;
+    });
+};
+
 // ── Init ──
 (async () => {
     await checkAuth();
-    await navigate(window.location.pathname + window.location.search, false);
+    await routeCurrentLocation();
 })();
 // ── Global confirmation modal (replaces browser confirm()) ──
 let _appConfirmResolver = null;

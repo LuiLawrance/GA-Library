@@ -114,6 +114,9 @@ def migrate_users() -> set[str]:
             "password_hash": info["password"],
             "auth_type": info.get("auth_type", "user"),
             "notes": info.get("notes", []),
+            "bio": info.get("bio", ""),
+            "omnidex_id": info.get("omnidex_id"),
+            "admin_note": info.get("admin_note", ""),
         }
         for username, info in users_data.items()
     ]
@@ -163,6 +166,9 @@ def port_owner_to_database() -> dict:
         "password_hash": info["password"],
         "auth_type": "owner",
         "notes": info.get("notes", []),
+        "bio": info.get("bio", ""),
+        "omnidex_id": info.get("omnidex_id"),
+        "admin_note": info.get("admin_note", ""),
     }
 
     try:

@@ -1946,6 +1946,163 @@
     color: var(--accent);
 }
 
+/* Omnidex ID — a small number trailing the username in the profile header,
+   floored so the digits sit level with the bottom of the username. */
+.admin-user-omnidex {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    vertical-align: text-bottom;
+}
+
+/* Member-since value under its label — normal case, not the label caps. */
+.admin-user-since-date {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text);
+    letter-spacing: 0.02em;
+}
+
+/* Bins / Cards / Decks badges pinned to the bottom of the profile panel. */
+.admin-user-stats {
+    margin-top: auto;
+}
+
+/* Bio block below the header. */
+.admin-user-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.admin-user-meta-bio {
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.admin-user-meta-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Admin notes textarea in the user profile panel — fixed size, not resizable. */
+.admin-user-note-input {
+    width: 100%;
+    height: 84px;
+    resize: none;
+    font-family: var(--font-sans);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+}
+
+.admin-user-note-input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+.admin-user-note-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.admin-user-note-hint {
+    margin-right: auto;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.admin-user-note-hint-error {
+    color: var(--error);
+}
+
+/* ── Per-row action menu (Reset Omni / Reset Password / Delete) ── */
+.admin-user-row-menu-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.admin-user-row-menu-btn:hover,
+.admin-user-row-menu-btn.open {
+    color: var(--text);
+}
+
+/* Left-facing ‹ at rest, rotating down to a v when the menu is open (overrides
+   the shared .dropdown-arrow rotation, which points down at rest). */
+.admin-user-row-menu-btn .dropdown-arrow {
+    transform: rotate(0deg);
+    transition: transform 0.2s ease;
+}
+
+.admin-user-row-menu-btn.open .dropdown-arrow {
+    transform: rotate(-90deg);
+}
+
+/* The list clips its overflow, so the menu is position:fixed and JS-placed.
+   Skip the shared .menu reveal animation — it fights the fixed positioning. */
+.admin-user-row-menu {
+    position: fixed;
+    top: auto;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    z-index: 400;
+    animation: none;
+    opacity: 1;
+    transform: none;
+}
+
+.admin-user-row-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.admin-user-row-menu-item:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+
+.admin-user-row-menu-item-danger:hover {
+    background: color-mix(in srgb, var(--error) 14%, transparent);
+    color: var(--error);
+}
+
 .admin-user-detail {
     flex: 1;
     min-width: 0;

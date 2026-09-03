@@ -1,0 +1,264 @@
+/* ═══════════════════════════════════════
+   profile.css — self-service /profile page
+   ═══════════════════════════════════════ */
+
+/* The whole page fills the content area and never scrolls itself — the
+   account column and the two tile menus each scroll internally if needed. */
+.profile-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 20px 32px;
+    display: flex;
+}
+
+.profile-layout {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    gap: 18px;
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+/* Left: account forms, fixed narrow width. Contained scroll is a safety net
+   for very short viewports — on a normal screen everything fits. */
+.profile-main-col {
+    flex: 0 0 300px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+
+/* Right: the two menus split the height; each tile grid scrolls its own
+   overflow. */
+.profile-side {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow: hidden;
+}
+
+.profile-side-panel {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* ── Public view (/@username) ──
+   Read-only: no password or danger panels. One centred column — Overview and
+   (if there's a bio) About on top, then the Decks and Inventory Bins menus
+   filling the rest, full-width, as many tiles per row as fit. */
+.profile-view-public .profile-area-password,
+.profile-view-public .profile-area-danger {
+    display: none;
+}
+
+.profile-view-public .profile-layout {
+    flex-direction: column;
+    max-width: 960px;
+}
+
+.profile-view-public .profile-main-col {
+    flex: 0 0 auto;
+    overflow: visible;
+    padding-right: 0;
+}
+
+.profile-view-public .profile-side {
+    flex: 1;
+}
+
+/* ── Narrow screens ── stack everything and let the page scroll normally. */
+@media (max-width: 880px) {
+    .profile-body {
+        overflow-y: auto;
+    }
+
+    .profile-layout {
+        flex-direction: column;
+    }
+
+    .profile-main-col {
+        flex: 0 0 auto;
+        overflow: visible;
+        padding-right: 0;
+    }
+
+    .profile-side {
+        overflow: visible;
+    }
+
+    .profile-side-panel {
+        flex: none;
+    }
+
+    .profile-tile-grid {
+        overflow: visible;
+    }
+}
+
+.profile-panel {
+    width: 100%;
+    padding: 15px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+
+.profile-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Header mirrors .admin-pid-detail-header on the Admin → Users page:
+   username with a small trailing "#<omnidex>", rank stacked below it. */
+.profile-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.profile-name {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--text);
+}
+
+/* Trailing Omnidex ID — floored so the digits sit level with the bottom of
+   the username (matches .admin-user-omnidex). */
+.profile-omnidex-trail {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    vertical-align: text-bottom;
+}
+
+.profile-role {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+
+/* "Member since" — its own bordered block, like the Admin panel's. */
+.profile-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 9px;
+    border-top: 1px solid var(--border);
+}
+
+.profile-since-date {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text);
+    letter-spacing: 0.02em;
+}
+
+.profile-stats {
+    margin-top: 2px;
+    gap: 6px;
+}
+
+.profile-stats .drawer-stat {
+    padding: 6px 10px;
+}
+
+/* Fixed size, not resizable — a bit of room to write a bio in. */
+.profile-bio {
+    resize: none;
+    height: 120px;
+}
+
+.profile-bio-readonly {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.profile-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.profile-field input {
+    padding: 8px 12px;
+}
+
+.profile-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.profile-btn {
+    font-size: 0.8rem;
+    padding: 8px 18px;
+    flex-shrink: 0;
+}
+
+.profile-hint {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    margin-right: auto;
+}
+
+.profile-hint-error {
+    color: var(--error);
+}
+
+.profile-hint-success {
+    color: var(--success);
+}
+
+.profile-danger {
+    border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+}
+
+.profile-danger-text {
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+/* ── Decks / Inventory Bins tile menus ──
+   Reuses .admin-user-tile-grid + .admin-user-tile from the Admin Users page
+   (admin.css). Here the column is always narrow, so a single tile per row. */
+.profile-side-count {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+/* Inherits .admin-user-tile-grid's repeat(auto-fill, minmax(280px, 1fr)) —
+   the wide side column fits multiple deck / bin tiles per row. */
+.profile-tile-grid.is-empty {
+    display: block;
+}
+
+.profile-menu-loading,
+.profile-menu-empty {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    padding: 6px 2px;
+}

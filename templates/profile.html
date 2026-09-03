@@ -1,0 +1,116 @@
+<div class="profile-page page" id="profile-page">
+    <div class="profile-body" id="profile-body">
+        <div class="profile-layout">
+            <!-- Account column: fits the viewport; scrolls internally only if
+                 the forms are taller than the area. -->
+            <div class="profile-main-col scroll-thin">
+                <!-- Overview -->
+                <div class="profile-panel panel profile-area-overview">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">Overview</span>
+                    </div>
+                    <div class="profile-overview">
+                        <span class="profile-name" id="profile-name">…</span>
+                        <span class="profile-role" id="profile-role">—</span>
+                    </div>
+                    <div class="profile-meta hidden" id="profile-since-block">
+                        <span class="label label--muted label--sm">Member since</span>
+                        <span class="profile-since-date" id="profile-since"></span>
+                    </div>
+                    <div class="drawer-stats profile-stats">
+                        <div class="drawer-stat">
+                            <span class="drawer-stat-label label label--muted label--sm">Bins</span>
+                            <span class="drawer-stat-value" id="profile-stat-bins">…</span>
+                        </div>
+                        <div class="drawer-stat">
+                            <span class="drawer-stat-label label label--muted label--sm">Cards</span>
+                            <span class="drawer-stat-value" id="profile-stat-cards">…</span>
+                        </div>
+                        <div class="drawer-stat">
+                            <span class="drawer-stat-label label label--muted label--sm">Decks</span>
+                            <span class="drawer-stat-value" id="profile-stat-decks">…</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- About -->
+                <div class="profile-panel panel profile-area-about">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">About</span>
+                    </div>
+                    <textarea class="textarea profile-bio scroll-thin" id="profile-bio" rows="3"
+                              maxlength="2000" placeholder="A short note about yourself…"></textarea>
+                    <p class="profile-bio-readonly hidden" id="profile-bio-readonly"></p>
+                    <div class="profile-form-actions" id="profile-bio-actions">
+                        <span class="profile-hint" id="profile-bio-hint"></span>
+                        <button type="button" class="btn btn--primary profile-btn" id="profile-bio-save"
+                                onclick="saveProfileBio()">Save</button>
+                    </div>
+                </div>
+
+                <!-- Change password -->
+                <div class="profile-panel panel profile-area-password">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">Change Password</span>
+                    </div>
+                    <div class="profile-field">
+                        <label class="profile-field-label label label--muted label--sm" for="profile-pw-current">Current password</label>
+                        <input type="password" id="profile-pw-current" autocomplete="current-password">
+                    </div>
+                    <div class="profile-field">
+                        <label class="profile-field-label label label--muted label--sm" for="profile-pw-new">New password</label>
+                        <input type="password" id="profile-pw-new" autocomplete="new-password">
+                    </div>
+                    <div class="profile-field">
+                        <label class="profile-field-label label label--muted label--sm" for="profile-pw-confirm">Confirm new password</label>
+                        <input type="password" id="profile-pw-confirm" autocomplete="new-password">
+                    </div>
+                    <div class="profile-form-actions">
+                        <span class="profile-hint" id="profile-pw-hint"></span>
+                        <button type="button" class="btn btn--primary profile-btn" id="profile-pw-save"
+                                onclick="updateProfilePassword()">Update Password</button>
+                    </div>
+                </div>
+
+                <!-- Danger zone -->
+                <div class="profile-panel panel profile-danger profile-area-danger hidden" id="profile-danger">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">Danger Zone</span>
+                    </div>
+                    <p class="profile-danger-text">
+                        Permanently delete your account along with your inventory, decks, and watchlist.
+                        This cannot be undone.
+                    </p>
+                    <div class="profile-form-actions">
+                        <span class="profile-hint" id="profile-delete-hint"></span>
+                        <button type="button" class="btn btn--ghost btn--danger profile-btn" id="profile-delete-btn"
+                                onclick="deleteMyAccount()">Delete Account</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Decks + Inventory Bins menus -->
+            <div class="profile-side profile-area-side">
+                <div class="profile-panel panel profile-side-panel">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">Decks</span>
+                        <span class="profile-side-count" id="profile-decks-count"></span>
+                    </div>
+                    <div class="admin-user-tile-grid profile-tile-grid scroll-thin" id="profile-decks-menu">
+                        <div class="profile-menu-loading">Loading…</div>
+                    </div>
+                </div>
+
+                <div class="profile-panel panel profile-side-panel">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">Inventory Bins</span>
+                        <span class="profile-side-count" id="profile-bins-count"></span>
+                    </div>
+                    <div class="admin-user-tile-grid profile-tile-grid scroll-thin" id="profile-bins-menu">
+                        <div class="profile-menu-loading">Loading…</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

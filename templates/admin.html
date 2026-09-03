@@ -242,6 +242,17 @@
                 </div>
                 <div class="admin-user-detail" id="admin-user-detail"></div>
             </div>
+
+            <!-- Shared per-row action menu — position:fixed, anchored by JS to
+                 the clicked ‹ arrow (see toggleAdminUserRowMenu in admin.js). -->
+            <div class="menu admin-user-row-menu hidden" id="admin-user-row-menu">
+                <button type="button" class="admin-user-row-menu-item"
+                        onclick="adminUserRowMenuAction('reset-omnidex')">Reset Omni</button>
+                <button type="button" class="admin-user-row-menu-item"
+                        onclick="adminUserRowMenuAction('reset-password')">Reset Password</button>
+                <button type="button" class="admin-user-row-menu-item admin-user-row-menu-item-danger"
+                        onclick="adminUserRowMenuAction('delete')">Delete User</button>
+            </div>
         </div>
 
         <div class="admin-section" id="admin-section-pricing">
