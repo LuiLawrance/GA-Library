@@ -25,7 +25,19 @@ let adminPidSetFilter = new Set();
 let adminPidSetFilterOpen = false;
 let adminPidRarityFilter = new Set();
 let adminPidRarityFilterOpen = false;
+// Product ID column's filter dropdown — unlike Set/Rarity (multi-select
+// Sets), only one of these (or none) applies at a time: null | 'missing' |
+// 'has_id' | 'no_id' | 'curio'. See adminPidIdFilterHtml/toggleAdminPidIdFilterOption.
+let adminPidIdFilter = null;
+let adminPidIdFilterOpen = false;
 let adminPidFindingIds = new Set();
+// Which column the Pricing table is sorted by, and its direction — 'name'
+// ascending (A-Z) is the default, matching the alphabetical order the
+// backend already returns adminPidData in (see api_admin_pricing_product_ids's
+// own sort in app.py) until an admin clicks a column header to change it. See
+// setAdminPidSort/adminPidCompareEditions.
+let adminPidSortField = 'name'; // 'name' | 'sales' | 'listings'
+let adminPidSortDir = 'asc';    // 'asc' | 'desc'
 // Whether Postgres is the backing store right now (Use JSON off — mirrors
 // is_db_mode() server-side), refreshed from GET /api/admin/pricing/product-ids
 // and kept live when the toggle is flipped (see updateAdminSystemSetting).
@@ -113,6 +125,46 @@ function adminPidIsScrapable(productId) {
     return !!productId && productId !== ADMIN_PID_NO_LISTINGS_SENTINEL;
 }
 
+// product_id -> how many times it's currently assigned across all editions —
+// counts both an edition's regular product_id and its Curio Foil override's
+// own product_id (if it has one), since either kind mistakenly pointing at
+// the same TCGPlayer listing as another card is the same underlying mistake.
+// Blank/"~" values never count (adminPidIsScrapable), so an empty Product ID
+// column is never flagged just for being empty on multiple rows.
+function computeAdminPidDuplicateProductIds() {
+    const counts = new Map();
+    const tally = (productId) => {
+        if (!adminPidIsScrapable(productId)) return;
+        counts.set(productId, (counts.get(productId) || 0) + 1);
+    };
+
+    adminPidData.forEach(e => {
+        tally(e.product_id);
+        if (e.curio) tally(e.curio.product_id);
+    });
+
+    return counts;
+}
+
+// Re-scans every Product ID input currently in the DOM — row list, detail
+// panel, and Curio Foil view alike, all sharing .admin-pid-input — and flags
+// (admin-pid-input-duplicate) any whose CURRENTLY DISPLAYED value collides
+// with another card's. Because a Curio Foil's own input only exists in the
+// DOM while its row's ✨ toggle is on (see adminPidProductIdFieldHtml), this
+// naturally limits the Curio Foil side of the check to toggled-on rows: with
+// the toggle off, only the regular product ID (the one actually in the DOM)
+// gets checked, so a unique regular ID never turns red just because a hidden,
+// untoggled Curio Foil ID happens to collide with something.
+function applyAdminPidDuplicateHighlights() {
+    const counts = computeAdminPidDuplicateProductIds();
+
+    document.querySelectorAll('.admin-pid-input').forEach(input => {
+        const value = input.value.trim();
+        const isDuplicate = adminPidIsScrapable(value) && (counts.get(value) || 0) > 1;
+        input.classList.toggle('admin-pid-input-duplicate', isDuplicate);
+    });
+}
+
 // positionPillIndicator (used below for the Cards section's two pill
 // toggles: Info/Pricing, Regular/Discord) now lives in animation.js, shared
 // alongside the rest of this page's animation helpers (animateBoxResize,
@@ -191,7 +243,8 @@ function switchAdminSection(section) {
 // visibly slides with the list as the grid recalculates each frame, instead
 // of needing a separate hide/reposition/reveal of its own. Its content still
 // updates instantly (inside the same mutate, right before that slide starts)
-// since the card selection itself IS reset on every switch — see below.
+// to reflect the new mode's shape for whatever card stays selected — the
+// selection itself carries over across the switch, see below.
 async function switchAdminCardsView(view) {
     const section = document.getElementById('admin-section-pricing');
     if (!section || adminCardsView === view) return;
@@ -207,15 +260,13 @@ async function switchAdminCardsView(view) {
     const enteringInfo = view === 'info';
 
     await fadeSwap([header, table], async () => {
-        // Deselect whatever card was open (and clear its bulk-refresh
-        // checkboxes) rather than carrying it — and its now-stale Sales/
-        // Listings history/foils/popover state — across into the other
-        // sub-view. Same reset selectAdminPricingDetail() does when
-        // switching to a DIFFERENT card, just landing on "nothing selected"
-        // instead of a new editionId.
-        adminPidDetailSelected = null;
-        adminPidDetailHistory = null;
-        adminPidDetailFoils = null;
+        // The selected card (adminPidDetailSelected) and its already-loaded
+        // history/foils carry over as-is — neither depends on which sub-view
+        // is showing them, and both info windows read the same
+        // adminPidDetailSelected (see the top of this function). Only the
+        // bulk-refresh checkboxes (meaningless in Info mode, which has no
+        // checkbox column) and the Pricing-only add-entry/import/export
+        // popovers get closed out.
         adminPidAddEntryOpenType = null;
         adminPidAddEntryFoilId = null;
         adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
@@ -234,10 +285,10 @@ async function switchAdminCardsView(view) {
         header.innerHTML = '';
         table.innerHTML = '';
 
-        // Updates the (now-deselected, so always "Select a card…") info
-        // window's content ahead of the slide below, so it's already showing
-        // the right thing by the time that's visible instead of changing
-        // mid-slide.
+        // Updates the info window's content ahead of the slide below (still
+        // showing the same selected card, now in the new mode's shape) so
+        // it's already correct by the time that's visible instead of
+        // changing mid-slide.
         renderAdminPricingDetailAll();
 
         await animateGridColumns(layout, () => {
@@ -245,6 +296,50 @@ async function switchAdminCardsView(view) {
         });
 
         renderAdminPricingIds();
+
+        // Jump straight to wherever the selected card landed rather than
+        // preserving the raw scroll offset — Info and Pricing rows aren't
+        // the same height, so a pixel offset carried over from one mode
+        // doesn't reliably land on the same card in the other.
+        //
+        // Waits for .admin-pid-controls' own max-height/opacity/margin-bottom
+        // transition (300ms, entirely separate from the grid-column animation
+        // just awaited above) to actually finish before measuring — that
+        // transition only starts on the FOLLOWING paint after the class
+        // toggle above (the browser needs a style pass to snapshot the
+        // "before" state first), so by the time animateGridColumns' own
+        // 300ms elapses it can still have a sliver left to run. Entering
+        // Pricing, .admin-pid-controls is what's expanding, and measuring
+        // .admin-pid-table-scroll's clientHeight a few ms before that
+        // finishes reads it taller than its settled size — undershooting the
+        // scroll and landing the selected row just past the real (shorter)
+        // viewport. transitionend catches the real finish; the timeout is
+        // just a safety net (e.g. transitions disabled/reduced motion).
+        const scrollToSelectedRow = () => {
+            const scroll = section.querySelector('.admin-pid-table-scroll');
+            const selectedRow = adminPidDetailSelected
+                && table.querySelector(`.admin-pid-row[data-edition-id="${CSS.escape(adminPidDetailSelected)}"]`);
+            if (!scroll || !selectedRow) return;
+
+            const target = (selectedRow.offsetTop - scroll.offsetTop) - (scroll.clientHeight - selectedRow.offsetHeight) / 2;
+            scroll.scrollTop = Math.max(0, target);
+        };
+
+        const controls = section.querySelector('.admin-pid-controls');
+        if (controls) {
+            let settled = false;
+            const settle = () => {
+                if (settled) return;
+                settled = true;
+                controls.removeEventListener('transitionend', onTransitionEnd);
+                scrollToSelectedRow();
+            };
+            const onTransitionEnd = e => { if (e.target === controls && e.propertyName === 'max-height') settle(); };
+            controls.addEventListener('transitionend', onTransitionEnd);
+            setTimeout(settle, 350);
+        } else {
+            scrollToSelectedRow();
+        }
     });
 
     // The list itself is shared, so either sub-view being opened first needs
@@ -2308,7 +2403,8 @@ function renderAdminPidHeader() {
 
     header.innerHTML = infoMode ? `
         <div class="admin-pid-row admin-pid-row-header admin-pid-row-info">
-            <span class="admin-pid-col-name">CARD</span>
+            <span class="admin-pid-col-name admin-pid-sort-header" title="Sort by card name"
+                  onclick="setAdminPidSort('name')">CARD${adminPidSortArrowHtml('name')}</span>
             <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
             <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
         </div>
@@ -2317,16 +2413,19 @@ function renderAdminPidHeader() {
             <span class="admin-pid-col-check">
                 <input type="checkbox" id="admin-pid-select-all" onchange="toggleSelectAllAdminPricing(this)">
             </span>
-            <span class="admin-pid-col-name">CARD</span>
+            <span class="admin-pid-col-name admin-pid-sort-header" title="Sort by card name"
+                  onclick="setAdminPidSort('name')">CARD${adminPidSortArrowHtml('name')}</span>
             <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
             <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
             <span class="admin-pid-col-status">
                 <input type="checkbox" class="admin-pid-curio-select-all" id="admin-pid-curio-select-all"
                        title="Toggle Curio Foil view for every visible card" onchange="toggleAllAdminPidCurioView(this)">
-                <span class="admin-pid-col-status-label">Product ID</span>
+                ${adminPidIdFilterHtml()}
             </span>
-            <span class="admin-pid-col-sales">Sales</span>
-            <span class="admin-pid-col-listings">Listings</span>
+            <span class="admin-pid-col-sales admin-pid-sort-header" title="Sort by days since last Sales check"
+                  onclick="setAdminPidSort('sales')">Sales${adminPidSortArrowHtml('sales')}</span>
+            <span class="admin-pid-col-listings admin-pid-sort-header" title="Sort by days since last Listings check"
+                  onclick="setAdminPidSort('listings')">Listings${adminPidSortArrowHtml('listings')}</span>
         </div>
     `;
 
@@ -2393,10 +2492,12 @@ function renderAdminPricingIds() {
 // out of sync with each other.
 function adminPidFilteredEditions() {
     const query = (document.getElementById('admin-pid-search')?.value || '').trim().toLowerCase();
-    const missingOnly = document.getElementById('admin-pid-missing-only')?.checked;
 
     return adminPidData.filter(e => {
-        if (missingOnly && e.product_id) return false;
+        if (adminPidIdFilter === 'missing' && e.product_id) return false;
+        if (adminPidIdFilter === 'has_id' && !adminPidIsScrapable(e.product_id)) return false;
+        if (adminPidIdFilter === 'no_id' && e.product_id !== ADMIN_PID_NO_LISTINGS_SENTINEL) return false;
+        if (adminPidIdFilter === 'curio' && !e.curio) return false;
 
         if (adminPidSetFilter.size > 0 && !adminPidSetFilter.has(e.set_prefix)) return false;
 
@@ -2408,7 +2509,55 @@ function adminPidFilteredEditions() {
         }
 
         return true;
-    });
+    }).sort(adminPidCompareEditions);
+}
+
+// adminPidSortField's sort key for one edition. Card compares alphabetically;
+// Sales/Listings compare by the same "days since last checked" number their
+// column actually displays (adminPidLastUpdatedFieldMarkup) — including that
+// row's own Curio Foil toggle state, so the sort order always matches what's
+// on screen. A never-checked card sorts as though it were the most overdue
+// (Infinity) rather than being pinned to a fixed end, so it moves with
+// everything else when the direction flips.
+function adminPidSortValue(e, field) {
+    if (field === 'name') return e.name || '';
+
+    const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
+    const clocks = (curioView ? e.curio.clocks : e.clocks) || {};
+    const days = adminPidDaysSince(adminPidActiveClock(clocks[field]));
+    return days == null ? Infinity : days;
+}
+
+function adminPidCompareEditions(a, b) {
+    const field = adminPidSortField;
+    const dir = adminPidSortDir === 'desc' ? -1 : 1;
+    const va = adminPidSortValue(a, field);
+    const vb = adminPidSortValue(b, field);
+
+    const cmp = field === 'name' ? va.localeCompare(vb) : va - vb;
+    return cmp * dir;
+}
+
+// Clicking a sortable column header (Card/Sales/Listings) — toggles
+// ascending/descending if it's already the active column, otherwise switches
+// to that column starting ascending (matching the "A to Z first" convention
+// the default Card sort already uses).
+function setAdminPidSort(field) {
+    if (adminPidSortField === field) {
+        adminPidSortDir = adminPidSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        adminPidSortField = field;
+        adminPidSortDir = 'asc';
+    }
+
+    renderAdminPricingIds();
+}
+
+// ▲/▼ next to whichever column header adminPidSortField/adminPidSortDir
+// currently point at — blank for the other two.
+function adminPidSortArrowHtml(field) {
+    if (adminPidSortField !== field) return '';
+    return ` <span class="admin-pid-sort-arrow">${adminPidSortDir === 'asc' ? '↑' : '↓'}</span>`;
 }
 
 // Recomputes just the "X of Y editions have a product ID" line — cheap enough
@@ -2495,6 +2644,7 @@ function renderAdminPidRows() {
         updateAdminPidCurioSelectAllState();
     }
 
+    applyAdminPidDuplicateHighlights();
     syncAdminPidHeaderScrollbarOffset();
 }
 
@@ -2632,6 +2782,7 @@ async function toggleAdminPidCurioView(editionId, bulk = false) {
     const listingsCell = row?.querySelector('.admin-pid-col-listings');
     if (listingsCell) listingsCell.innerHTML = adminPidLastUpdatedFieldMarkup(record, 'listings');
 
+    applyAdminPidDuplicateHighlights();
     updateAdminPidCurioSelectAllState();
     updateAdminPidSummaryText();
 
@@ -2706,6 +2857,7 @@ async function saveAdminFoilProductId(input) {
             el.classList.toggle('admin-pid-input-no-listings', data.product_id === ADMIN_PID_NO_LISTINGS_SENTINEL);
         });
 
+        applyAdminPidDuplicateHighlights();
         if (adminPidDetailSelected === editionId) renderAdminPricingDetail();
     } catch (err) {
         input.value = record.curio.product_id || '';
@@ -2847,6 +2999,70 @@ function toggleAdminPidRarityFilterOption(rarity) {
     renderAdminPidRows();
 }
 
+// Product ID filter — same dropdown widget as Set/Rarity above, but
+// single-select: choosing an option replaces whatever was selected before
+// instead of adding to it, and only one (or none) is ever "selected" —
+// picking the currently-active option again clears it back to "no filter".
+// See adminPidFilteredEditions() for what each value actually excludes.
+const ADMIN_PID_ID_FILTER_OPTIONS = [
+    {value: 'missing', label: 'Missing Only'},
+    {value: 'has_id', label: 'IDs Only'},
+    {value: 'no_id', label: 'No IDs Only'},
+    {value: 'curio', label: 'Curio IDs Only'},
+];
+
+function adminPidIdFilterHtml() {
+    const optionsHtml = ADMIN_PID_ID_FILTER_OPTIONS.map(opt => `
+        <div class="set-dropdown-option ${adminPidIdFilter === opt.value ? 'selected' : ''}" data-id-filter="${opt.value}"
+             onclick="event.stopPropagation(); toggleAdminPidIdFilterOption('${opt.value}')">
+            <span>${escapeHtml(opt.label)}</span>
+            <div class="set-toggle"></div>
+        </div>
+    `).join('');
+
+    return `
+        <span class="set-dropdown-wrap admin-pid-col-status-label">
+            <button type="button" class="set-dropdown-btn btn btn--ghost btn--mono ${adminPidIdFilterOpen ? 'open' : ''}"
+                    onclick="event.stopPropagation(); toggleAdminPidIdFilter()">
+                <span>Product ID</span>
+                <span class="set-dropdown-arrow dropdown-arrow">&#8249;</span>
+            </button>
+            <div class="set-dropdown-menu menu ${adminPidIdFilterOpen ? '' : 'hidden'}">
+                ${optionsHtml}
+            </div>
+        </span>
+    `;
+}
+
+// Same reasoning as applyAdminPidSetFilterOpenState() above.
+function applyAdminPidIdFilterOpenState() {
+    const btn = document.querySelector('.admin-pid-col-status .set-dropdown-btn');
+    const menu = document.querySelector('.admin-pid-col-status .set-dropdown-menu');
+    if (btn) btn.classList.toggle('open', adminPidIdFilterOpen);
+    if (menu) menu.classList.toggle('hidden', !adminPidIdFilterOpen);
+}
+
+function toggleAdminPidIdFilter() {
+    adminPidIdFilterOpen = !adminPidIdFilterOpen;
+    applyAdminPidIdFilterOpenState();
+}
+
+function closeAdminPidIdFilter() {
+    if (!adminPidIdFilterOpen) return;
+    adminPidIdFilterOpen = false;
+    applyAdminPidIdFilterOpenState();
+}
+
+function toggleAdminPidIdFilterOption(value) {
+    adminPidIdFilter = adminPidIdFilter === value ? null : value;
+
+    document.querySelectorAll('.admin-pid-col-status .set-dropdown-option').forEach(opt => {
+        opt.classList.toggle('selected', opt.dataset.idFilter === adminPidIdFilter);
+    });
+
+    renderAdminPidRows();
+}
+
 // field is 'sales' or 'listings' — each has its own column now, and its own
 // slice of adminPidRefreshStatus[editionId] (a refresh can target just one
 // of them, so their running/error states are tracked independently).
@@ -2955,8 +3171,15 @@ function updateAdminPidRefreshButton() {
     listingsBtn.disabled = disabled;
     bothBtn.disabled = disabled;
 
-    bothBtn.textContent = targets.length > 0
-        ? `Refresh Selected (${targets.length})`
+    // The count used to be inline text ("Refresh Selected (12)") — a fixed-width
+    // badge instead keeps the button's own footprint from growing much as the
+    // selection count changes, which matters on narrower screens where this
+    // group already shares a tight row with the Regular/Discord pill (see
+    // .admin-pid-controls-cell-detail's wrap comment in admin.css): a wide
+    // swing in this one button's width was exactly what tipped that row from
+    // fitting on one line to wrapping as admins selected/deselected cards.
+    bothBtn.innerHTML = targets.length > 0
+        ? `Refresh Selected <span class="admin-pid-refresh-count">${targets.length}</span>`
         : 'Refresh Selected';
 }
 
@@ -3044,12 +3267,13 @@ async function saveAdminProductId(input) {
 
         record.product_id = data.product_id;
 
-        if (document.getElementById('admin-pid-missing-only')?.checked) {
+        if (adminPidIdFilter) {
             // Whether this row still belongs in the filtered list may have
-            // just changed (product ID went from missing to filled, or back)
-            // — needs an actual row re-render for correctness, not just a
-            // style update. Still skips the header rebuild renderAdminPricingIds()
-            // would otherwise do (the Set/Rarity dropdowns don't depend on this).
+            // just changed (e.g. product ID went from missing to filled, or
+            // to/from "~") — needs an actual row re-render for correctness,
+            // not just a style update. Still skips the header rebuild
+            // renderAdminPricingIds() would otherwise do (the Set/Rarity/ID
+            // dropdowns don't depend on this).
             renderAdminPidRows();
         } else {
             // Regenerates the whole field (input + find button) rather than
@@ -3065,6 +3289,7 @@ async function saveAdminProductId(input) {
             updateAdminPidSummaryText();
         }
 
+        applyAdminPidDuplicateHighlights();
         if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
     } catch (err) {
         input.value = record.product_id || '';
@@ -3594,6 +3819,8 @@ function renderAdminPricingImageCol() {
         ${statsHtml}
         ${pidRowHtml}
     `;
+
+    applyAdminPidDuplicateHighlights();
 
     const img = col.querySelector('.admin-pid-detail-image');
     if (img && document.getElementById('card-drawer')) {
@@ -4690,6 +4917,8 @@ function initAdmin() {
     adminPidSetFilterOpen = false;
     adminPidRarityFilter = new Set();
     adminPidRarityFilterOpen = false;
+    adminPidIdFilter = null;
+    adminPidIdFilterOpen = false;
     adminPidCurioViewSelected = new Set();
     adminPidDetailSelected = null;
     adminPidDetailHistory = null;
@@ -4757,5 +4986,6 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#admin-pid-condition-dropdown-wrap')) closeAdminPidConditionDropdown();
     if (!e.target.closest('.admin-pid-col-rarity .set-dropdown-wrap')) closeAdminPidRarityFilter();
     if (!e.target.closest('.admin-pid-col-set .set-dropdown-wrap')) closeAdminPidSetFilter();
+    if (!e.target.closest('.admin-pid-col-status .set-dropdown-wrap')) closeAdminPidIdFilter();
     if (!e.target.closest('#admin-system-db-ssl-wrap')) closeAdminPidDropdown('admin-system-db-ssl-menu', 'admin-system-db-ssl-btn');
 }, true);

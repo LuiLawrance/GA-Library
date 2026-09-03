@@ -603,10 +603,6 @@
     pointer-events: none;
 }
 
-.admin-cards-mode-info .admin-pid-filter-toggle {
-    display: none;
-}
-
 /* The list's own width comes from .admin-pricing-layout's first track below
    (it's a plain stretch-to-fill grid item, no explicit width of its own) —
    animating THAT track (via animateGridColumns, see switchAdminCardsView in
@@ -653,7 +649,14 @@
     margin-bottom: 16px;
     flex-shrink: 0;
     overflow: hidden;
-    max-height: 160px;
+    /* Just a big-enough open target for the Info<->Pricing collapse transition
+       below (there's no content here to size against — see the comment on
+       .admin-cards-mode-info's max-height:0 counterpart) — not tuned tightly
+       to .admin-pid-controls-grid's usual (much shorter) content height. Sized
+       with real headroom past that content's normal ~76px so the row wrapping
+       .admin-pid-controls-cell-detail can fall into on narrower screens (see
+       its own comment below) never gets clipped by this cap. */
+    max-height: 240px;
     transition: opacity 0.25s ease, max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
         margin-bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -758,17 +761,6 @@
     border-color: var(--border-focus);
 }
 
-.admin-pid-filter-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.82rem;
-    color: var(--text-muted);
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.admin-pid-filter-toggle input[type="checkbox"],
 .admin-pid-col-check input[type="checkbox"],
 .admin-pid-curio-select-all {
     appearance: none;
@@ -784,14 +776,12 @@
     transition: background 0.15s, border-color 0.15s;
 }
 
-.admin-pid-filter-toggle input[type="checkbox"]:focus-visible,
 .admin-pid-col-check input[type="checkbox"]:focus-visible,
 .admin-pid-curio-select-all:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
-.admin-pid-filter-toggle input[type="checkbox"]:checked,
 .admin-pid-col-check input[type="checkbox"]:checked,
 .admin-pid-curio-select-all:checked {
     background: var(--accent);
@@ -834,11 +824,11 @@
 
 /* Card-select checkboxes (both the per-row ones and their "select all" in
    the header) match the Curio Foil select-all checkbox's size (26px) rather
-   than the smaller 16px .admin-pid-filter-toggle checkbox elsewhere on this
-   page. Same login.css `input { padding }` override as
-   .admin-pid-curio-select-all above (see its comment) is needed here too —
-   without it these were already rendering larger than their declared 16px,
-   just not next to anything to notice it against. */
+   than the smaller 16px base size declared for them above. Same login.css
+   `input { padding }` override as .admin-pid-curio-select-all above (see its
+   comment) is needed here too — without it these were already rendering
+   larger than their declared 16px, just not next to anything to notice it
+   against. */
 .admin-pid-col-check input[type="checkbox"] {
     width: 26px;
     height: 26px;
@@ -952,6 +942,26 @@
 
 .admin-pid-refresh-btn:hover:not(:disabled) {
     opacity: 0.85;
+}
+
+/* Selection count on "Refresh Selected" (updateAdminPidRefreshButton in
+   admin.js) — a small fixed-size badge instead of growing the button's own
+   inline text, so the button's width barely changes as the count changes.
+   currentColor keeps it readable in both the accent (enabled) and muted
+   (disabled) button states above/below without a separate override for each. */
+.admin-pid-refresh-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 2px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    background: color-mix(in srgb, currentColor 22%, transparent);
 }
 
 .admin-pid-refresh-btn:disabled {
@@ -1576,6 +1586,22 @@
     gap: 6px;
 }
 
+/* Card/Sales/Listings header labels double as sort controls (setAdminPidSort
+   in admin.js) — the active column's own arrow uses --accent so it reads at
+   a glance which of the three (if any) the list is currently sorted by. */
+.admin-pid-sort-header {
+    cursor: pointer;
+    user-select: none;
+}
+
+.admin-pid-sort-header:hover {
+    color: var(--text);
+}
+
+.admin-pid-sort-arrow {
+    color: var(--accent);
+}
+
 .admin-pid-row:not(.admin-pid-row-header):hover {
     background: var(--bg-hover);
 }
@@ -1665,6 +1691,17 @@
 .admin-pid-input-error {
     border-color: var(--error);
     background: color-mix(in srgb, var(--error) 12%, var(--bg-card));
+}
+
+/* A product ID currently assigned to more than one card (see
+   computeAdminPidDuplicateProductIds/applyAdminPidDuplicateHighlights in
+   admin.js) — unlike the transient .admin-pid-input-error flash above, this
+   stays applied until the collision is actually resolved. The extra
+   .admin-pid-input in the selector outranks .admin-pid-input-filled's own
+   green border so a duplicate reads as red even though it's also "filled". */
+.admin-pid-input.admin-pid-input-duplicate {
+    border-color: var(--error);
+    background: color-mix(in srgb, var(--error) 16%, var(--bg-card));
 }
 
 /* Anchors the absolutely-positioned .admin-pid-curio-toggle (below) so its
@@ -2740,6 +2777,26 @@
     letter-spacing: normal;
     max-height: 240px;
     overflow: auto;
+}
+
+/* Info mode's list panel is a fixed, narrow track (--admin-pid-info-list-width)
+   and its ancestor (.admin-pricing-list) clips overflow — the Rarity/Set
+   menus' default left:0 (cards.css .set-dropdown-menu) grows them rightward
+   from the column's left edge, which is fine in Pricing mode's much wider
+   list but pushes them past Info mode's panel edge and gets them clipped.
+   Growing leftward from the column's right edge instead keeps both menus
+   inside the panel, since neither column sits near its left edge. */
+.admin-cards-mode-info #admin-pid-table-header .set-dropdown-menu {
+    left: auto;
+    right: 0;
+}
+
+/* The Product ID filter sits close to the row's right edge (Sales/Listings
+   still follow it) — same overflow risk and same fix as Info mode's panel
+   above, just scoped to this one column instead of the whole header. */
+.admin-pid-col-status .set-dropdown-menu {
+    left: auto;
+    right: 0;
 }
 
 /* Matches #set-dropdown-options's scrollbar on the cards page exactly. */

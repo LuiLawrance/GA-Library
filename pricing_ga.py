@@ -1245,6 +1245,33 @@ def _listings_gate_result(edition_id: str, foil_id: str | None = None) -> dict |
     return None
 
 
+def _edition_listings_gate_result(edition_id: str, foil_scope: str | None) -> dict | None:
+    """Batch-level counterpart to _listings_gate_result() — None if a listings
+    refresh for this edition (respecting foil_scope the same way
+    scrape_listings_tcg_by_edition() does) would touch at least one ungated
+    target, otherwise the gated result dict to use as-is. Lets a batch refresh
+    recognize a fully-gated edition and skip it before a browser is ever
+    opened for it, rather than only gating once already inside a shared
+    browser session."""
+    if foil_scope == "main":
+        return _listings_gate_result(edition_id, None)
+
+    if foil_scope is not None:
+        return _listings_gate_result(edition_id, foil_scope)
+
+    main_gated = _listings_gate_result(edition_id, None)
+    if main_gated is None:
+        return None
+
+    overrides = api_tcgplayer.get_foil_overrides(edition_id)
+    override_foil_ids = [foil_id for foil_id, entry in overrides.items() if entry.get("product_id")]
+
+    if any(_listings_gate_result(edition_id, foil_id) is None for foil_id in override_foil_ids):
+        return None
+
+    return main_gated
+
+
 def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool = False,
                            foil_id: str | None = None) -> dict:
     if sales is None:
@@ -1603,11 +1630,32 @@ def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: boo
     results = {}
     foil_scopes = foil_scopes or {}
 
+    # For a listings-only refresh, an edition already inside its 7-day cooldown
+    # does no scraping at all — check that before opening a browser or queuing
+    # the edition up for one, rather than after, so a batch that's entirely
+    # gated never launches Chromium in the first place.
+    pending_edition_ids = edition_ids
+    if target == "listings":
+        pending_edition_ids = []
+        for edition_id in edition_ids:
+            gated = _edition_listings_gate_result(edition_id, foil_scopes.get(edition_id))
+            if gated is None:
+                pending_edition_ids.append(edition_id)
+                continue
+
+            result = {"sales": None, "listings": gated}
+            results[edition_id] = result
+            if progress_callback:
+                progress_callback(edition_id, result)
+
+    if not pending_edition_ids:
+        return results
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         page = browser.new_page()
 
-        for edition_id in edition_ids:
+        for edition_id in pending_edition_ids:
             scope = foil_scopes.get(edition_id)
 
             try:
