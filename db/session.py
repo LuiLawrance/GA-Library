@@ -24,7 +24,25 @@ def _get_engine():
                 "Set one in Admin -> System -> Database Connection, or DATABASE_URL in .env."
             )
 
-        _engine = create_engine(database_url, future=True)
+        _engine = create_engine(
+            database_url,
+            future=True,
+            # pool_pre_ping: a cheap "SELECT 1" before handing out a pooled
+            # connection, so a connection Railway's proxy silently dropped
+            # while idle gets replaced instead of surfacing as a random
+            # "server closed the connection unexpectedly" on someone's
+            # request. pool_recycle: proactively retire connections before
+            # they get old enough to hit that same proxy idle timeout.
+            # pool_size/max_overflow: per WORKER PROCESS — each uvicorn
+            # worker (see the Dockerfile's --workers) gets its own engine/pool,
+            # so the real ceiling is workers * (pool_size + max_overflow);
+            # keep this modest so a few workers don't exhaust Postgres's own
+            # max_connections.
+            pool_pre_ping=True,
+            pool_recycle=1800,
+            pool_size=5,
+            max_overflow=10,
+        )
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
     return _engine

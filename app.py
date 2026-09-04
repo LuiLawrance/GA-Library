@@ -25,7 +25,7 @@ from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
-from sqlalchemy import create_engine, delete, select, text, update
+from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from user import (
     RANK_ORDER,
@@ -1775,8 +1775,24 @@ def _user_decks_list(username: str) -> list[dict]:
     """Every deck for a user as {name, format, desc, banner, card_count},
     name-sorted — feeds both the admin profile panel and the self-service
     Profile page's Decks menu."""
+    index = _deck_index_load(username)
     decks = []
-    for name, entry in _deck_index_load(username).items():
+
+    if is_db_mode():
+        content = _deck_bulk_content_db(user_get_id(username))
+        for name, entry in index.items():
+            c = content.get(name, {})
+            decks.append({
+                "name": name,
+                "format": c.get("format", entry.get("format", "")),
+                "desc": c.get("desc", entry.get("desc", "")),
+                "banner": entry.get("banner"),
+                "card_count": c.get("card_count", 0),
+            })
+        decks.sort(key=lambda d: d["name"].lower())
+        return decks
+
+    for name, entry in index.items():
         deck_data = _deck_load(username, name)
         count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
         decks.append({
@@ -2864,23 +2880,36 @@ def _inv_load_db(username: str) -> dict:
             _inv_save_db(username, data)
             return data
 
+        # Batched instead of one query per bin plus one query per section —
+        # a user with B bins and S sections/bin used to cost 1+B+B*S round
+        # trips to open their inventory; now it's always 3, regardless of
+        # how many bins/sections/cards they have.
+        bin_ids = [b.id for b in bins]
+        sections = session.execute(
+            select(InventorySection).where(InventorySection.bin_id.in_(bin_ids))
+            .order_by(InventorySection.position)
+        ).scalars().all()
+
+        section_ids = [s.id for s in sections]
+        inv_cards = session.execute(
+            select(InventoryCard).where(InventoryCard.section_id.in_(section_ids))
+        ).scalars().all() if section_ids else []
+
+        sections_by_bin: dict[int, list] = {}
+        for s in sections:
+            sections_by_bin.setdefault(s.bin_id, []).append(s)
+
+        cards_by_section: dict[int, dict] = {}
+        for c in inv_cards:
+            cards_by_section.setdefault(c.section_id, {}) \
+                .setdefault(c.card_id, {}).setdefault(c.edition_id, {})[c.foil_id] = c.quantity
+
         result = {}
         for bin_row in bins:
-            sections = session.execute(
-                select(InventorySection).where(InventorySection.bin_id == bin_row.id)
-                .order_by(InventorySection.position)
-            ).scalars().all()
-
-            sections_data = {}
-            for section_row in sections:
-                cards_data = {}
-                inv_cards = session.execute(
-                    select(InventoryCard).where(InventoryCard.section_id == section_row.id)
-                ).scalars().all()
-                for c in inv_cards:
-                    cards_data.setdefault(c.card_id, {}).setdefault(c.edition_id, {})[c.foil_id] = c.quantity
-                sections_data[section_row.name] = cards_data
-
+            sections_data = {
+                section_row.name: cards_by_section.get(section_row.id, {})
+                for section_row in sections_by_bin.get(bin_row.id, [])
+            }
             result[bin_row.name] = {
                 "banner": bin_row.banner,
                 "default": bin_row.is_default,
@@ -2894,40 +2923,94 @@ def _inv_load_db(username: str) -> dict:
 
 
 def _inv_save_db(username: str, data: dict) -> None:
+    """Diffs `data` against what's currently stored instead of deleting the
+    user's whole inventory and reinserting it — every inventory mutation
+    (add/remove/set-quantity for a single card) goes through this same
+    load-mutate-save round trip, so a one-card quantity change used to rewrite
+    every bin, section and card the user owns. See _deck_save_db for the same
+    fix on the decks side."""
     user_id = user_get_id(username)
 
     with get_session() as session:
-        session.execute(delete(InventoryBin).where(InventoryBin.user_id == user_id))
-        session.flush()
+        existing_bins = session.execute(
+            select(InventoryBin).where(InventoryBin.user_id == user_id)
+        ).scalars().all()
+        existing_bins_by_name = {b.name: b for b in existing_bins}
+
+        bin_ids = [b.id for b in existing_bins]
+        existing_sections = session.execute(
+            select(InventorySection).where(InventorySection.bin_id.in_(bin_ids))
+        ).scalars().all() if bin_ids else []
+        sections_by_bin: dict[int, dict[str, InventorySection]] = {}
+        for s in existing_sections:
+            sections_by_bin.setdefault(s.bin_id, {})[s.name] = s
+
+        section_ids = [s.id for s in existing_sections]
+        existing_cards = session.execute(
+            select(InventoryCard).where(InventoryCard.section_id.in_(section_ids))
+        ).scalars().all() if section_ids else []
+        cards_by_section: dict[int, dict[tuple, InventoryCard]] = {}
+        for c in existing_cards:
+            cards_by_section.setdefault(c.section_id, {})[(c.card_id, c.edition_id, c.foil_id)] = c
+
+        # Bins dropped entirely (cascades to their sections/cards at the DB
+        # level via ON DELETE CASCADE).
+        for name, bin_row in existing_bins_by_name.items():
+            if name not in data:
+                session.delete(bin_row)
 
         for bin_name, bin_data in data.items():
-            bin_row = InventoryBin(
-                user_id=user_id,
-                name=bin_name,
-                desc=bin_data.get("desc", ""),
-                banner=bin_data.get("banner"),
-                symbol=bin_data.get("symbol"),
-                tags=bin_data.get("tags"),
-                is_default=bool(bin_data.get("default")),
-            )
-            session.add(bin_row)
-            session.flush()
+            bin_row = existing_bins_by_name.get(bin_name)
+            if bin_row is None:
+                bin_row = InventoryBin(user_id=user_id, name=bin_name)
+                session.add(bin_row)
+                session.flush()  # need bin_row.id for the InventorySection rows below
+                current_sections: dict[str, InventorySection] = {}
+            else:
+                current_sections = sections_by_bin.get(bin_row.id, {})
 
-            for position, (section_name, cards) in enumerate(bin_data.get("sections", {}).items()):
-                section_row = InventorySection(bin_id=bin_row.id, name=section_name, position=position)
-                session.add(section_row)
-                session.flush()
+            bin_row.desc = bin_data.get("desc", "")
+            bin_row.banner = bin_data.get("banner")
+            bin_row.symbol = bin_data.get("symbol")
+            bin_row.tags = bin_data.get("tags")
+            bin_row.is_default = bool(bin_data.get("default"))
 
+            new_sections = bin_data.get("sections", {})
+
+            for name, section_row in current_sections.items():
+                if name not in new_sections:
+                    session.delete(section_row)
+
+            for position, (section_name, cards) in enumerate(new_sections.items()):
+                section_row = current_sections.get(section_name)
+                if section_row is None:
+                    section_row = InventorySection(bin_id=bin_row.id, name=section_name, position=position)
+                    session.add(section_row)
+                    session.flush()  # need section_row.id for the InventoryCard rows below
+                    current_cards: dict[tuple, InventoryCard] = {}
+                else:
+                    if section_row.position != position:
+                        section_row.position = position
+                    current_cards = cards_by_section.get(section_row.id, {})
+
+                seen_keys = set()
                 for card_id, editions in cards.items():
                     for edition_id, foils in editions.items():
                         for foil_id, quantity in foils.items():
-                            session.add(InventoryCard(
-                                section_id=section_row.id,
-                                card_id=card_id,
-                                edition_id=edition_id,
-                                foil_id=foil_id,
-                                quantity=quantity,
-                            ))
+                            key = (card_id, edition_id, foil_id)
+                            seen_keys.add(key)
+                            existing_card = current_cards.get(key)
+                            if existing_card is None:
+                                session.add(InventoryCard(
+                                    section_id=section_row.id, card_id=card_id,
+                                    edition_id=edition_id, foil_id=foil_id, quantity=quantity,
+                                ))
+                            elif existing_card.quantity != quantity:
+                                existing_card.quantity = quantity
+
+                for key, existing_card in current_cards.items():
+                    if key not in seen_keys:
+                        session.delete(existing_card)
 
 
 @app.get("/api/inventory")
@@ -3785,20 +3868,60 @@ def _deck_load_db(username: str, deck_name: str) -> dict | None:
             select(DeckSection).where(DeckSection.deck_id == deck_row.id).order_by(DeckSection.position)
         ).scalars().all()
 
-        sections_data = {}
-        for section_row in sections:
-            cards = session.execute(
-                select(DeckCard).where(DeckCard.section_id == section_row.id).order_by(DeckCard.position)
-            ).scalars().all()
-            sections_data[section_row.name] = [
+        # One query for every section's cards (instead of one query per
+        # section) — a deck with S sections used to cost 1+S round trips
+        # here; now it's always 2, regardless of S.
+        section_ids = [s.id for s in sections]
+        cards = session.execute(
+            select(DeckCard).where(DeckCard.section_id.in_(section_ids)).order_by(DeckCard.position)
+        ).scalars().all() if section_ids else []
+
+        cards_by_section: dict[int, list] = {}
+        for c in cards:
+            cards_by_section.setdefault(c.section_id, []).append(
                 {"card_id": c.card_id, "edition_id": c.edition_id, "foil_id": c.foil_id, "quantity": c.quantity}
-                for c in cards
-            ]
+            )
+
+        sections_data = {s.name: cards_by_section.get(s.id, []) for s in sections}
 
         return {"desc": deck_row.desc or "", "format": deck_row.format or "", "sections": sections_data}
 
 
+def _deck_bulk_content_db(user_id: int) -> dict[str, dict]:
+    """{deck_name: {desc, format, card_count}} for every deck a user owns, in
+    2 queries total — used by list endpoints that would otherwise call
+    _deck_load_db once per deck (api_decks_list, _user_decks_list,
+    _public_decks_list), turning an O(decks * sections) fan-out into a flat
+    cost independent of how many decks/sections/cards exist."""
+    with get_session() as session:
+        decks = session.execute(
+            select(Deck.id, Deck.name, Deck.desc, Deck.format).where(Deck.user_id == user_id)
+        ).all()
+
+        deck_ids = [d.id for d in decks]
+        counts = dict(session.execute(
+            select(DeckSection.deck_id, func.coalesce(func.sum(DeckCard.quantity), 0))
+            .join(DeckCard, DeckCard.section_id == DeckSection.id)
+            .where(DeckSection.deck_id.in_(deck_ids))
+            .group_by(DeckSection.deck_id)
+        ).all()) if deck_ids else {}
+
+        return {
+            d.name: {"desc": d.desc or "", "format": d.format or "", "card_count": counts.get(d.id, 0)}
+            for d in decks
+        }
+
+
 def _deck_save_db(username: str, deck_name: str, data: dict) -> None:
+    """Diffs `data` against what's currently stored instead of the old
+    delete-everything-then-reinsert-everything approach — every deck mutation
+    (add/remove/set-quantity/move a single card) goes through this same
+    load-mutate-save round trip, so the old version rewrote an entire deck's
+    sections and cards for a one-row change. Now only rows that actually
+    changed get written, and reads for existing sections/cards are each one
+    batched query instead of one-per-section, so a same-shape save (the
+    common case — most edits change quantities, not structure) costs a
+    handful of round trips regardless of deck size."""
     user_id = user_get_id(username)
 
     with get_session() as session:
@@ -3820,22 +3943,61 @@ def _deck_save_db(username: str, deck_name: str, data: dict) -> None:
         deck_row.desc = data.get("desc", "")
         deck_row.format = data.get("format", "")
         deck_row.modified_at = today
-        session.flush()
 
-        session.execute(delete(DeckSection).where(DeckSection.deck_id == deck_row.id))
-        session.flush()
+        existing_sections = session.execute(
+            select(DeckSection).where(DeckSection.deck_id == deck_row.id)
+        ).scalars().all()
+        existing_by_name = {s.name: s for s in existing_sections}
 
-        for position, (section_name, cards) in enumerate(data.get("sections", {}).items()):
-            section_row = DeckSection(deck_id=deck_row.id, name=section_name, position=position)
-            session.add(section_row)
-            session.flush()
+        existing_section_ids = [s.id for s in existing_sections]
+        existing_cards = session.execute(
+            select(DeckCard).where(DeckCard.section_id.in_(existing_section_ids))
+        ).scalars().all() if existing_section_ids else []
+        cards_by_section: dict[int, dict[tuple, DeckCard]] = {}
+        for c in existing_cards:
+            cards_by_section.setdefault(c.section_id, {})[(c.card_id, c.edition_id, c.foil_id)] = c
 
+        new_sections = data.get("sections", {})
+
+        # Sections dropped entirely (cascades to their cards at the DB level
+        # via deck_cards' ON DELETE CASCADE — no need to delete those rows
+        # here too).
+        for name, section_row in existing_by_name.items():
+            if name not in new_sections:
+                session.delete(section_row)
+
+        for position, (section_name, cards) in enumerate(new_sections.items()):
+            section_row = existing_by_name.get(section_name)
+            if section_row is None:
+                section_row = DeckSection(deck_id=deck_row.id, name=section_name, position=position)
+                session.add(section_row)
+                session.flush()  # need section_row.id for the DeckCard rows below
+                current_cards: dict[tuple, DeckCard] = {}
+            else:
+                if section_row.position != position:
+                    section_row.position = position
+                current_cards = cards_by_section.get(section_row.id, {})
+
+            seen_keys = set()
             for card_position, row in enumerate(cards):
-                session.add(DeckCard(
-                    section_id=section_row.id, card_id=row["card_id"],
-                    edition_id=row.get("edition_id"), foil_id=row.get("foil_id"),
-                    quantity=row["quantity"], position=card_position,
-                ))
+                key = (row["card_id"], row.get("edition_id"), row.get("foil_id"))
+                seen_keys.add(key)
+                existing_card = current_cards.get(key)
+                if existing_card is None:
+                    session.add(DeckCard(
+                        section_id=section_row.id, card_id=row["card_id"],
+                        edition_id=row.get("edition_id"), foil_id=row.get("foil_id"),
+                        quantity=row["quantity"], position=card_position,
+                    ))
+                else:
+                    if existing_card.quantity != row["quantity"]:
+                        existing_card.quantity = row["quantity"]
+                    if existing_card.position != card_position:
+                        existing_card.position = card_position
+
+            for key, existing_card in current_cards.items():
+                if key not in seen_keys:
+                    session.delete(existing_card)
 
 
 def _deck_row_find(cards: list[dict], card_id: str, edition_id: str | None, foil_id: str | None) -> dict | None:
@@ -3961,22 +4123,34 @@ def _public_decks_list() -> list[dict]:
     if is_db_mode():
         with get_session() as session:
             rows = session.execute(
-                select(Deck, User.username).join(User, User.id == Deck.user_id).where(Deck.is_public == True)
+                select(Deck, User.username, User.omnidex_id)
+                .join(User, User.id == Deck.user_id).where(Deck.is_public == True)
             ).all()
-        decks = []
-        for row, username in rows:
-            deck_data = _deck_load_db(username, row.name)
-            count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
-            profile = user_get_profile(username)
-            decks.append({
+
+            # Batched in place of the old per-row _deck_load_db (sections+cards)
+            # and user_get_profile (re-fetching a User row we already joined
+            # against) — this whole function used to cost ~2 extra queries per
+            # public deck; now it's always 2 total, however many decks match.
+            deck_ids = [row.id for row, _, _ in rows]
+            counts = dict(session.execute(
+                select(DeckSection.deck_id, func.coalesce(func.sum(DeckCard.quantity), 0))
+                .join(DeckCard, DeckCard.section_id == DeckSection.id)
+                .where(DeckSection.deck_id.in_(deck_ids))
+                .group_by(DeckSection.deck_id)
+            ).all()) if deck_ids else {}
+
+        decks = [
+            {
                 "name": row.name,
                 "username": username,
-                "omnidex_id": profile.get("omnidex_id") if profile else None,
+                "omnidex_id": omnidex_id,
                 "format": row.format or "",
                 "desc": row.desc or "",
                 "banner": row.banner,
-                "card_count": count,
-            })
+                "card_count": counts.get(row.id, 0),
+            }
+            for row, username, omnidex_id in rows
+        ]
         decks.sort(key=lambda d: d["name"].lower())
         return decks
 
@@ -4031,6 +4205,16 @@ async def api_decks_list(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     index = _deck_index_load(user)
     result = {}
+    if is_db_mode():
+        content = _deck_bulk_content_db(user_get_id(user))
+        for name, entry in index.items():
+            c = content.get(name, {})
+            result[name] = {**entry,
+                            "desc": c.get("desc", entry.get("desc", "")),
+                            "format": c.get("format", entry.get("format", "")),
+                            "card_count": c.get("card_count", 0)}
+        return JSONResponse({"decks": result})
+
     for name, entry in index.items():
         deck_data = _deck_load(user, name)
         count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0

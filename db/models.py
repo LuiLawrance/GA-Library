@@ -31,7 +31,8 @@ import was qualified).
 import datetime as dt
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Numeric, Text, UniqueConstraint,
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Numeric, Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -126,7 +127,7 @@ class CardSlug(Base):
     __tablename__ = "card_slugs"
 
     slug: Mapped[str] = mapped_column(Text, primary_key=True)
-    card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -134,7 +135,7 @@ class CardRule(Base):
     __tablename__ = "card_rules"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False)
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False, index=True)
     date: Mapped[dt.date | None] = mapped_column(Date)
     title: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -144,8 +145,8 @@ class Edition(Base):
     __tablename__ = "editions"
 
     edition_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False)
-    set_slug: Mapped[str | None] = mapped_column(ForeignKey("sets.slug"))
+    card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False, index=True)
+    set_slug: Mapped[str | None] = mapped_column(ForeignKey("sets.slug"), index=True)
     collector_number: Mapped[str | None] = mapped_column(Text)
     rarity: Mapped[int | None]
     illustrator: Mapped[str | None] = mapped_column(Text)
@@ -257,6 +258,7 @@ class PriceListing(Base):
     __tablename__ = "price_listings"
     __table_args__ = (
         ForeignKeyConstraint(["edition_id", "foil_id"], ["foils.edition_id", "foils.foil_id"]),
+        Index("ix_price_listings_edition_id_foil_id", "edition_id", "foil_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
