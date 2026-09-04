@@ -9,10 +9,14 @@ to Postgres yet still exist here so the schema and the import script
 (scripts/migrate_json_to_pg.py) stay complete.
 
 Primary keys reuse the JSON data's own string IDs (card_id, edition_id,
-foil_id, username, slug, ...) wherever one already exists, so a table reads
-1:1 against the JSON file it replaces. Surrogate integer keys are only used
-where the JSON has none (rules, errors, price rows, bins, sections, decks,
-deck cards, watchlist/wishlist entries).
+foil_id, slug, ...) wherever one already exists, so a table reads 1:1
+against the JSON file it replaces. Surrogate integer keys are used where the
+JSON has none (rules, errors, price rows, bins, sections, decks, deck cards,
+watchlist/wishlist entries) — and, since migration 9b8c7d6e5f4a, for `users`
+too: username is mutable (renames, omnidex_id changes) so it can't safely be
+a key other tables embed in a foreign key, the same reasoning that keeps
+edition_id/foil_id off of price_listings/price_sales as anything but plain
+columns.
 
 Note: `datetime` is imported as a module (`import datetime as dt`, referenced
 as `dt.date`/`dt.datetime`) rather than `from datetime import date, datetime`
@@ -42,7 +46,13 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
-    username: Mapped[str] = mapped_column(Text, primary_key=True)
+    # Surrogate key, same pattern as price_listings/price_sales/decks/etc.
+    # username used to be the primary key directly; every dependent table
+    # below now points at this id instead, so a username can be changed
+    # (rename, or omnidex_id) without having to cascade that value through
+    # every FK that used to embed it.
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     auth_type: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
@@ -280,10 +290,10 @@ class PriceSale(Base):
 
 class InventoryBin(Base):
     __tablename__ = "inventory_bins"
-    __table_args__ = (UniqueConstraint("username", "name"),)
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(ForeignKey("users.username", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     desc: Mapped[str | None] = mapped_column(Text)
     banner: Mapped[str | None] = mapped_column(Text)
@@ -321,10 +331,10 @@ class InventoryCard(Base):
 
 class Deck(Base):
     __tablename__ = "decks"
-    __table_args__ = (UniqueConstraint("username", "name"),)
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(ForeignKey("users.username", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     desc: Mapped[str | None] = mapped_column(Text)
     format: Mapped[str | None] = mapped_column(Text)
@@ -332,6 +342,7 @@ class Deck(Base):
     symbol: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSONB)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    edition_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[dt.date | None] = mapped_column(Date)
     modified_at: Mapped[dt.date | None] = mapped_column(Date)
 
@@ -348,11 +359,16 @@ class DeckSection(Base):
 
 class DeckCard(Base):
     __tablename__ = "deck_cards"
-    __table_args__ = (UniqueConstraint("section_id", "card_id"),)
+    __table_args__ = (
+        UniqueConstraint("section_id", "card_id", "edition_id", "foil_id"),
+        ForeignKeyConstraint(["edition_id", "foil_id"], ["foils.edition_id", "foils.foil_id"]),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     section_id: Mapped[int] = mapped_column(ForeignKey("deck_sections.id", ondelete="CASCADE"), nullable=False)
     card_id: Mapped[str] = mapped_column(ForeignKey("cards.card_id"), nullable=False)
+    edition_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    foil_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     quantity: Mapped[int] = mapped_column(nullable=False)
     position: Mapped[int | None]
 
@@ -362,12 +378,12 @@ class DeckCard(Base):
 class WatchlistEntry(Base):
     __tablename__ = "watchlist_entries"
     __table_args__ = (
-        UniqueConstraint("username", "edition_id", "foil_id"),
+        UniqueConstraint("user_id", "edition_id", "foil_id"),
         ForeignKeyConstraint(["edition_id", "foil_id"], ["foils.edition_id", "foils.foil_id"]),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(ForeignKey("users.username", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     edition_id: Mapped[str] = mapped_column(Text, nullable=False)
     foil_id: Mapped[str] = mapped_column(Text, nullable=False)
     added_date: Mapped[dt.date | None] = mapped_column(Date)
@@ -378,12 +394,12 @@ class WishlistEntry(Base):
     yet (see plan); mirrors watchlist's shape as a starting point."""
     __tablename__ = "wishlist_entries"
     __table_args__ = (
-        UniqueConstraint("username", "edition_id", "foil_id"),
+        UniqueConstraint("user_id", "edition_id", "foil_id"),
         ForeignKeyConstraint(["edition_id", "foil_id"], ["foils.edition_id", "foils.foil_id"]),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(ForeignKey("users.username", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     edition_id: Mapped[str] = mapped_column(Text, nullable=False)
     foil_id: Mapped[str] = mapped_column(Text, nullable=False)
     added_date: Mapped[dt.date | None] = mapped_column(Date)

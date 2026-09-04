@@ -7,6 +7,8 @@ let activeDeckData = null;
 let dgaAddModalCardId = null;
 let dgaAddModalCardName = null;
 let dgaAddModalEditionId = null;
+let dgaAddModalFoilId = null;
+let dgaAddModalCardData = null; // full /api/cards/{id} response once the deck is Edition Locked
 let dgaAddModalPreSection = null;
 let dgaAddAcIndex = -1;
 
@@ -107,16 +109,23 @@ document.addEventListener('contextmenu', e => {
 // ── Deck card context menu (right-click a card inside a deck) ──
 
 let dgaCtxTargetEdition = null;
+// The specific row a right-click landed on — only meaningful (non-null
+// editionId/foilId) when the deck is Edition Locked; used by "Change Edition".
+let dgaCtxCardTarget = null; // {cardId, cardName, section, editionId, foilId}
 
-function dgaOpenCardContextMenu(e, editionId) {
+function dgaOpenCardContextMenu(e, editionId, cardId, cardName, rowEditionId, rowFoilId, sectionName) {
     dgaCtxTargetEdition = editionId;
+    dgaCtxCardTarget = {cardId, cardName, section: sectionName, editionId: rowEditionId, foilId: rowFoilId};
     const isCurrent = gaDecks[activeDeck]?.banner === editionId;
     document.getElementById('dga-ctx-banner-label').textContent =
         isCurrent ? 'Remove Banner' : 'Set as Banner';
+    // Swapping a printing only makes sense for a specific, known row —
+    // unlocked tiles are a collapsed group with no single row to target.
+    document.getElementById('dga-ctx-change-edition').classList.toggle('hidden', !activeDeckData?.edition_locked);
     const menu = document.getElementById('dga-card-context-menu');
     menu.classList.remove('hidden');
     const x = Math.min(e.clientX, window.innerWidth - 180);
-    const y = Math.min(e.clientY, window.innerHeight - 60);
+    const y = Math.min(e.clientY, window.innerHeight - 100);
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
 }
@@ -124,6 +133,7 @@ function dgaOpenCardContextMenu(e, editionId) {
 function dgaCloseCardContextMenu() {
     document.getElementById('dga-card-context-menu')?.classList.add('hidden');
     dgaCtxTargetEdition = null;
+    dgaCtxCardTarget = null;
 }
 
 async function dgaCtxSetBanner() {
@@ -144,6 +154,163 @@ async function dgaCtxSetBanner() {
         if (gaDecks[activeDeck]) gaDecks[activeDeck].banner = banner;
     } catch {
         console.error('Failed to update banner');
+    }
+}
+
+// ── Change Edition (context-menu action on a card, Edition Locked only) ──
+// Swaps an existing row's printing in place instead of the owner having to
+// delete it and re-add the desired one — reuses the same foils-list picker
+// as the Add Card confirm step, minus the search/qty/section fields since
+// it's editing one specific already-placed row.
+let dgaSwapTarget = null; // {cardId, cardName, section, fromEditionId, fromFoilId}
+let dgaSwapModalEditionId = null;
+let dgaSwapModalFoilId = null;
+let dgaSwapModalCardData = null;
+
+function dgaCtxChangeEdition() {
+    const target = dgaCtxCardTarget;
+    dgaCloseCardContextMenu();
+    if (!target || !activeDeck) return;
+    dgaSwapTarget = {
+        cardId: target.cardId, cardName: target.cardName, section: target.section,
+        fromEditionId: target.editionId, fromFoilId: target.foilId,
+    };
+    dgaSwapModalEditionId = null;
+    dgaSwapModalFoilId = null;
+    dgaSwapModalCardData = null;
+
+    document.getElementById('dga-swap-modal-name').textContent = target.cardName || '';
+    document.getElementById('dga-swap-modal-set').textContent = '';
+    document.getElementById('dga-swap-modal-img').src = target.editionId ? `/images/${target.editionId}.jpg` : '';
+    document.getElementById('dga-swap-modal-submit').disabled = true;
+    document.getElementById('dga-edition-swap-modal').classList.remove('hidden');
+
+    dgaLoadSwapFoilOptions(target.cardId);
+}
+
+function closeDgaEditionSwapModal() {
+    document.getElementById('dga-edition-swap-modal').classList.add('hidden');
+    dgaSwapTarget = null;
+}
+
+async function dgaLoadSwapFoilOptions(cardId) {
+    const foilList = document.getElementById('dga-swap-modal-foils');
+    foilList.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);">Loading...</div>';
+    document.getElementById('dga-swap-modal-submit').disabled = true;
+
+    try {
+        const res = await fetch(`/api/cards/${cardId}`);
+        const data = await res.json();
+        dgaSwapModalCardData = data.card;
+
+        const editions = Object.entries(dgaSwapModalCardData.editions || {}).sort((a, b) => {
+            const parseNum = s => {
+                const m = (s || 'ZZZ').match(/^(\d+)([A-Z]*)$/i);
+                return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, s];
+            };
+            const [nA, sA] = parseNum(a[1].collector_number);
+            const [nB, sB] = parseNum(b[1].collector_number);
+            return nA !== nB ? nA - nB : sA.localeCompare(sB);
+        });
+
+        foilList.innerHTML = '';
+        let currentOpt = null;
+        let firstOpt = null;
+
+        editions.forEach(([eid, einfo]) => {
+            const rarity = rarityMapInv[einfo.rarity] || '?';
+            Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
+                const variants = finfo.variants || {};
+
+                // Same "skip a parent no separate product was ever made for"
+                // rule as the Add Card foil step (dgaLoadFoilOptions).
+                const variantPopulation = Object.values(variants).reduce((sum, v) => sum + (v.population || 0), 0);
+                const remainingPopulation = finfo.population == null ? null : finfo.population - variantPopulation;
+
+                if (remainingPopulation === null || remainingPopulation > 0) {
+                    const opt = dgaBuildSwapFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false, finfo.population == null);
+                    if (!firstOpt) firstOpt = {opt, eid, fid};
+                    if (eid === dgaSwapTarget?.fromEditionId && fid === dgaSwapTarget?.fromFoilId) currentOpt = {opt, eid, fid};
+                    foilList.appendChild(opt);
+                }
+
+                Object.entries(variants).forEach(([vid, vinfo]) => {
+                    const vopt = dgaBuildSwapFoilOption(eid, vid, vinfo.kind, einfo.set_prefix, rarity, einfo.collector_number, true);
+                    if (!firstOpt) firstOpt = {opt: vopt, eid, fid: vid};
+                    if (eid === dgaSwapTarget?.fromEditionId && vid === dgaSwapTarget?.fromFoilId) currentOpt = {opt: vopt, eid, fid: vid};
+                    foilList.appendChild(vopt);
+                });
+            });
+        });
+
+        // Pre-select the card's current printing so the modal doesn't open
+        // looking like nothing is chosen — the owner can then pick another.
+        const toSelect = currentOpt || firstOpt;
+        if (toSelect) dgaSelectSwapFoilOption(toSelect.opt, toSelect.eid, toSelect.fid);
+    } catch {
+        foilList.innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
+    }
+}
+
+function dgaBuildSwapFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant, isTemp = false) {
+    const label = kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
+    const opt = document.createElement('div');
+    opt.className = 'inv-foil-option';
+    opt.dataset.editionId = editionId;
+    opt.dataset.foilId = foilId;
+    opt.innerHTML = `
+        <div class="inv-foil-left">
+            <div class="inv-foil-name">${label}${isVariant ? ' <span style="opacity:0.5;font-size:0.85em">(variant)</span>' : ''}${isTemp ? ' <span class="inv-foil-temp-badge" title="No circulation data reported yet — this printing is a placeholder until the official foil ID is assigned">TEMP</span>' : ''}</div>
+            <div class="inv-foil-meta">${setPrefix} · ${rarity} · #${collectorNum || '?'}</div>
+        </div>
+        <div class="inv-foil-check"></div>`;
+    opt.onclick = () => dgaSelectSwapFoilOption(opt, editionId, foilId);
+    return opt;
+}
+
+function dgaSelectSwapFoilOption(opt, editionId, foilId) {
+    document.querySelectorAll('#dga-swap-modal-foils .inv-foil-option').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    dgaSwapModalEditionId = editionId;
+    dgaSwapModalFoilId = foilId;
+
+    const einfo = dgaSwapModalCardData?.editions?.[editionId];
+    if (einfo) {
+        document.getElementById('dga-swap-modal-img').src = `/images/${editionId}.jpg`;
+        document.getElementById('dga-swap-modal-set').textContent = `${einfo.set_name || ''} (${einfo.set_prefix || ''}) — #${einfo.collector_number || '?'}`;
+    }
+    document.getElementById('dga-swap-modal-submit').disabled = false;
+}
+
+async function submitDgaEditionSwap() {
+    if (!dgaSwapTarget || !activeDeck || !dgaSwapModalEditionId) return;
+    const btn = document.getElementById('dga-swap-modal-submit');
+    btn.disabled = true;
+    btn.textContent = 'Changing...';
+
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/edition`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                card_id: dgaSwapTarget.cardId, section: dgaSwapTarget.section,
+                from_edition_id: dgaSwapTarget.fromEditionId, from_foil_id: dgaSwapTarget.fromFoilId,
+                to_edition_id: dgaSwapModalEditionId, to_foil_id: dgaSwapModalFoilId,
+            })
+        });
+
+        if (res.ok) {
+            btn.disabled = false;
+            btn.textContent = 'Change Edition';
+            closeDgaEditionSwapModal();
+            await dgaReloadActiveDeck();
+        } else {
+            btn.textContent = 'Error';
+            setTimeout(() => { btn.textContent = 'Change Edition'; btn.disabled = false; }, 1500);
+        }
+    } catch {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Change Edition'; btn.disabled = false; }, 1500);
     }
 }
 
@@ -562,6 +729,7 @@ async function openDeckDetail(deckName, pushUrl = true) {
     dgaRenderDetailName(deckName);
     dgaRenderDetailDesc(entry.desc || '');
     dgaWireDetailInlineEdit();
+    _setEditionLockedPillUI(!!entry.edition_locked);
 
     const grid = document.getElementById('dga-card-grid');
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
@@ -574,9 +742,46 @@ async function openDeckDetail(deckName, pushUrl = true) {
         const res = await fetch(`/api/decks/${encodeURIComponent(deckName)}`);
         if (!res.ok) throw new Error();
         activeDeckData = await res.json();
+        _setEditionLockedPillUI(!!activeDeckData.edition_locked); // authoritative, once known
         renderDeckSections(activeDeckData);
     } catch {
         if (grid) grid.innerHTML = '<p class="dga-loading">Failed to load deck.</p>';
+    }
+}
+
+// Edition Locked (pill toggle next to the "+" add-card button, dga-edition-locked-toggle
+// in decks_ga.html) — decides whether adding a card asks which printing/foil to
+// use (dgaGoToConfirm), and whether the deck view lists each printing
+// separately (Locked) or collapses same-card rows into one random-printing
+// tile (Unlocked, today's default) — see renderDeckSections.
+function _setEditionLockedPillUI(value) {
+    const toggle = document.getElementById('dga-edition-locked-toggle');
+    toggle.querySelectorAll('.pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'true') === value);
+    });
+    positionPillIndicator(toggle);
+}
+
+async function setDgaEditionLocked(value) {
+    _setEditionLockedPillUI(value);
+    if (!activeDeck) return;
+    try {
+        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({edition_locked: value})
+        });
+        if (!res.ok) throw new Error();
+        if (gaDecks[activeDeck]) gaDecks[activeDeck].edition_locked = value;
+        // Toggling changes how *existing* cards are grouped/displayed, not
+        // just how new ones get added — re-render right away.
+        if (activeDeckData) {
+            activeDeckData.edition_locked = value;
+            renderDeckSections(activeDeckData);
+        }
+    } catch {
+        console.error('Failed to update edition-locked setting');
+        _setEditionLockedPillUI(!value);
     }
 }
 
@@ -684,37 +889,59 @@ function dgaCommitFromPlaceholder() {
 
 function dgaCommitCardMove(toSection, index) {
     if (!dgaDragCard || !activeDeck) return;
-    const {cardId, fromSection} = dgaDragCard;
+    const {cardId, editionId, foilId, fromSection} = dgaDragCard;
+
+    const sections = activeDeckData?.sections || {};
+    const editionLocked = !!activeDeckData?.edition_locked;
+    // Locked: this tile is one specific row. Unlocked: it's every row for
+    // cardId collapsed together, so the whole group moves as one unit.
+    const rowMatches = editionLocked
+        ? (r => r.card_id === cardId && (r.edition_id || null) === (editionId || null) && (r.foil_id || null) === (foilId || null))
+        : (r => r.card_id === cardId);
 
     // No-op guard: dropping back onto its own position. Indices are
     // post-removal (the dragged card is excluded from the count), so its
     // own position is exactly currentIndex — one step right is index + 1.
-    const sections = activeDeckData?.sections || {};
     if (fromSection === toSection) {
-        const currentIndex = Object.keys(sections[fromSection] || {}).indexOf(cardId);
+        const currentIndex = (sections[fromSection] || []).findIndex(rowMatches);
         if (currentIndex === index) return;
     }
 
     // Optimistic: apply the move locally and render the final order NOW —
     // synchronously, before dragend fires — so no restore animation or
     // old-order frame ever shows. The server call runs in the background.
-    if (sections[fromSection] && cardId in sections[fromSection]) {
-        let qty = sections[fromSection][cardId];
-        delete sections[fromSection][cardId];
-        if (cardId in (sections[toSection] || {})) {
-            qty += sections[toSection][cardId];
-            delete sections[toSection][cardId];
+    const fromCards = sections[fromSection] || [];
+    if (editionLocked) {
+        const rowIndex = fromCards.findIndex(rowMatches);
+        if (rowIndex !== -1) {
+            let [row] = fromCards.splice(rowIndex, 1);
+            const toCards = sections[toSection] || (sections[toSection] = []);
+            const existingIndex = toCards.findIndex(rowMatches);
+            if (existingIndex !== -1) {
+                const [existing] = toCards.splice(existingIndex, 1);
+                row = {...row, quantity: row.quantity + existing.quantity};
+            }
+            toCards.splice(Math.max(0, Math.min(index, toCards.length)), 0, row);
         }
-        const items = Object.entries(sections[toSection] || {});
-        items.splice(Math.max(0, Math.min(index, items.length)), 0, [cardId, qty]);
-        sections[toSection] = Object.fromEntries(items);
+    } else {
+        const movingRows = fromCards.filter(rowMatches);
+        if (movingRows.length) {
+            for (const row of movingRows) fromCards.splice(fromCards.indexOf(row), 1);
+            const toCards = sections[toSection] || (sections[toSection] = []);
+            toCards.splice(Math.max(0, Math.min(index, toCards.length)), 0, ...movingRows);
+        }
     }
     renderDeckSections(activeDeckData, false);
 
     fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/move`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({card_id: cardId, from_section: fromSection, to_section: toSection, index})
+        body: JSON.stringify({
+            card_id: cardId,
+            edition_id: editionLocked ? (editionId || null) : null,
+            foil_id: editionLocked ? (foilId || null) : null,
+            from_section: fromSection, to_section: toSection, index,
+        })
     }).then(res => {
         if (!res.ok) dgaReloadActiveDeck(); // server refused — restore truth
     }).catch(() => dgaReloadActiveDeck());
@@ -735,19 +962,36 @@ async function dgaReloadActiveDeck() {
 
 const ALWAYS_FOIL_DGA = new Set([7, 8, 9]);
 
+// Groups a section's rows by card_id, preserving first-seen order — used
+// when the deck isn't Edition Locked, where several rows for the same card
+// (e.g. one random printing per separate add) collapse into one tile.
+function _dgaGroupCardsByCardId(cards) {
+    const order = [];
+    const byId = new Map();
+    for (const row of cards) {
+        if (!byId.has(row.card_id)) {
+            byId.set(row.card_id, []);
+            order.push(row.card_id);
+        }
+        byId.get(row.card_id).push(row);
+    }
+    return order.map(cardId => byId.get(cardId));
+}
+
 function renderDeckSections(deckData, animate = true) {
     const grid = document.getElementById('dga-card-grid');
     grid.classList.toggle('dga-no-anim', !animate);
     const sections = deckData.sections || {};
     const nameMap = deckData.name_map || {};
     const editionMap = deckData.edition_map || {};
+    const editionsInfo = deckData.editions_info || {};
+    const foilsInfo = deckData.foils_info || {};
+    const editionLocked = !!deckData.edition_locked;
 
     let totalUnique = 0, totalQty = 0;
     for (const cards of Object.values(sections)) {
-        for (const qty of Object.values(cards)) {
-            totalUnique++;
-            totalQty += qty;
-        }
+        totalUnique += editionLocked ? cards.length : new Set(cards.map(r => r.card_id)).size;
+        for (const row of cards) totalQty += row.quantity;
     }
     updateDeckCounts(totalUnique, totalQty);
 
@@ -764,7 +1008,7 @@ function renderDeckSections(deckData, animate = true) {
             block.className = 'dga-section-block';
 
             // Header
-            const sectionQty = Object.values(cards).reduce((s, q) => s + q, 0);
+            const sectionQty = cards.reduce((s, row) => s + row.quantity, 0);
             const header = document.createElement('div');
             header.className = 'dga-section-header';
             header.innerHTML = `
@@ -802,18 +1046,45 @@ function renderDeckSections(deckData, animate = true) {
                 dgaCommitFromPlaceholder();
             });
 
-            // Card tiles
-            const cardEntries = Object.entries(cards);
-            cardEntries.forEach(([card_id, qty], i) => {
-                const cardName = nameMap[card_id] || card_id;
-                const editionId = editionMap[card_id] || null;
-                sectionGrid.appendChild(buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, i, cardEntries.length));
-            });
+            // Card tiles. Locked: one tile per row (a card_id may have
+            // several, split across printings). Unlocked: one tile per
+            // card_id, collapsing its rows together (summed quantity, a
+            // random printing among them for the thumbnail, no foil badge).
+            let tileCount;
+            if (editionLocked) {
+                tileCount = cards.length;
+                cards.forEach((row, i) => {
+                    const cardName = nameMap[row.card_id] || row.card_id;
+                    const displayEditionId = row.edition_id || editionMap[row.card_id] || null;
+                    sectionGrid.appendChild(buildDeckCardTile(
+                        row.card_id, cardName, displayEditionId, row.quantity, sectionName, i, tileCount,
+                        row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo,
+                    ));
+                });
+            } else {
+                const groups = _dgaGroupCardsByCardId(cards);
+                tileCount = groups.length;
+                groups.forEach((rows, i) => {
+                    const cardId = rows[0].card_id;
+                    const cardName = nameMap[cardId] || cardId;
+                    const qty = rows.reduce((s, r) => s + r.quantity, 0);
+                    // Unlocked means editions don't matter for display either —
+                    // always a random printing from the card's full catalog
+                    // (edition_map, server-side _pick_edition), regardless of
+                    // which printing(s) got randomly assigned to the row(s)
+                    // themselves when they were added.
+                    const displayEditionId = editionMap[cardId] || null;
+                    sectionGrid.appendChild(buildDeckCardTile(
+                        cardId, cardName, displayEditionId, qty, sectionName, i, tileCount,
+                        null, null, editionsInfo, foilsInfo,
+                    ));
+                });
+            }
 
             // Add tile inside this section's grid
             const addTile = document.createElement('div');
             addTile.className = 'inv-card-add-tile';
-            addTile.style.animationDelay = `${Math.min(cardEntries.length * 40, 640)}ms`;
+            addTile.style.animationDelay = `${Math.min(tileCount * 40, 640)}ms`;
             addTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">Add Card</span>`;
             addTile.onclick = () => openDeckAddModal(sectionName);
             sectionGrid.appendChild(addTile);
@@ -852,7 +1123,7 @@ function dgaBuildAddSectionButton() {
                     body: JSON.stringify({section: name})
                 });
                 if (!res.ok) return cancel();
-                activeDeckData.sections[name] = {};
+                activeDeckData.sections[name] = [];
                 renderDeckSections(activeDeckData, false);
             } catch {
                 cancel();
@@ -870,43 +1141,65 @@ function updateDeckCounts(unique, total) {
 
 // ── Deck tile edit mode — uses TileEditMode from tiles.js ──
 const dgaDeckEditMode = new TileEditMode('dga-qty-confirm-bar', async (changes) => {
+    const editionLocked = !!activeDeckData?.edition_locked;
     for (const c of changes) {
         const section = c.input.dataset.section;
         if (!section) continue;
+        const editionId = c.editionId || null;
+        const foilId = c.foilId || null;
 
         try {
             if (c.quantity <= 0) {
                 await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
                     method: 'DELETE',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({card_id: c.cardId, section})
+                    body: JSON.stringify({card_id: c.cardId, section, edition_id: editionId, foil_id: foilId})
                 });
-                if (activeDeckData?.sections?.[section])
-                    delete activeDeckData.sections[section][c.cardId];
             } else {
                 await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
                     method: 'PATCH',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({card_id: c.cardId, section, quantity: c.quantity})
+                    body: JSON.stringify({card_id: c.cardId, section, edition_id: editionId, foil_id: foilId, quantity: c.quantity})
                 });
-                if (activeDeckData?.sections?.[section])
-                    activeDeckData.sections[section][c.cardId] = c.quantity;
             }
-            // Update badge
-            const badge = c.input.closest('.dga-card-tile')?.querySelector('.inv-qty-badge');
-            if (badge) {
-                badge.textContent = `x${c.quantity}`;
-                badge.style.display = c.quantity > 0 ? '' : 'none';
+            if (editionLocked) {
+                // One row per tile — patch it in place directly.
+                const cards = activeDeckData?.sections?.[section];
+                const row = cards?.find(r => r.card_id === c.cardId
+                    && (r.edition_id || null) === editionId && (r.foil_id || null) === foilId);
+                if (c.quantity <= 0) {
+                    if (row) cards.splice(cards.indexOf(row), 1);
+                } else if (row) {
+                    row.quantity = c.quantity;
+                }
+                const badge = c.input.closest('.dga-card-tile')?.querySelector('.inv-qty-badge');
+                if (badge) {
+                    badge.textContent = `x${c.quantity}`;
+                    badge.style.display = c.quantity > 0 ? '' : 'none';
+                }
             }
+            // Not locked: the tile is a collapsed group possibly spanning
+            // several real rows, and the server redistributes the new
+            // total across them — reload once below rather than trying to
+            // duplicate that redistribution logic here.
         } catch {
             console.error('Failed to update deck card quantity');
         }
     }
 
+    if (!editionLocked) {
+        await dgaReloadActiveDeck();
+        if (activeDeck && gaDecks[activeDeck]) {
+            gaDecks[activeDeck].card_count = Object.values(activeDeckData?.sections || {})
+                .reduce((s, c) => s + c.reduce((a, r) => a + r.quantity, 0), 0);
+        }
+        return;
+    }
+
     // Re-render to remove deleted tiles
     const anyDeleted = changes.some(c => c.quantity <= 0);
-    const totalQty = Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0);
-    const totalUnique = Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0);
+    const totalQty = Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + c.reduce((a, r) => a + r.quantity, 0), 0);
+    const totalUnique = Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + c.length, 0);
 
     // Keep the list-view's in-memory card_count in sync so it's correct immediately on back/browser-back,
     // without requiring a full re-fetch of /api/decks
@@ -948,13 +1241,31 @@ dgaDeckEditMode._clearAllIndicators = function () {
     document.querySelectorAll('.dga-card-tile.has-pending').forEach(t => this._clearIndicator(t));
 };
 
-function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index, total) {
+// Foil/curio indicator for a tile that pins a specific printing — mirrors
+// Inventory's getFoilSuffix (inventory.js) but drops the rarity letter,
+// just the emoji: ⭐ for a plain foil, 💎 for anything else non-foil (a
+// descriptive Curio Foil name etc.), nothing for Nonfoil. Rarities that are
+// always-foil (CSR/CUR/CPR) skip the badge too — same rule as Inventory,
+// since it'd be redundant there.
+const DGA_ALWAYS_FOIL_RARITIES = new Set([7, 8, 9]);
+function _dgaFoilBadgeEmoji(rarity, kind) {
+    if (DGA_ALWAYS_FOIL_RARITIES.has(rarity)) return '';
+    const k = (kind || '').toLowerCase();
+    if (k === 'nonfoil' || k === '') return '';
+    return k === 'foil' ? '⭐' : '💎';
+}
+
+function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index, total,
+                            rowEditionId = null, rowFoilId = null, editionsInfo = {}, foilsInfo = {}) {
     const tile = document.createElement('div');
     tile.className = 'dga-card-tile inv-card-tile tile-hoverable';
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
     tile.style.animationDelay = `${delay}ms`;
 
     const imgSrc = editionId ? `/images/${editionId}.jpg` : '';
+    const foilEmoji = rowEditionId
+        ? _dgaFoilBadgeEmoji(editionsInfo[rowEditionId]?.rarity, foilsInfo[rowFoilId]?.kind)
+        : '';
 
     // An empty src (no resolved edition yet) never fires load or error at
     // all — so it can't rely on revealTileImage to ever clear the "loading"
@@ -970,6 +1281,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
             <div class="card-tile-dim"></div>
         </div>
         <span class="inv-qty-badge">x${qty}</span>
+        ${foilEmoji ? `<span class="dga-foil-badge">${foilEmoji}</span>` : ''}
         <div class="inv-card-tile-overlay">
             <div class="inv-card-tile-info">
                 <div class="dga-card-tile-name">${cardName}</div>
@@ -980,7 +1292,9 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
             <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-add" type="button">+</button>
             <input class="inv-tile-qty-input" type="number" value="${qty}" min="0" max="999"
                 data-card-id="${card_id}"
-                data-section="${sectionName}">
+                data-section="${sectionName}"
+                data-edition-id="${rowEditionId || ''}"
+                data-foil-id="${rowFoilId || ''}">
             <button class="inv-tile-qty-btn btn btn--icon inv-tile-qty-sub" type="button">−</button>
         </div>
         <div class="inv-tile-qty-indicator"></div>`;
@@ -993,13 +1307,15 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
 
     tile.addEventListener('contextmenu', e => {
         e.preventDefault();
-        dgaOpenCardContextMenu(e, editionId);
+        dgaOpenCardContextMenu(e, editionId, card_id, cardName, rowEditionId, rowFoilId, sectionName);
     });
 
     // ── Drag & drop: reorder within / move across sections ──
     tile.draggable = true;
     tile.dataset.cardId = card_id;
     tile.dataset.section = sectionName;
+    tile.dataset.editionId = rowEditionId || '';
+    tile.dataset.foilId = rowFoilId || '';
 
     // Qty controls need normal mouse interaction — suspend dragging over them
     // The qty ctrl overlay spans the whole tile face, so only suspend
@@ -1015,7 +1331,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
     }
 
     tile.addEventListener('dragstart', e => {
-        dgaDragCard = {cardId: card_id, fromSection: sectionName, tile};
+        dgaDragCard = {cardId: card_id, editionId: rowEditionId, foilId: rowFoilId, fromSection: sectionName, tile};
         tile.classList.add('dga-dragging');
         document.body.classList.add('dga-drag-active');
         e.dataTransfer.effectAllowed = 'move';
@@ -1071,34 +1387,47 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
     async function commitNow(newQty) {
         badge.textContent = `x${newQty}`;
         badge.style.display = newQty > 0 ? '' : 'none';
+        const editionLocked = !!activeDeckData?.edition_locked;
+        const findRow = cards => cards?.find(r => r.card_id === card_id
+            && (r.edition_id || null) === rowEditionId && (r.foil_id || null) === rowFoilId);
         try {
             if (newQty <= 0) {
                 await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
                     method: 'DELETE',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({card_id, section: sectionName})
+                    body: JSON.stringify({card_id, section: sectionName, edition_id: rowEditionId, foil_id: rowFoilId})
                 });
-                if (activeDeckData?.sections?.[sectionName]) {
-                    delete activeDeckData.sections[sectionName][card_id];
-                    renderDeckSections(activeDeckData);
+                if (editionLocked) {
+                    const cards = activeDeckData?.sections?.[sectionName];
+                    const row = findRow(cards);
+                    if (row) cards.splice(cards.indexOf(row), 1);
                 }
             } else {
                 await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
                     method: 'PATCH',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({card_id, section: sectionName, quantity: newQty})
+                    body: JSON.stringify({card_id, section: sectionName, edition_id: rowEditionId, foil_id: rowFoilId, quantity: newQty})
                 });
-                if (activeDeckData?.sections?.[sectionName])
-                    activeDeckData.sections[sectionName][card_id] = newQty;
-                updateDeckCounts(
-                    Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.keys(c).length, 0),
-                    Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0)
+                if (editionLocked) {
+                    const row = findRow(activeDeckData?.sections?.[sectionName]);
+                    if (row) row.quantity = newQty;
+                }
+            }
+            if (!editionLocked) {
+                // Collapsed tile — the server may have redistributed quantity
+                // across several real rows; reload rather than guess at that.
+                await dgaReloadActiveDeck();
+            } else {
+                if (newQty <= 0) renderDeckSections(activeDeckData);
+                else updateDeckCounts(
+                    Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + c.length, 0),
+                    Object.values(activeDeckData?.sections || {}).reduce((s, c) => s + c.reduce((a, r) => a + r.quantity, 0), 0)
                 );
             }
             // Keep list-view's in-memory card_count in sync
             if (activeDeck && gaDecks[activeDeck]) {
                 gaDecks[activeDeck].card_count = Object.values(activeDeckData?.sections || {})
-                    .reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0);
+                    .reduce((s, c) => s + c.reduce((a, r) => a + r.quantity, 0), 0);
             }
         } catch {
             console.error('Failed to update deck card');
@@ -1418,7 +1747,7 @@ async function submitAddSectionModal() {
             errEl.classList.remove('hidden');
             return;
         }
-        if (!activeDeckData.sections[name]) activeDeckData.sections[name] = {};
+        if (!activeDeckData.sections[name]) activeDeckData.sections[name] = [];
         closeAddSectionModal();
         renderDeckSections(activeDeckData);
     } catch {
@@ -1439,7 +1768,7 @@ async function submitAddSection() {
             body: JSON.stringify({section: name})
         });
         if (!res.ok) return;
-        if (!activeDeckData.sections[name]) activeDeckData.sections[name] = {};
+        if (!activeDeckData.sections[name]) activeDeckData.sections[name] = [];
         input.value = '';
         renderSectionList();
         renderDeckSections(activeDeckData);
@@ -1460,7 +1789,7 @@ async function submitDeleteSection(sectionName) {
         renderDeckSections(activeDeckData);
         if (activeDeck && gaDecks[activeDeck]) {
             gaDecks[activeDeck].card_count = Object.values(activeDeckData?.sections || {})
-                .reduce((s, c) => s + Object.values(c).reduce((a, v) => a + v, 0), 0);
+                .reduce((s, c) => s + c.reduce((a, r) => a + r.quantity, 0), 0);
         }
     } catch {
         console.error('Failed to delete section');
@@ -1745,7 +2074,7 @@ async function dgaSubmitImport() {
 
         let totalQty = 0;
         for (const cards of Object.values(activeDeckData.sections || {}))
-            for (const qty of Object.values(cards)) totalQty += qty;
+            for (const row of cards) totalQty += row.quantity;
         if (gaDecks[activeDeck]) gaDecks[activeDeck].card_count = totalQty;
 
         dgaLoadExport();
@@ -1799,6 +2128,8 @@ function openDeckAddModal(sectionName = null) {
     dgaAddModalCardId = null;
     dgaAddModalCardName = null;
     dgaAddModalEditionId = null;
+    dgaAddModalFoilId = null;
+    dgaAddModalCardData = null;
     dgaAddModalPreSection = sectionName;
 
     document.getElementById('dga-add-card-search').value = '';
@@ -1838,6 +2169,12 @@ function dgaBackToSearch() {
         document.getElementById('dga-add-back-btn').classList.add('hidden');
         document.querySelector('#dga-add-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
     });
+    // Stale foil options from the last card shouldn't linger into the next pick
+    dgaAddModalFoilId = null;
+    dgaAddModalCardData = null;
+    const foilsBox = document.getElementById('dga-add-modal-foils');
+    foilsBox.classList.add('hidden');
+    foilsBox.innerHTML = '';
 }
 
 async function searchDgaAddCards() {
@@ -1954,12 +2291,119 @@ function dgaGoToConfirm(cardId, cardName, editionId, setLabel = '') {
     hidden.value = preSelect;
     label.textContent = preSelect;
 
+    // Reset any previous card's foil pick — either resolved fresh below, or
+    // left null (generic — "any edition") when the deck isn't Edition Locked.
+    dgaAddModalFoilId = null;
+    dgaAddModalCardData = null;
+    const editionLocked = !!activeDeckData?.edition_locked;
+    const foilsBox = document.getElementById('dga-add-modal-foils');
+    const submitBtn = document.getElementById('dga-add-modal-submit');
+    if (editionLocked) {
+        foilsBox.classList.remove('hidden');
+        submitBtn.disabled = true;
+    } else {
+        foilsBox.classList.add('hidden');
+        foilsBox.innerHTML = '';
+        submitBtn.disabled = false;
+    }
+
     dgaAnimateAddModalResize(() => {
         document.getElementById('dga-add-step-search').classList.add('hidden');
         document.getElementById('dga-add-step-confirm').classList.remove('hidden');
         document.getElementById('dga-add-back-btn').classList.remove('hidden');
         document.querySelector('#dga-add-modal .inv-modal-wide').classList.add('inv-modal-foil-step');
     });
+
+    if (editionLocked) dgaLoadFoilOptions(cardId);
+}
+
+// Fetches the card's full edition/foil list and lets the user pin the add to
+// one specific printing — same data source and sort as Inventory's foil step
+// (goToFoilStep in inventory.js), duplicated here under dga-prefixed ids
+// rather than shared, matching this file's existing convention of not
+// sharing modal code with inventory.js.
+async function dgaLoadFoilOptions(cardId) {
+    const foilList = document.getElementById('dga-add-modal-foils');
+    foilList.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted);">Loading...</div>';
+    document.getElementById('dga-add-modal-submit').disabled = true;
+
+    try {
+        const res = await fetch(`/api/cards/${cardId}`);
+        const data = await res.json();
+        dgaAddModalCardData = data.card;
+
+        const editions = Object.entries(dgaAddModalCardData.editions || {}).sort((a, b) => {
+            const parseNum = s => {
+                const m = (s || 'ZZZ').match(/^(\d+)([A-Z]*)$/i);
+                return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, s];
+            };
+            const [nA, sA] = parseNum(a[1].collector_number);
+            const [nB, sB] = parseNum(b[1].collector_number);
+            return nA !== nB ? nA - nB : sA.localeCompare(sB);
+        });
+
+        foilList.innerHTML = '';
+        let firstOpt = null;
+
+        editions.forEach(([eid, einfo]) => {
+            const rarity = rarityMapInv[einfo.rarity] || '?';
+            Object.entries(einfo.foils || {}).forEach(([fid, finfo]) => {
+                const variants = finfo.variants || {};
+
+                // Same "skip a parent that no separate product was ever
+                // made for" rule as Inventory's goToFoilStep — see its
+                // comment for the full rationale (Curio-Foil-only cards).
+                const variantPopulation = Object.values(variants).reduce((sum, v) => sum + (v.population || 0), 0);
+                const remainingPopulation = finfo.population == null ? null : finfo.population - variantPopulation;
+
+                if (remainingPopulation === null || remainingPopulation > 0) {
+                    const opt = dgaBuildFoilOption(eid, fid, finfo.kind, einfo.set_prefix, rarity, einfo.collector_number, false, finfo.population == null);
+                    if (!firstOpt) firstOpt = {opt, eid, fid};
+                    foilList.appendChild(opt);
+                }
+
+                Object.entries(variants).forEach(([vid, vinfo]) => {
+                    const vopt = dgaBuildFoilOption(eid, vid, vinfo.kind, einfo.set_prefix, rarity, einfo.collector_number, true);
+                    if (!firstOpt) firstOpt = {opt: vopt, eid, fid: vid};
+                    foilList.appendChild(vopt);
+                });
+            });
+        });
+
+        if (firstOpt) dgaSelectFoilOption(firstOpt.opt, firstOpt.eid, firstOpt.fid);
+    } catch {
+        foilList.innerHTML = '<div style="font-size:0.78rem;color:var(--error);">Failed to load editions.</div>';
+    }
+}
+
+function dgaBuildFoilOption(editionId, foilId, kind, setPrefix, rarity, collectorNum, isVariant, isTemp = false) {
+    const label = kind ? kind.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : 'Standard';
+    const opt = document.createElement('div');
+    opt.className = 'inv-foil-option';
+    opt.dataset.editionId = editionId;
+    opt.dataset.foilId = foilId;
+    opt.innerHTML = `
+        <div class="inv-foil-left">
+            <div class="inv-foil-name">${label}${isVariant ? ' <span style="opacity:0.5;font-size:0.85em">(variant)</span>' : ''}${isTemp ? ' <span class="inv-foil-temp-badge" title="No circulation data reported yet — this printing is a placeholder until the official foil ID is assigned">TEMP</span>' : ''}</div>
+            <div class="inv-foil-meta">${setPrefix} · ${rarity} · #${collectorNum || '?'}</div>
+        </div>
+        <div class="inv-foil-check"></div>`;
+    opt.onclick = () => dgaSelectFoilOption(opt, editionId, foilId);
+    return opt;
+}
+
+function dgaSelectFoilOption(opt, editionId, foilId) {
+    document.querySelectorAll('#dga-add-modal-foils .inv-foil-option').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+    dgaAddModalEditionId = editionId;
+    dgaAddModalFoilId = foilId;
+
+    const einfo = dgaAddModalCardData?.editions?.[editionId];
+    if (einfo) {
+        document.getElementById('dga-add-modal-img').src = `/images/${editionId}.jpg`;
+        document.getElementById('dga-add-modal-set').textContent = `${einfo.set_name || ''} (${einfo.set_prefix || ''}) — #${einfo.collector_number || '?'}`;
+    }
+    document.getElementById('dga-add-modal-submit').disabled = false;
 }
 
 
@@ -2002,6 +2446,12 @@ async function submitDgaAddCard() {
 
     const section = document.getElementById('dga-add-section').value;
     const quantity = parseInt(document.getElementById('dga-add-modal-qty').value) || 1;
+    // Not Edition Locked means "any edition" — even though the search step
+    // may have resolved *a* editionId for the thumbnail, that pick is only
+    // cosmetic and must not be persisted as a real edition/foil selection.
+    const editionLocked = !!activeDeckData?.edition_locked;
+    const editionId = editionLocked ? dgaAddModalEditionId : null;
+    const foilId = editionLocked ? dgaAddModalFoilId : null;
     const btn = document.getElementById('dga-add-modal-submit');
     btn.disabled = true;
     btn.textContent = 'Adding...';
@@ -2010,7 +2460,7 @@ async function submitDgaAddCard() {
         const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({card_id: dgaAddModalCardId, section, quantity})
+            body: JSON.stringify({card_id: dgaAddModalCardId, section, quantity, edition_id: editionId, foil_id: foilId})
         });
 
         if (res.ok) {
@@ -2018,19 +2468,38 @@ async function submitDgaAddCard() {
             btn.disabled = false;
             btn.textContent = 'Add to Deck';
 
-            // Update local state
-            if (activeDeckData?.sections?.[section] !== undefined) {
-                const existing = activeDeckData.sections[section][dgaAddModalCardId] || 0;
-                activeDeckData.sections[section][dgaAddModalCardId] = existing + quantity;
-                // Update edition map for display
-                if (dgaAddModalEditionId && !activeDeckData.edition_map[dgaAddModalCardId])
-                    activeDeckData.edition_map[dgaAddModalCardId] = dgaAddModalEditionId;
-                if (dgaAddModalCardName && !activeDeckData.name_map[dgaAddModalCardId])
-                    activeDeckData.name_map[dgaAddModalCardId] = dgaAddModalCardName;
+            if (editionLocked) {
+                // Update local state — a specific, known row
+                if (activeDeckData?.sections?.[section] !== undefined) {
+                    const cards = activeDeckData.sections[section];
+                    const row = cards.find(r => r.card_id === dgaAddModalCardId
+                        && (r.edition_id || null) === editionId && (r.foil_id || null) === foilId);
+                    if (row) row.quantity += quantity;
+                    else cards.push({card_id: dgaAddModalCardId, edition_id: editionId, foil_id: foilId, quantity});
+                    if (dgaAddModalCardName && !activeDeckData.name_map[dgaAddModalCardId])
+                        activeDeckData.name_map[dgaAddModalCardId] = dgaAddModalCardName;
+                    // Seed editions_info/foils_info for the badge — the server won't be
+                    // asked again until the next full reload, so without this a freshly
+                    // picked edition/foil renders its badge as bare "#?" until then.
+                    const einfo = dgaAddModalCardData?.editions?.[editionId];
+                    if (einfo && !activeDeckData.editions_info[editionId]) {
+                        activeDeckData.editions_info[editionId] = {
+                            set_prefix: einfo.set_prefix, collector_number: einfo.collector_number, rarity: einfo.rarity,
+                        };
+                    }
+                    if (foilId && einfo && !activeDeckData.foils_info[foilId]) {
+                        activeDeckData.foils_info[foilId] = {kind: einfo.foils?.[foilId]?.kind};
+                    }
+                }
+                closeDeckAddModal();
+                renderDeckSections(activeDeckData);
+            } else {
+                // Not locked — the server picked a random printing and/or
+                // merged into an existing row for this card_id; reload
+                // rather than guess which.
+                closeDeckAddModal();
+                await dgaReloadActiveDeck();
             }
-
-            closeDeckAddModal();
-            renderDeckSections(activeDeckData);
 
             if (gaDecks[activeDeck])
                 gaDecks[activeDeck].card_count = (gaDecks[activeDeck].card_count || 0) + quantity;

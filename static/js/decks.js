@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════
 
 let pdDecks = [];
-let pdActiveDeck = null; // {username, name}
+let pdActiveDeck = null; // {omnidexId, name}
 
 async function loadPublicDecks() {
     const container = document.getElementById('pd-sections');
@@ -82,33 +82,39 @@ function buildPublicDeckTile(deck, index, total) {
         tile.prepend(bg);
     }
 
-    tile.onclick = () => openPublicDeckDetail(deck.username, deck.name);
+    tile.onclick = () => openPublicDeckDetail(deck.omnidex_id, deck.name, true, deck.username);
     return tile;
 }
 
-async function openPublicDeckDetail(username, deckName, pushUrl = true) {
-    pdActiveDeck = {username, name: deckName};
+// omnidexId (not username) addresses the deck in the URL/API — same rationale
+// as the public profile page (see api_public_deck_get). displayUsername is an
+// optional immediate value for the "by ..." byline, shown before the deck
+// fetch resolves (which also carries username, confirming/filling it in for
+// a direct/deep-linked visit where no tile click supplied it upfront).
+async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, displayUsername = null) {
+    pdActiveDeck = {omnidexId, name: deckName};
 
     document.getElementById('pd-list-view').classList.add('hidden');
     document.getElementById('pd-detail-view').classList.remove('hidden');
 
     document.getElementById('pd-detail-name').textContent = deckName;
-    document.getElementById('pd-detail-owner').textContent = `by ${username}`;
+    document.getElementById('pd-detail-owner').textContent = displayUsername ? `by ${displayUsername}` : '';
 
     const grid = document.getElementById('pd-card-grid');
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
 
     if (pushUrl) {
-        window.history.pushState({}, '', `/decks?user=${encodeURIComponent(username)}&deck=${encodeURIComponent(deckName)}`);
+        window.history.pushState({}, '', `/decks?omni=${encodeURIComponent(omnidexId)}&deck=${encodeURIComponent(deckName)}`);
     }
 
     try {
-        const res = await fetch(`/api/decks/public/${encodeURIComponent(username)}/${encodeURIComponent(deckName)}`);
+        const res = await fetch(`/api/decks/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(deckName)}`);
         if (!res.ok) throw new Error();
         const data = await res.json();
 
         document.getElementById('pd-detail-format').textContent = data.format ? `[${data.format}]` : '';
         document.getElementById('pd-detail-desc').textContent = data.desc || '';
+        document.getElementById('pd-detail-owner').textContent = `by ${data.username}`;
 
         renderPublicDeckSections(data);
     } catch {
@@ -123,18 +129,35 @@ function closePublicDeckDetail() {
     window.history.pushState({}, '', '/decks');
 }
 
+// Groups a section's rows by card_id, preserving first-seen order — same
+// helper as decks_ga.js's _dgaGroupCardsByCardId, duplicated per this file's
+// existing split from decks_ga.js (no shared module between them).
+function _pdGroupCardsByCardId(cards) {
+    const order = [];
+    const byId = new Map();
+    for (const row of cards) {
+        if (!byId.has(row.card_id)) {
+            byId.set(row.card_id, []);
+            order.push(row.card_id);
+        }
+        byId.get(row.card_id).push(row);
+    }
+    return order.map(cardId => byId.get(cardId));
+}
+
 function renderPublicDeckSections(deckData) {
     const grid = document.getElementById('pd-card-grid');
     const sections = deckData.sections || {};
     const nameMap = deckData.name_map || {};
     const editionMap = deckData.edition_map || {};
+    const editionsInfo = deckData.editions_info || {};
+    const foilsInfo = deckData.foils_info || {};
+    const editionLocked = !!deckData.edition_locked;
 
     let totalUnique = 0, totalQty = 0;
     for (const cards of Object.values(sections)) {
-        for (const qty of Object.values(cards)) {
-            totalUnique++;
-            totalQty += qty;
-        }
+        totalUnique += editionLocked ? cards.length : new Set(cards.map(r => r.card_id)).size;
+        for (const row of cards) totalQty += row.quantity;
     }
     document.getElementById('pd-detail-counts').textContent = `${totalUnique} unique · ${totalQty} total`;
 
@@ -152,7 +175,7 @@ function renderPublicDeckSections(deckData) {
         const block = document.createElement('div');
         block.className = 'dga-section-block';
 
-        const sectionQty = Object.values(cards).reduce((s, q) => s + q, 0);
+        const sectionQty = cards.reduce((s, row) => s + row.quantity, 0);
         const header = document.createElement('div');
         header.className = 'dga-section-header';
         header.innerHTML = `
@@ -163,24 +186,65 @@ function renderPublicDeckSections(deckData) {
         const sectionGrid = document.createElement('div');
         sectionGrid.className = 'dga-section-grid';
 
-        Object.entries(cards).forEach(([card_id, qty], i) => {
-            const cardName = nameMap[card_id] || card_id;
-            const editionId = editionMap[card_id] || null;
-            sectionGrid.appendChild(buildPublicCardTile(card_id, cardName, editionId, qty, i, Object.keys(cards).length));
-        });
+        // Locked: one tile per row (a card_id may have several, split
+        // across printings). Unlocked: one tile per card_id, collapsing
+        // its rows together (summed quantity, a random printing among them
+        // for the thumbnail, no foil badge) — same rule as the owner view.
+        if (editionLocked) {
+            cards.forEach((row, i) => {
+                const cardName = nameMap[row.card_id] || row.card_id;
+                const displayEditionId = row.edition_id || editionMap[row.card_id] || null;
+                sectionGrid.appendChild(buildPublicCardTile(
+                    row.card_id, cardName, displayEditionId, row.quantity, i, cards.length,
+                    row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo,
+                ));
+            });
+        } else {
+            const groups = _pdGroupCardsByCardId(cards);
+            groups.forEach((rows, i) => {
+                const cardId = rows[0].card_id;
+                const cardName = nameMap[cardId] || cardId;
+                const qty = rows.reduce((s, r) => s + r.quantity, 0);
+                // Unlocked means editions don't matter for display either —
+                // always a random printing from the card's full catalog
+                // (edition_map, server-side _pick_edition), regardless of
+                // which printing(s) got randomly assigned to the row(s)
+                // themselves when they were added.
+                const displayEditionId = editionMap[cardId] || null;
+                sectionGrid.appendChild(buildPublicCardTile(
+                    cardId, cardName, displayEditionId, qty, i, groups.length,
+                    null, null, editionsInfo, foilsInfo,
+                ));
+            });
+        }
 
         block.appendChild(sectionGrid);
         grid.appendChild(block);
     }
 }
 
-function buildPublicCardTile(card_id, cardName, editionId, qty, index, total) {
+// Foil/curio indicator for a tile that pins a specific printing — duplicated
+// from decks_ga.js's own _dgaFoilBadgeEmoji, same rationale as the rest of
+// this file's split from decks_ga.js: no shared module between them.
+const PD_ALWAYS_FOIL_RARITIES = new Set([7, 8, 9]);
+function _pdFoilBadgeEmoji(rarity, kind) {
+    if (PD_ALWAYS_FOIL_RARITIES.has(rarity)) return '';
+    const k = (kind || '').toLowerCase();
+    if (k === 'nonfoil' || k === '') return '';
+    return k === 'foil' ? '⭐' : '💎';
+}
+
+function buildPublicCardTile(card_id, cardName, editionId, qty, index, total,
+                              rowEditionId = null, rowFoilId = null, editionsInfo = {}, foilsInfo = {}) {
     const tile = document.createElement('div');
     tile.className = 'dga-card-tile inv-card-tile tile-hoverable';
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
     tile.style.animationDelay = `${delay}ms`;
 
     const imgSrc = editionId ? `/images/${editionId}.jpg` : '';
+    const foilEmoji = rowEditionId
+        ? _pdFoilBadgeEmoji(editionsInfo[rowEditionId]?.rarity, foilsInfo[rowFoilId]?.kind)
+        : '';
 
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
@@ -191,6 +255,7 @@ function buildPublicCardTile(card_id, cardName, editionId, qty, index, total) {
             <div class="card-tile-dim"></div>
         </div>
         <span class="inv-qty-badge">x${qty}</span>
+        ${foilEmoji ? `<span class="dga-foil-badge">${foilEmoji}</span>` : ''}
         <div class="inv-card-tile-overlay">
             <div class="inv-card-tile-info">
                 <div class="dga-card-tile-name">${cardName}</div>
@@ -208,9 +273,9 @@ window.initDecks = async function () {
     await loadPublicDecks();
 
     const urlParams = new URLSearchParams(window.location.search);
-    const username = urlParams.get('user');
+    const omnidexId = urlParams.get('omni');
     const deckName = urlParams.get('deck');
-    if (username && deckName) {
-        await openPublicDeckDetail(username, deckName, false);
+    if (omnidexId && deckName) {
+        await openPublicDeckDetail(omnidexId, deckName, false);
     }
 };

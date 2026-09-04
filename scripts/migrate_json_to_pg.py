@@ -105,7 +105,25 @@ def _guard_full_replace(session: Session, model, new_count: int, label: str, for
 
 # ── Users & settings ─────────────────────────────────────────────────────────
 
-def migrate_users() -> set[str]:
+# Columns _upsert(..., User, ...) is allowed to touch on a conflicting
+# username — i.e. every User column except username itself (the conflict
+# target) and id. id is a surrogate key now (see db/models.py's User) with a
+# server-side nextval() default: _upsert's usual "every non-key column"
+# default would put `id` in the UPDATE SET list, and since these row dicts
+# never include an explicit id, Postgres computes a *fresh* nextval() for
+# excluded.id on every insert attempt, conflict or not — silently
+# reassigning an existing user's id (and orphaning every inventory_bins/
+# decks/watchlist_entries/wishlist_entries row still pointing at the old
+# one) on every re-run. Listing update_cols explicitly avoids that.
+_USER_UPDATE_COLS = ["password_hash", "auth_type", "notes", "bio", "omnidex_id", "admin_note", "created_at"]
+
+
+def migrate_users() -> dict[str, int]:
+    """Upserts USERS.json into `users` and returns {username: id} for every
+    account now in Postgres — the id side is what inventory/decks/watchlist/
+    wishlist rows key off of (see db/models.py's User), so every downstream
+    migrate_* function needs this mapping rather than just the username set
+    migrate_users used to return."""
     users_data = _load(DIR_GENERAL / "USERS.json")
 
     rows = [
@@ -122,10 +140,11 @@ def migrate_users() -> set[str]:
     ]
 
     with get_session() as session:
-        _upsert(session, User, rows, index_elements=["username"])
+        _upsert(session, User, rows, index_elements=["username"], update_cols=_USER_UPDATE_COLS)
+        user_ids = dict(session.execute(select(User.username, User.id)).all())
 
     print(f"users: {len(rows)}")
-    return set(users_data.keys())
+    return user_ids
 
 
 def find_owner_username() -> str | None:
@@ -173,7 +192,7 @@ def port_owner_to_database() -> dict:
 
     try:
         with get_session() as session:
-            _upsert(session, User, [row], index_elements=["username"])
+            _upsert(session, User, [row], index_elements=["username"], update_cols=_USER_UPDATE_COLS)
     except Exception as exc:
         return {"ok": False, "owner": owner, "error": str(exc)}
 
@@ -563,20 +582,20 @@ def migrate_pricing(known_foil_pairs: set[tuple[str, str]], force: bool = False)
 
 # ── Inventory / decks / watchlist / wishlist (schema exists, app not wired yet) ─
 
-def migrate_inventory(known_usernames: set[str], known_foil_pairs: set[tuple[str, str]]) -> None:
+def migrate_inventory(user_ids: dict[str, int], known_foil_pairs: set[tuple[str, str]]) -> None:
     bin_count = section_count = card_count = 0
     skipped_users = []
 
     with get_session() as session:
         for path in DIR_INV.glob("*.json"):
             username = path.stem
-            if username not in known_usernames:
+            if username not in user_ids:
                 skipped_users.append(username)
                 continue
 
             for bin_name, bin_data in _load(path).items():
                 bin_row = {
-                    "username": username,
+                    "user_id": user_ids[username],
                     "name": bin_name,
                     "desc": bin_data.get("desc", ""),
                     "banner": bin_data.get("banner"),
@@ -585,8 +604,8 @@ def migrate_inventory(known_usernames: set[str], known_foil_pairs: set[tuple[str
                     "is_default": bool(bin_data.get("default")),
                 }
                 stmt = pg_insert(InventoryBin).values(bin_row).on_conflict_do_update(
-                    index_elements=["username", "name"],
-                    set_={k: v for k, v in bin_row.items() if k not in ("username", "name")},
+                    index_elements=["user_id", "name"],
+                    set_={k: v for k, v in bin_row.items() if k not in ("user_id", "name")},
                 )
                 bin_id = session.execute(stmt.returning(InventoryBin.id)).scalar_one()
                 bin_count += 1
@@ -619,14 +638,14 @@ def migrate_inventory(known_usernames: set[str], known_foil_pairs: set[tuple[str
           + (f" (skipped users with no account: {skipped_users})" if skipped_users else ""))
 
 
-def migrate_decks(known_usernames: set[str], known_card_ids: set[str]) -> None:
+def migrate_decks(user_ids: dict[str, int], known_card_ids: set[str]) -> None:
     deck_count = section_count = card_count = 0
     skipped_users = []
 
     with get_session() as session:
         for index_path in DIR_DECK_INDEX.glob("*.json"):
             username = index_path.stem
-            if username not in known_usernames:
+            if username not in user_ids:
                 skipped_users.append(username)
                 continue
 
@@ -638,7 +657,7 @@ def migrate_decks(known_usernames: set[str], known_card_ids: set[str]) -> None:
                 deck_data = _load(deck_path) if deck_path.exists() else {}
 
                 deck_row = {
-                    "username": username,
+                    "user_id": user_ids[username],
                     "name": deck_name,
                     "desc": deck_data.get("desc", entry.get("desc", "")),
                     "format": deck_data.get("format", entry.get("format", "")),
@@ -649,8 +668,8 @@ def migrate_decks(known_usernames: set[str], known_card_ids: set[str]) -> None:
                     "modified_at": entry.get("modified"),
                 }
                 stmt = pg_insert(Deck).values(deck_row).on_conflict_do_update(
-                    index_elements=["username", "name"],
-                    set_={k: v for k, v in deck_row.items() if k not in ("username", "name")},
+                    index_elements=["user_id", "name"],
+                    set_={k: v for k, v in deck_row.items() if k not in ("user_id", "name")},
                 )
                 deck_id = session.execute(stmt.returning(Deck.id)).scalar_one()
                 deck_count += 1
@@ -681,12 +700,12 @@ def migrate_decks(known_usernames: set[str], known_card_ids: set[str]) -> None:
 
 
 def _migrate_watch_or_wish(
-    model, directory: Path, known_usernames: set[str], known_foil_pairs: set[tuple[str, str]]
+    model, directory: Path, user_ids: dict[str, int], known_foil_pairs: set[tuple[str, str]]
 ) -> int:
     rows = []
     for path in directory.glob("*.json"):
         username = path.stem
-        if username not in known_usernames:
+        if username not in user_ids:
             continue
 
         for card_id, editions in _load(path).items():
@@ -695,21 +714,21 @@ def _migrate_watch_or_wish(
                     if (edition_id, foil_id) not in known_foil_pairs:
                         continue
                     rows.append({
-                        "username": username,
+                        "user_id": user_ids[username],
                         "edition_id": edition_id,
                         "foil_id": foil_id,
                         "added_date": foil_entry.get("added"),
                     })
 
     with get_session() as session:
-        _upsert(session, model, rows, index_elements=["username", "edition_id", "foil_id"])
+        _upsert(session, model, rows, index_elements=["user_id", "edition_id", "foil_id"])
 
     return len(rows)
 
 
-def migrate_watchlist_and_wishlist(known_usernames: set[str], known_foil_pairs: set[tuple[str, str]]) -> None:
-    watch_count = _migrate_watch_or_wish(WatchlistEntry, DIR_WATCHLIST, known_usernames, known_foil_pairs)
-    wish_count = _migrate_watch_or_wish(WishlistEntry, DIR_WISH, known_usernames, known_foil_pairs)
+def migrate_watchlist_and_wishlist(user_ids: dict[str, int], known_foil_pairs: set[tuple[str, str]]) -> None:
+    watch_count = _migrate_watch_or_wish(WatchlistEntry, DIR_WATCHLIST, user_ids, known_foil_pairs)
+    wish_count = _migrate_watch_or_wish(WishlistEntry, DIR_WISH, user_ids, known_foil_pairs)
     print(f"watchlist_entries: {watch_count}, wishlist_entries: {wish_count}")
 
 
@@ -720,7 +739,7 @@ def main(force: bool = False) -> None:
         session.execute(text("SELECT 1"))
     print("Connected to Postgres.\n")
 
-    known_usernames = migrate_users()
+    user_ids = migrate_users()
 
     info_data = _load(DIR_CARDS / "INFO.json")
     known_card_ids = set(info_data.keys())
@@ -734,9 +753,9 @@ def main(force: bool = False) -> None:
     migrate_thema(info_data)
     migrate_card_errors(force=force)
     migrate_pricing(known_foil_pairs, force=force)
-    migrate_inventory(known_usernames, known_foil_pairs)
-    migrate_decks(known_usernames, known_card_ids)
-    migrate_watchlist_and_wishlist(known_usernames, known_foil_pairs)
+    migrate_inventory(user_ids, known_foil_pairs)
+    migrate_decks(user_ids, known_card_ids)
+    migrate_watchlist_and_wishlist(user_ids, known_foil_pairs)
 
     print("\nDone.")
 

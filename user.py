@@ -37,6 +37,13 @@ def _save_users_data(data: dict) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
+def _get_user(session, username: str) -> UserModel | None:
+    """Look up a user row by username (DB mode). username is no longer the
+    primary key — see db/models.py's User — so this replaces the old
+    session.get(UserModel, username) shortcut."""
+    return session.execute(select(UserModel).where(UserModel.username == username)).scalar_one_or_none()
+
+
 def user_create(username: str, password: str, omnidex_id: str | None = None, debug: bool = False) -> None:
     """omnidex_id is supplied at registration (see api_register); it must be
     unique across all users, and is write-once — there's no way to change it
@@ -46,7 +53,7 @@ def user_create(username: str, password: str, omnidex_id: str | None = None, deb
 
     if is_db_mode():
         with get_session() as session:
-            if session.get(UserModel, username):
+            if _get_user(session, username):
                 raise ValueError(f"Username already taken: {username}")
 
             if omnidex_id and session.execute(
@@ -105,7 +112,7 @@ def user_create(username: str, password: str, omnidex_id: str | None = None, deb
 def user_delete(username: str, debug: bool = False) -> None:
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
 
             if not user:
                 print(f"User not found: {username}")
@@ -113,7 +120,7 @@ def user_delete(username: str, debug: bool = False) -> None:
 
             # Inventory/decks/watchlist rows for this user (if any were
             # imported by scripts/migrate_json_to_pg.py) cascade with it —
-            # see the ondelete="CASCADE" on those tables' username FK.
+            # see the ondelete="CASCADE" on those tables' user_id FK.
             session.delete(user)
 
         if debug:
@@ -165,7 +172,7 @@ def user_delete(username: str, debug: bool = False) -> None:
 def user_login(username: str, password: str, debug: bool = False) -> str | None:
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             hashed = user.password_hash.encode("utf-8") if user else None
     else:
         users_data = _load_users_data()
@@ -198,7 +205,7 @@ def user_reset(username: str, password: str, debug: bool = False) -> None:
 
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
 
             if not user:
                 print(f"User not found: {username}")
@@ -225,10 +232,24 @@ def user_reset(username: str, password: str, debug: bool = False) -> None:
         print(f"Reset password for user: {username}")
 
 
+def user_get_id(username: str) -> int | None:
+    """The surrogate users.id for a username (DB mode only) — resolves the
+    user_id FK value for inventory_bins/decks/watchlist_entries/
+    wishlist_entries, which key off id rather than username. Returns None in
+    JSON mode (those tables aren't JSON files keyed by username at all) or if
+    the username doesn't exist."""
+    if not is_db_mode():
+        return None
+
+    with get_session() as session:
+        user = _get_user(session, username)
+        return user.id if user else None
+
+
 def user_get_auth_type(username: str) -> str | None:
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             return user.auth_type if user else None
 
     return _load_users_data().get(username, {}).get("auth_type")
@@ -270,7 +291,7 @@ def user_list() -> list[dict]:
 def user_set_role(username: str, auth_type: str) -> None:
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             user.auth_type = auth_type
         return
 
@@ -289,7 +310,7 @@ def user_get_profile(username: str) -> dict | None:
     """
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
 
             if not user:
                 return None
@@ -333,7 +354,7 @@ def user_needs_setup(username: str) -> dict:
     """
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             if not user:
                 return dict(_NO_SETUP)
             return {
@@ -353,7 +374,7 @@ def user_needs_setup(username: str) -> dict:
 def user_set_bio(username: str, bio: str) -> None:
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             user.bio = bio
         return
 
@@ -365,7 +386,7 @@ def user_set_bio(username: str, bio: str) -> None:
 def user_set_admin_note(username: str, note: str) -> None:
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             user.admin_note = note
         return
 
@@ -388,7 +409,7 @@ def user_set_omnidex_id(username: str, omnidex_id: str) -> None:
             if clash and clash.username != username:
                 raise ValueError("That Omnidex ID is already taken")
 
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             user.omnidex_id = omnidex_id
 
             try:
@@ -412,7 +433,7 @@ def user_admin_reset_omnidex(username: str) -> None:
     """Clear a user's Omnidex ID — they must re-enter one on next login."""
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             if user:
                 user.omnidex_id = None
         return
@@ -428,7 +449,7 @@ def user_admin_reset_password(username: str) -> None:
     must set a new one before doing anything (see user_login / user_needs_setup)."""
     if is_db_mode():
         with get_session() as session:
-            user = session.get(UserModel, username)
+            user = _get_user(session, username)
             if user:
                 user.password_hash = ""
         return

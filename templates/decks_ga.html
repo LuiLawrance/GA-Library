@@ -5,6 +5,10 @@
         <button class="inv-context-item" onclick="dgaCtxSetBanner()">
             <span class="inv-context-icon">🖼</span> <span id="dga-ctx-banner-label">Set as Banner</span>
         </button>
+        <!-- Only shown when the deck is Edition Locked — see dgaOpenCardContextMenu -->
+        <button class="inv-context-item hidden" id="dga-ctx-change-edition" onclick="dgaCtxChangeEdition()">
+            <span class="inv-context-icon">⇄</span> Change Edition
+        </button>
     </div>
 
     <!-- ── Deck context menu ── -->
@@ -109,6 +113,14 @@
                 <div class="dga-detail-header-right">
                     <div class="dga-detail-counts" id="dga-detail-counts"></div>
                     <div class="inv-detail-controls">
+                        <div class="pill-toggle dga-edition-lock-toggle" id="dga-edition-locked-toggle"
+                             title="Locked: pick a specific printing when adding cards, and list every printing separately. Unlocked: printings are assigned randomly and collapsed into one card.">
+                            <span class="pill-indicator"></span>
+                            <button type="button" class="pill-toggle-btn active" data-value="false"
+                                    onclick="setDgaEditionLocked(false)">Unlocked</button>
+                            <button type="button" class="pill-toggle-btn" data-value="true"
+                                    onclick="setDgaEditionLocked(true)">Locked</button>
+                        </div>
                         <button class="inv-detail-add-btn btn btn--ghost" onclick="openDeckAddModal()" title="Add card">+</button>
                         <button class="inv-settings-btn btn btn--icon" onclick="openDeckSettingsModal()" title="Deck settings">⚙
                         </button>
@@ -233,7 +245,9 @@
         </div>
     </div>
 
-    <!-- ── Add card modal — simplified (no foil step) ── -->
+    <!-- ── Add card modal. The confirm step's foil picker (dga-add-modal-foils)
+         only fills in when the deck is Edition Locked (dga-edition-locked-toggle
+         in the detail header) — see dgaGoToConfirm in decks_ga.js. ── -->
     <div class="inv-modal-overlay overlay hidden" id="dga-add-modal" onclick="closeDeckAddModal()">
         <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
             <div class="inv-modal-header inv-add-modal-header">
@@ -263,7 +277,11 @@
                 </div>
             </div>
 
-            <!-- Confirm step: card selected, choose section + qty (inventory layout, no foils) ── -->
+            <!-- Confirm step: card selected, choose section + qty. When the
+                 "Specify Edition" toggle is on, dga-add-modal-foils also fills
+                 in with a per-printing picker (dgaLoadFoilOptions in
+                 decks_ga.js) — otherwise it stays empty/hidden and this looks
+                 identical to the "any edition" flow. ── -->
             <div class="hidden" id="dga-add-step-confirm">
                 <div class="inv-foil-step-body">
                     <img alt="" class="inv-modal-img-large" id="dga-add-modal-img" src="">
@@ -273,6 +291,7 @@
                                 <div class="inv-modal-title" id="dga-add-modal-name"></div>
                                 <div class="inv-modal-set" id="dga-add-modal-set"></div>
                             </div>
+                            <div class="inv-modal-foils hidden" id="dga-add-modal-foils"></div>
                         </div>
                         <div class="inv-foil-step-bottom">
                             <div class="inv-modal-qty-row">
@@ -301,6 +320,36 @@
                                 Add to Deck
                             </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Change Edition modal — right-click a card (Change Edition, Edition
+         Locked only) to swap its printing in place, keeping quantity/position.
+         Same foils-list picker as the Add Card confirm step, no search/qty/section
+         fields since it's editing one specific existing row. ── -->
+    <div class="inv-modal-overlay overlay hidden" id="dga-edition-swap-modal" onclick="closeDgaEditionSwapModal()">
+        <div class="inv-modal modal inv-modal-wide inv-modal-foil-step" onclick="event.stopPropagation()">
+            <div class="inv-modal-header inv-add-modal-header">
+                <span class="inv-modal-title">Change Edition</span>
+                <button class="inv-modal-close" onclick="closeDgaEditionSwapModal()">✕</button>
+            </div>
+            <div class="inv-foil-step-body">
+                <img alt="" class="inv-modal-img-large" id="dga-swap-modal-img" src="">
+                <div class="inv-foil-step-right">
+                    <div class="inv-foil-step-top">
+                        <div>
+                            <div class="inv-modal-title" id="dga-swap-modal-name"></div>
+                            <div class="inv-modal-set" id="dga-swap-modal-set"></div>
+                        </div>
+                        <div class="inv-modal-foils" id="dga-swap-modal-foils"></div>
+                    </div>
+                    <div class="inv-foil-step-bottom">
+                        <button class="inv-modal-submit" id="dga-swap-modal-submit" onclick="submitDgaEditionSwap()" disabled>
+                            Change Edition
+                        </button>
                     </div>
                 </div>
             </div>

@@ -9,7 +9,7 @@ from api_tcgplayer import clear_foil_last_scraped, clear_last_scraped, MARKETPLA
     set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from db.connection_url import compose as compose_database_url, parse as parse_database_url
-from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection
+from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection, User
 from db.session import get_session, reset_engine
 from db_connection import resolved_database_url, save_database_url
 from db_mode import is_db_mode
@@ -35,6 +35,7 @@ from user import (
     user_delete,
     user_find_by_omnidex,
     user_get_auth_type,
+    user_get_id,
     user_get_profile,
     user_list,
     user_login,
@@ -2851,9 +2852,11 @@ def _inv_save(username: str, data: dict) -> None:
 # Postgres yet and will fail with a foreign key error until that stage lands
 # or the import script is re-run.
 def _inv_load_db(username: str) -> dict:
+    user_id = user_get_id(username)
+
     with get_session() as session:
         bins = session.execute(
-            select(InventoryBin).where(InventoryBin.username == username)
+            select(InventoryBin).where(InventoryBin.user_id == user_id)
         ).scalars().all()
 
         if not bins:
@@ -2891,13 +2894,15 @@ def _inv_load_db(username: str) -> dict:
 
 
 def _inv_save_db(username: str, data: dict) -> None:
+    user_id = user_get_id(username)
+
     with get_session() as session:
-        session.execute(delete(InventoryBin).where(InventoryBin.username == username))
+        session.execute(delete(InventoryBin).where(InventoryBin.user_id == user_id))
         session.flush()
 
         for bin_name, bin_data in data.items():
             bin_row = InventoryBin(
-                username=username,
+                user_id=user_id,
                 name=bin_name,
                 desc=bin_data.get("desc", ""),
                 banner=bin_data.get("banner"),
@@ -3663,6 +3668,23 @@ def _deck_index_save(username: str, data: dict) -> None:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 
+def _normalize_deck_sections(sections: dict) -> dict:
+    """Upgrade a legacy flat {card_id: qty} section into the current row-list
+    shape ({"card_id", "edition_id", "foil_id", "quantity"} dicts), so every
+    deck consumer can assume the list shape regardless of when the JSON file
+    on disk was last saved. Already-normalized sections pass through as-is."""
+    normalized = {}
+    for name, cards in sections.items():
+        if isinstance(cards, dict):
+            normalized[name] = [
+                {"card_id": card_id, "edition_id": None, "foil_id": None, "quantity": qty}
+                for card_id, qty in cards.items()
+            ]
+        else:
+            normalized[name] = cards
+    return normalized
+
+
 def _deck_load(username: str, deck_name: str) -> dict | None:
     if is_db_mode():
         return _deck_load_db(username, deck_name)
@@ -3671,7 +3693,10 @@ def _deck_load(username: str, deck_name: str) -> dict | None:
     if not os.path.exists(path):
         return None
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    if "sections" in data:
+        data["sections"] = _normalize_deck_sections(data["sections"])
+    return data
 
 
 def _deck_save(username: str, deck_name: str, data: dict) -> None:
@@ -3702,14 +3727,17 @@ def _deck_save(username: str, deck_name: str, data: dict) -> None:
 # reason the JSON branch doesn't let a generic save handle renaming either,
 # and instead calls os.rename() on the file directly.
 def _deck_index_load_db(username: str) -> dict:
+    user_id = user_get_id(username)
+
     with get_session() as session:
-        rows = session.execute(select(Deck).where(Deck.username == username)).scalars().all()
+        rows = session.execute(select(Deck).where(Deck.user_id == user_id)).scalars().all()
         return {
             row.name: {
                 "banner": row.banner,
                 "symbol": row.symbol,
                 "tags": row.tags,
                 "public": row.is_public,
+                "edition_locked": row.edition_locked,
                 "created": row.created_at.isoformat() if row.created_at else None,
                 "modified": row.modified_at.isoformat() if row.modified_at else None,
             }
@@ -3718,12 +3746,14 @@ def _deck_index_load_db(username: str) -> dict:
 
 
 def _deck_index_save_db(username: str, data: dict) -> None:
+    user_id = user_get_id(username)
+
     with get_session() as session:
         # Decks removed from the index (deck_delete) — cascades to their
         # sections/cards. A rename never reaches here as a deletion; see
         # api_deck_patch's explicit rename-in-place branch.
         keep_names = list(data.keys())
-        session.execute(delete(Deck).where(Deck.username == username, Deck.name.notin_(keep_names)))
+        session.execute(delete(Deck).where(Deck.user_id == user_id, Deck.name.notin_(keep_names)))
 
         for name, entry in data.items():
             created = date.fromisoformat(entry["created"]) if entry.get("created") else None
@@ -3731,18 +3761,21 @@ def _deck_index_save_db(username: str, data: dict) -> None:
             index_fields = {
                 "banner": entry.get("banner"), "symbol": entry.get("symbol"), "tags": entry.get("tags"),
                 "is_public": entry.get("public", False),
+                "edition_locked": entry.get("edition_locked", False),
                 "created_at": created, "modified_at": modified,
             }
-            stmt = pg_insert(Deck).values(username=username, name=name, **index_fields).on_conflict_do_update(
-                index_elements=["username", "name"], set_=index_fields,
+            stmt = pg_insert(Deck).values(user_id=user_id, name=name, **index_fields).on_conflict_do_update(
+                index_elements=["user_id", "name"], set_=index_fields,
             )
             session.execute(stmt)
 
 
 def _deck_load_db(username: str, deck_name: str) -> dict | None:
+    user_id = user_get_id(username)
+
     with get_session() as session:
         deck_row = session.execute(
-            select(Deck).where(Deck.username == username, Deck.name == deck_name)
+            select(Deck).where(Deck.user_id == user_id, Deck.name == deck_name)
         ).scalar_one_or_none()
 
         if deck_row is None:
@@ -3757,15 +3790,20 @@ def _deck_load_db(username: str, deck_name: str) -> dict | None:
             cards = session.execute(
                 select(DeckCard).where(DeckCard.section_id == section_row.id).order_by(DeckCard.position)
             ).scalars().all()
-            sections_data[section_row.name] = {c.card_id: c.quantity for c in cards}
+            sections_data[section_row.name] = [
+                {"card_id": c.card_id, "edition_id": c.edition_id, "foil_id": c.foil_id, "quantity": c.quantity}
+                for c in cards
+            ]
 
         return {"desc": deck_row.desc or "", "format": deck_row.format or "", "sections": sections_data}
 
 
 def _deck_save_db(username: str, deck_name: str, data: dict) -> None:
+    user_id = user_get_id(username)
+
     with get_session() as session:
         deck_row = session.execute(
-            select(Deck).where(Deck.username == username, Deck.name == deck_name)
+            select(Deck).where(Deck.user_id == user_id, Deck.name == deck_name)
         ).scalar_one_or_none()
 
         today = date.today()
@@ -3775,7 +3813,7 @@ def _deck_save_db(username: str, deck_name: str, data: dict) -> None:
             # missing — rebuild it" case (see api_deck_patch) — every real
             # path creates the index row first, so this shouldn't normally
             # fire.
-            deck_row = Deck(username=username, name=deck_name, created_at=today)
+            deck_row = Deck(user_id=user_id, name=deck_name, created_at=today)
             session.add(deck_row)
             session.flush()
 
@@ -3792,25 +3830,92 @@ def _deck_save_db(username: str, deck_name: str, data: dict) -> None:
             session.add(section_row)
             session.flush()
 
-            for card_position, (card_id, quantity) in enumerate(cards.items()):
+            for card_position, row in enumerate(cards):
                 session.add(DeckCard(
-                    section_id=section_row.id, card_id=card_id, quantity=quantity, position=card_position,
+                    section_id=section_row.id, card_id=row["card_id"],
+                    edition_id=row.get("edition_id"), foil_id=row.get("foil_id"),
+                    quantity=row["quantity"], position=card_position,
                 ))
 
 
+def _deck_row_find(cards: list[dict], card_id: str, edition_id: str | None, foil_id: str | None) -> dict | None:
+    """Find the row for a specific (card_id, edition_id, foil_id) — a bare
+    card_id may have several rows in one section, split across editions."""
+    return next(
+        (r for r in cards if r["card_id"] == card_id
+         and r.get("edition_id") == edition_id and r.get("foil_id") == foil_id),
+        None,
+    )
+
+
+def _deck_row_add(cards: list[dict], card_id: str, edition_id: str | None, foil_id: str | None, qty: int) -> int:
+    """Merge qty into the matching row (creating one if needed), or remove it
+    if the merge brings quantity to zero or below. Returns the resulting
+    quantity (0 if the row was removed/never created)."""
+    row = _deck_row_find(cards, card_id, edition_id, foil_id)
+    if row:
+        row["quantity"] += qty
+        if row["quantity"] <= 0:
+            cards.remove(row)
+            return 0
+        return row["quantity"]
+    if qty > 0:
+        cards.append({"card_id": card_id, "edition_id": edition_id, "foil_id": foil_id, "quantity": qty})
+        return qty
+    return 0
+
+
+def _deck_rows_all_editions(cards: list[dict], card_id: str) -> list[dict]:
+    """Every row for card_id regardless of edition/foil."""
+    return [r for r in cards if r["card_id"] == card_id]
+
+
+def _pick_random_printing(card_id: str, info_data: dict) -> tuple[str | None, str | None]:
+    """Random (edition_id, foil_id) for a card — used whenever a new deck
+    card row needs *some* real printing recorded even though the deck isn't
+    Edition Locked (the view just won't surface it while unlocked)."""
+    editions = info_data.get(card_id, {}).get("editions", {})
+    if not editions:
+        return None, None
+    eid = random.choice(list(editions.keys()))
+    foils = editions[eid].get("foils", {})
+    fid = random.choice(list(foils.keys())) if foils else None
+    return eid, fid
+
+
+def _deck_row_add_generic(cards: list[dict], card_id: str, qty: int, info_data: dict) -> int:
+    """Add qty of card_id without pinning a printing — reuses any existing
+    row for that card_id (whatever printing it already has), or rolls a
+    fresh random one if this is the card's first row here. Used for adds
+    while not Edition Locked, and for text-import (which never specifies a
+    printing either way)."""
+    rows = _deck_rows_all_editions(cards, card_id)
+    if rows:
+        rows[0]["quantity"] += qty
+        if rows[0]["quantity"] <= 0:
+            cards.remove(rows[0])
+            return 0
+        return rows[0]["quantity"]
+    if qty > 0:
+        eid, fid = _pick_random_printing(card_id, info_data)
+        cards.append({"card_id": card_id, "edition_id": eid, "foil_id": fid, "quantity": qty})
+        return qty
+    return 0
+
+
+def _deck_is_edition_locked(username: str, deck_name: str) -> bool:
+    return bool(_deck_index_load(username).get(deck_name, {}).get("edition_locked", False))
+
+
 def _deck_card_count(sections: dict) -> int:
-    total = 0
-    for cards in sections.values():
-        for qty in cards.values():
-            total += qty
-    return total
+    return sum(row["quantity"] for cards in sections.values() for row in cards)
 
 
 def _make_deck_data(desc: str, fmt: str) -> dict:
     return {
         "desc": desc,
         "format": fmt,
-        "sections": {s: {} for s in DEFAULT_SECTIONS}
+        "sections": {s: [] for s in DEFAULT_SECTIONS}
     }
 
 
@@ -3819,29 +3924,54 @@ def _deck_detail_payload(deck_data: dict) -> dict:
     info_data = load_info_data()
     name_map = {d["card_id"]: d["name"] for d in slug_data.values()}
     edition_map = {}
+    editions_info: dict[str, dict] = {}
+    foils_info: dict[str, dict] = {}
     for cards in deck_data["sections"].values():
-        for card_id in cards:
+        for row in cards:
+            card_id = row["card_id"]
             if card_id not in edition_map:
                 eid = _pick_edition(card_id, info_data)
                 if eid:
                     edition_map[card_id] = eid
-    return {**deck_data, "name_map": name_map, "edition_map": edition_map}
+
+            eid, fid = row.get("edition_id"), row.get("foil_id")
+            if not eid:
+                continue
+            einfo = info_data.get(card_id, {}).get("editions", {}).get(eid, {})
+            if eid not in editions_info:
+                editions_info[eid] = {
+                    "set_prefix": einfo.get("set_prefix"),
+                    "collector_number": einfo.get("collector_number"),
+                    "rarity": einfo.get("rarity"),
+                }
+            if fid and fid not in foils_info:
+                foils_info[fid] = {"kind": einfo.get("foils", {}).get(fid, {}).get("kind")}
+    return {
+        **deck_data, "name_map": name_map, "edition_map": edition_map,
+        "editions_info": editions_info, "foils_info": foils_info,
+    }
 
 
 def _public_decks_list() -> list[dict]:
     """Every deck marked public, across all users — feeds the public /decks
     browse page. Unlike _user_decks_list (one user's decks), this fans out
-    over every user, so each entry also carries its owner's username."""
+    over every user, so each entry also carries its owner's username (for
+    display) and omnidex_id (the stable id used in the deck's public URL/API
+    path — see api_public_deck_get)."""
     if is_db_mode():
         with get_session() as session:
-            rows = session.execute(select(Deck).where(Deck.is_public == True)).scalars().all()
+            rows = session.execute(
+                select(Deck, User.username).join(User, User.id == Deck.user_id).where(Deck.is_public == True)
+            ).all()
         decks = []
-        for row in rows:
-            deck_data = _deck_load_db(row.username, row.name)
+        for row, username in rows:
+            deck_data = _deck_load_db(username, row.name)
             count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
+            profile = user_get_profile(username)
             decks.append({
                 "name": row.name,
-                "username": row.username,
+                "username": username,
+                "omnidex_id": profile.get("omnidex_id") if profile else None,
                 "format": row.format or "",
                 "desc": row.desc or "",
                 "banner": row.banner,
@@ -3853,6 +3983,8 @@ def _public_decks_list() -> list[dict]:
     decks = []
     for user in user_list():
         username = user["username"]
+        profile = user_get_profile(username)
+        omnidex_id = profile.get("omnidex_id") if profile else None
         for name, entry in _deck_index_load(username).items():
             if not entry.get("public"):
                 continue
@@ -3861,6 +3993,7 @@ def _public_decks_list() -> list[dict]:
             decks.append({
                 "name": name,
                 "username": username,
+                "omnidex_id": omnidex_id,
                 "format": (deck_data or {}).get("format", entry.get("format", "")),
                 "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
                 "banner": entry.get("banner"),
@@ -3925,7 +4058,7 @@ async def api_deck_create(request: Request):
         raise HTTPException(status_code=400, detail="Deck already exists")
     created = date.today().isoformat()
     index[name] = {"banner": None, "symbol": None, "tags": None, "public": False,
-                   "created": created, "modified": created}
+                   "edition_locked": False, "created": created, "modified": created}
     _deck_index_save(user, index)
     _deck_save(user, name, _make_deck_data(desc, fmt))
     return JSONResponse({"ok": True, "created": created})
@@ -3945,9 +4078,20 @@ async def api_deck_export(deck_name: str, request: Request):
     for section_name, cards in deck_data["sections"].items():
         if not cards:
             continue
+        # Export always reports one name+qty line per card_id, summed across
+        # any edition/foil split — competition submissions only care about
+        # which cards and how many, never which printing.
+        totals: dict[str, int] = {}
+        order = []
+        for row in cards:
+            card_id = row["card_id"]
+            if card_id not in totals:
+                totals[card_id] = 0
+                order.append(card_id)
+            totals[card_id] += row["quantity"]
         lines.append(f"# {section_name}")
-        for card_id, qty in cards.items():
-            lines.append(f"{qty} {name_map.get(card_id, card_id)}")
+        for card_id in order:
+            lines.append(f"{totals[card_id]} {name_map.get(card_id, card_id)}")
         lines.append("")
     return JSONResponse({"text": "\n".join(lines).strip()})
 
@@ -3978,7 +4122,7 @@ async def api_deck_import_parse(deck_name: str, request: Request):
         if line.startswith("#"):
             current_section = line.lstrip("#").strip()
             if current_section not in sections:
-                sections[current_section] = {}
+                sections[current_section] = []
             continue
         if current_section is None:
             continue
@@ -4013,6 +4157,7 @@ async def api_deck_import_commit(deck_name: str, request: Request):
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
 
+    info_data = load_info_data()
     for item in cards:
         card_id = item.get("card_id")
         section = item.get("section")
@@ -4020,8 +4165,8 @@ async def api_deck_import_commit(deck_name: str, request: Request):
         if not card_id or not section:
             continue
         if section not in deck_data["sections"]:
-            deck_data["sections"][section] = {}
-        deck_data["sections"][section][card_id] = deck_data["sections"][section].get(card_id, 0) + qty
+            deck_data["sections"][section] = []
+        _deck_row_add_generic(deck_data["sections"][section], card_id, qty, info_data)
 
     _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})
@@ -4058,8 +4203,8 @@ async def api_deck_import_resolve(deck_name: str, request: Request):
 
     if card_id:
         if section not in deck_data["sections"]:
-            deck_data["sections"][section] = {}
-        deck_data["sections"][section][card_id] = deck_data["sections"][section].get(card_id, 0) + qty
+            deck_data["sections"][section] = []
+        _deck_row_add_generic(deck_data["sections"][section], card_id, qty, load_info_data())
         _deck_save(user, deck_name, deck_data)
         return JSONResponse({"ok": True, "card_id": card_id, "found": True})
 
@@ -4071,8 +4216,14 @@ async def api_public_decks_list():
     return JSONResponse({"decks": _public_decks_list()})
 
 
-@app.get("/api/decks/public/{username}/{deck_name}")
-async def api_public_deck_get(username: str, deck_name: str):
+@app.get("/api/decks/public/{omnidex_id}/{deck_name}")
+async def api_public_deck_get(omnidex_id: str, deck_name: str):
+    # Looked up by Omnidex ID rather than username — same rationale as the
+    # public profile route (api_public_profile): a stable, not-writable
+    # public id rather than the mutable username.
+    username = user_find_by_omnidex(omnidex_id.strip())
+    if username is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
     index = _deck_index_load(username)
     entry = index.get(deck_name)
     if entry is None or not entry.get("public"):
@@ -4080,7 +4231,8 @@ async def api_public_deck_get(username: str, deck_name: str):
     deck_data = _deck_load(username, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-    return JSONResponse({**_deck_detail_payload(deck_data), "username": username, "banner": entry.get("banner")})
+    return JSONResponse({**_deck_detail_payload(deck_data), "username": username, "omnidex_id": omnidex_id,
+                          "banner": entry.get("banner"), "edition_locked": entry.get("edition_locked", False)})
 
 
 @app.get("/api/decks/{deck_name}")
@@ -4091,7 +4243,8 @@ async def api_deck_get(deck_name: str, request: Request):
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-    return JSONResponse(_deck_detail_payload(deck_data))
+    entry = _deck_index_load(user).get(deck_name, {})
+    return JSONResponse({**_deck_detail_payload(deck_data), "edition_locked": entry.get("edition_locked", False)})
 
 
 @app.patch("/api/decks/{deck_name}")
@@ -4115,9 +4268,10 @@ async def api_deck_patch(deck_name: str, request: Request):
             # this itself: from its point of view the old name just
             # vanished and a new one appeared, which it can only read as
             # "delete the old deck, create an empty new one."
+            user_id = user_get_id(user)
             with get_session() as session:
                 session.execute(
-                    update(Deck).where(Deck.username == user, Deck.name == deck_name).values(name=new_name)
+                    update(Deck).where(Deck.user_id == user_id, Deck.name == deck_name).values(name=new_name)
                 )
         else:
             old_path = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
@@ -4130,6 +4284,8 @@ async def api_deck_patch(deck_name: str, request: Request):
         index[deck_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
     if "public" in body:
         index[deck_name]["public"] = bool(body["public"])
+    if "edition_locked" in body:
+        index[deck_name]["edition_locked"] = bool(body["edition_locked"])
     index[deck_name]["modified"] = date.today().isoformat()
     _deck_index_save(user, index)
     if "format" in body or "desc" in body:
@@ -4164,6 +4320,52 @@ async def api_deck_delete(deck_name: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/decks/{deck_name}/card/edition")
+async def api_deck_card_edition(deck_name: str, request: Request):
+    """Swap an existing row's printing in place (Edition Locked only) — changes
+    which edition/foil a card slot points to without touching its quantity or
+    position, so the owner doesn't have to delete the old row and re-add the
+    new one."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    body = await request.json()
+    card_id = body.get("card_id", "").strip()
+    section = body.get("section", "").strip()
+    from_edition_id = body.get("from_edition_id") or None
+    from_foil_id = body.get("from_foil_id") or None
+    to_edition_id = body.get("to_edition_id") or None
+    to_foil_id = body.get("to_foil_id") or None
+    if not card_id or not section or not to_edition_id:
+        raise HTTPException(status_code=400, detail="Missing card_id, section, or to_edition_id")
+    if not _deck_is_edition_locked(user, deck_name):
+        raise HTTPException(status_code=400, detail="Deck is not Edition Locked")
+
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    if section not in deck_data["sections"]:
+        raise HTTPException(status_code=400, detail="Section not found")
+
+    cards = deck_data["sections"][section]
+    row = _deck_row_find(cards, card_id, from_edition_id, from_foil_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Card not in section")
+
+    existing = _deck_row_find(cards, card_id, to_edition_id, to_foil_id)
+    if existing is not None and existing is not row:
+        # The target printing already has its own row here — merge into it
+        # and drop the old one, same as api_deck_card_move's merge-on-collision.
+        existing["quantity"] += row["quantity"]
+        cards.remove(row)
+    else:
+        row["edition_id"] = to_edition_id
+        row["foil_id"] = to_foil_id
+
+    _deck_save(user, deck_name, deck_data)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/api/decks/{deck_name}/card/move")
 async def api_deck_card_move(deck_name: str, request: Request):
     """Move a card to a new position — within a section or across sections."""
@@ -4173,6 +4375,8 @@ async def api_deck_card_move(deck_name: str, request: Request):
 
     body = await request.json()
     card_id = body.get("card_id", "")
+    edition_id = body.get("edition_id") or None
+    foil_id = body.get("foil_id") or None
     from_section = body.get("from_section", "")
     to_section = body.get("to_section", "")
     index = body.get("index", 0)
@@ -4183,20 +4387,38 @@ async def api_deck_card_move(deck_name: str, request: Request):
     sections = deck_data.get("sections", {})
     if from_section not in sections or to_section not in sections:
         raise HTTPException(status_code=404, detail="Section not found")
-    if card_id not in sections[from_section]:
-        raise HTTPException(status_code=404, detail="Card not in section")
-
-    qty = sections[from_section].pop(card_id)
 
     target = sections[to_section]
-    if card_id in target:
-        # Card already in target section — merge quantities at its new position
-        qty += target.pop(card_id)
 
-    items = list(target.items())
-    index = max(0, min(int(index), len(items)))
-    items.insert(index, (card_id, qty))
-    sections[to_section] = dict(items)
+    if _deck_is_edition_locked(user, deck_name):
+        row = _deck_row_find(sections[from_section], card_id, edition_id, foil_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Card not in section")
+
+        sections[from_section].remove(row)
+        qty = row["quantity"]
+
+        existing = _deck_row_find(target, card_id, edition_id, foil_id)
+        if existing:
+            # Card (same edition/foil) already in target section — merge
+            # quantities at its new position
+            target.remove(existing)
+            qty += existing["quantity"]
+
+        index = max(0, min(int(index), len(target)))
+        target.insert(index, {"card_id": card_id, "edition_id": edition_id, "foil_id": foil_id, "quantity": qty})
+    else:
+        # Not Edition Locked — the dragged tile represents every row for
+        # this card_id collapsed together; move them all as one unit.
+        rows = _deck_rows_all_editions(sections[from_section], card_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail="Card not in section")
+        for row in rows:
+            sections[from_section].remove(row)
+        qty = sum(r["quantity"] for r in rows)
+        index = max(0, min(int(index), len(target)))
+        for i, row in enumerate(rows):
+            target.insert(index + i, row)
 
     _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True, "merged_qty": qty})
@@ -4210,6 +4432,8 @@ async def api_deck_card_add(deck_name: str, request: Request):
     body = await request.json()
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
+    edition_id = body.get("edition_id") or None
+    foil_id = body.get("foil_id") or None
     quantity = int(body.get("quantity", 1))
     if not card_id or not section:
         raise HTTPException(status_code=400, detail="Missing card_id or section")
@@ -4219,13 +4443,12 @@ async def api_deck_card_add(deck_name: str, request: Request):
     if section not in deck_data["sections"]:
         raise HTTPException(status_code=400, detail="Section not found")
     cards = deck_data["sections"][section]
-    new_qty = cards.get(card_id, 0) + quantity
-    if new_qty <= 0:
-        cards.pop(card_id, None)
+    if _deck_is_edition_locked(user, deck_name):
+        new_qty = _deck_row_add(cards, card_id, edition_id, foil_id, quantity)
     else:
-        cards[card_id] = new_qty
+        new_qty = _deck_row_add_generic(cards, card_id, quantity, load_info_data())
     _deck_save(user, deck_name, deck_data)
-    return JSONResponse({"ok": True, "quantity": max(new_qty, 0)})
+    return JSONResponse({"ok": True, "quantity": new_qty})
 
 
 @app.patch("/api/decks/{deck_name}/card")
@@ -4237,6 +4460,8 @@ async def api_deck_card_set(deck_name: str, request: Request):
     body = await request.json()
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
+    edition_id = body.get("edition_id") or None
+    foil_id = body.get("foil_id") or None
     quantity = int(body.get("quantity", 0))
     if not card_id or not section:
         raise HTTPException(status_code=400, detail="Missing card_id or section")
@@ -4245,29 +4470,70 @@ async def api_deck_card_set(deck_name: str, request: Request):
         raise HTTPException(status_code=404, detail="Deck not found")
     if section not in deck_data["sections"]:
         raise HTTPException(status_code=400, detail="Section not found")
-    if quantity <= 0:
-        deck_data["sections"][section].pop(card_id, None)
+    cards = deck_data["sections"][section]
+
+    if _deck_is_edition_locked(user, deck_name):
+        row = _deck_row_find(cards, card_id, edition_id, foil_id)
+        if quantity <= 0:
+            if row:
+                cards.remove(row)
+        elif row:
+            row["quantity"] = quantity
+        else:
+            cards.append({"card_id": card_id, "edition_id": edition_id, "foil_id": foil_id, "quantity": quantity})
     else:
-        deck_data["sections"][section][card_id] = quantity
+        # Not Edition Locked — the client shows one collapsed tile per
+        # card_id, so an absolute-quantity set here means "this is the new
+        # total," however many real rows currently make it up.
+        rows = _deck_rows_all_editions(cards, card_id)
+        current_total = sum(r["quantity"] for r in rows)
+        if quantity <= 0:
+            for r in rows:
+                cards.remove(r)
+        elif not rows:
+            eid, fid = _pick_random_printing(card_id, load_info_data())
+            cards.append({"card_id": card_id, "edition_id": eid, "foil_id": fid, "quantity": quantity})
+        elif quantity >= current_total:
+            rows[0]["quantity"] += quantity - current_total
+        else:
+            remaining = current_total - quantity
+            for r in reversed(rows):
+                if remaining <= 0:
+                    break
+                take = min(r["quantity"], remaining)
+                r["quantity"] -= take
+                remaining -= take
+                if r["quantity"] <= 0:
+                    cards.remove(r)
     _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})
 
 
 @app.delete("/api/decks/{deck_name}/card")
 async def api_deck_card_delete(deck_name: str, request: Request):
-    """Remove a card from a deck section entirely."""
+    """Remove a card from a deck section — a specific printing when Edition
+    Locked, or every row for that card_id (the whole collapsed tile) when not."""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
+    edition_id = body.get("edition_id") or None
+    foil_id = body.get("foil_id") or None
     if not card_id or not section:
         raise HTTPException(status_code=400, detail="Missing card_id or section")
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
-    deck_data["sections"].get(section, {}).pop(card_id, None)
+    cards = deck_data["sections"].get(section, [])
+    if _deck_is_edition_locked(user, deck_name):
+        row = _deck_row_find(cards, card_id, edition_id, foil_id)
+        if row:
+            cards.remove(row)
+    else:
+        for row in _deck_rows_all_editions(cards, card_id):
+            cards.remove(row)
     _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})
 
@@ -4286,7 +4552,7 @@ async def api_deck_section_add(deck_name: str, request: Request):
         raise HTTPException(status_code=404, detail="Deck not found")
     if section in deck_data["sections"]:
         raise HTTPException(status_code=400, detail="Section already exists")
-    deck_data["sections"][section] = {}
+    deck_data["sections"][section] = []
     _deck_save(user, deck_name, deck_data)
     return JSONResponse({"ok": True})
 

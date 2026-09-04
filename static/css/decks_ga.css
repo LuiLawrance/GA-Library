@@ -283,6 +283,17 @@
     color: var(--text-muted);
 }
 
+/* Sits in .inv-detail-controls (inventory.css) immediately left of the "+"
+   add-card button — toggling it flips the deck's edition_locked flag
+   (app.py), which decides whether adding a card asks for a specific
+   printing (Locked) or gets a random one collapsed into one tile
+   (Unlocked). Compact sizing to match the 32px icon-button row it sits in
+   — see the shared .pill-toggle comment (components.css) for the base look. */
+.dga-edition-lock-toggle .pill-toggle-btn {
+    font-size: 0.72rem;
+    padding: 5px 10px;
+}
+
 .dga-detail-back {
     display: flex;
     align-items: center;
@@ -518,8 +529,30 @@
     padding-right: 4px;
 }
 
+/* Foil/curio indicator — shown only when the deck is Edition Locked (one
+   tile per printing, buildDeckCardTile / buildPublicCardTile). Same box
+   chrome as Inventory's rarity badge (.edition-rarity-badge, cards.css /
+   .inv-card-tile override, inventory.css) — dark blurred pill, bottom-left
+   — but just the emoji, no rarity letter, since a locked deck tile isn't
+   about rarity. */
+.dga-foil-badge {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.6);
+}
+
 .dga-card-tile:hover .inv-qty-badge,
-.dga-card-tile:hover .edition-rarity-badge {
+.dga-card-tile:hover .edition-rarity-badge,
+.dga-card-tile:hover .dga-foil-badge {
     opacity: 0;
     transition: opacity 0.15s;
 }
