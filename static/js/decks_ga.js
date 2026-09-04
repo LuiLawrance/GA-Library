@@ -490,6 +490,42 @@ document.addEventListener('click', e => {
 // LOAD & RENDER DECK LIST
 // ═══════════════════════════════════════
 
+// Deck priced-total badge — same treatment as Inventory's loadBinValue
+// (inventory.js): "…" while loading, "$N.NN" once resolved, a dimmed-outline
+// "partial" state when some cards have no price data, and a hover popup with
+// the sale / listing / no-data split. `url` is the deck's /value endpoint
+// (owner: /api/decks/{name}/value, public: /api/decks/public/{omni}/{name}/value).
+// The response shape matches api_bin_value (see _deck_value in app.py), so
+// inventory.js's showBinValuePopup / hideBinValuePopup are reused as-is.
+async function loadDeckValue(badgeEl, url) {
+    if (!badgeEl) return;
+    badgeEl.textContent = '…';
+    badgeEl.classList.add('inv-bin-value-loading');
+    badgeEl.classList.remove('inv-bin-value-partial');
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+
+        badgeEl.textContent = `$${data.total.toFixed(2)}`;
+        badgeEl.classList.remove('inv-bin-value-loading');
+        if (data.priced_quantity < data.total_quantity) badgeEl.classList.add('inv-bin-value-partial');
+
+        // Stash the breakdown and read it at hover time — the detail-header
+        // badge is a persistent element re-run on every edit, so re-binding
+        // listeners each call would stack duplicates (same note as loadBinValue).
+        badgeEl._binValueData = data;
+        if (!badgeEl._binValueHoverWired) {
+            badgeEl._binValueHoverWired = true;
+            badgeEl.addEventListener('mouseenter', () => showBinValuePopup(badgeEl, badgeEl._binValueData));
+            badgeEl.addEventListener('mouseleave', hideBinValuePopup);
+        }
+    } catch {
+        badgeEl.textContent = '—';
+        badgeEl.classList.remove('inv-bin-value-loading');
+    }
+}
+
 async function loadMyDecks() {
     try {
         const res = await fetch('/api/decks');
@@ -529,14 +565,32 @@ function buildDeckTile(name, entry, index, total) {
 
     const fmt = entry.format ? `<span class="dga-tile-format">${entry.format}</span>` : '';
     const pub = entry.public ? `<span class="dga-tile-public" title="Listed on the public Decks page">Public</span>` : '';
-    const desc = entry.desc ? `<div class="dga-tile-desc">${entry.desc}</div>` : '';
     const count = entry.card_count || 0;
 
+    // Format / Public badges sit in the icon row, to the right of the ⬡ glyph —
+    // same placement as Inventory's "Default" bin badge (see buildBinTile).
+    // Meta row mirrors .inv-bin-meta-row: card count left, priced-total badge
+    // bottom-right (streams in via loadDeckValue) — only for Edition Locked
+    // decks, where every row pins a real printing, so an unlocked deck's value
+    // is neither shown nor computed.
+    const valueBadge = entry.edition_locked
+        ? '<span class="inv-bin-value-badge inv-bin-value-loading">…</span>'
+        : '';
     tile.innerHTML = `
-        <div class="dga-tile-icon">⬡</div>
-        <div class="dga-tile-name">${name}${fmt}${pub}</div>
+        <div class="dga-tile-icon-row">
+            <span class="dga-tile-icon">⬡</span>
+            ${fmt}${pub}
+        </div>
+        <div class="dga-tile-name">${name}</div>
         <div class="dga-tile-desc">${entry.desc || ''}</div>
-        <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
+        <div class="dga-tile-meta-row inv-bin-meta-row">
+            <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>
+            ${valueBadge}
+        </div>`;
+
+    if (entry.edition_locked) {
+        loadDeckValue(tile.querySelector('.inv-bin-value-badge'), `/api/decks/${encodeURIComponent(name)}/value`);
+    }
 
     if (entry.banner) {
         tile.classList.add('has-banner');
@@ -735,6 +789,14 @@ async function openDeckDetail(deckName, pushUrl = true) {
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
     const countEl = document.getElementById('dga-detail-counts');
     if (countEl) countEl.textContent = '';
+    const valEl = document.getElementById('dga-detail-value');
+    if (valEl) {
+        // Value badge is Edition-Locked-decks-only — hidden for an unlocked deck.
+        valEl.classList.toggle('hidden', !entry.edition_locked);
+        valEl.textContent = '…';
+        valEl.classList.add('inv-bin-value-loading');
+        valEl.classList.remove('inv-bin-value-partial');
+    }
 
     if (pushUrl) window.history.pushState({}, '', `/decks_ga?deck=${encodeURIComponent(deckName)}`);
 
@@ -777,7 +839,15 @@ async function setDgaEditionLocked(value) {
         // just how new ones get added — re-render right away.
         if (activeDeckData) {
             activeDeckData.edition_locked = value;
-            renderDeckSections(activeDeckData);
+            if (value) {
+                // Locking makes the server attach per-card price data
+                // (card_prices) the prior payload didn't carry — refetch so
+                // the price badges show on this render.
+                dgaReloadActiveDeck();
+            } else {
+                activeDeckData.card_prices = {};
+                renderDeckSections(activeDeckData);
+            }
         }
     } catch {
         console.error('Failed to update edition-locked setting');
@@ -986,6 +1056,9 @@ function renderDeckSections(deckData, animate = true) {
     const editionMap = deckData.edition_map || {};
     const editionsInfo = deckData.editions_info || {};
     const foilsInfo = deckData.foils_info || {};
+    // {card_id: {edition_id: {foil_id: {price, lowest_listing}}}} — server sends
+    // it only for Edition Locked decks (empty otherwise), matching api_bin_prices.
+    const cardPrices = deckData.card_prices || {};
     const editionLocked = !!deckData.edition_locked;
 
     let totalUnique = 0, totalQty = 0;
@@ -1058,7 +1131,7 @@ function renderDeckSections(deckData, animate = true) {
                     const displayEditionId = row.edition_id || editionMap[row.card_id] || null;
                     sectionGrid.appendChild(buildDeckCardTile(
                         row.card_id, cardName, displayEditionId, row.quantity, sectionName, i, tileCount,
-                        row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo,
+                        row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo, cardPrices,
                     ));
                 });
             } else {
@@ -1076,7 +1149,7 @@ function renderDeckSections(deckData, animate = true) {
                     const displayEditionId = editionMap[cardId] || null;
                     sectionGrid.appendChild(buildDeckCardTile(
                         cardId, cardName, displayEditionId, qty, sectionName, i, tileCount,
-                        null, null, editionsInfo, foilsInfo,
+                        null, null, editionsInfo, foilsInfo, cardPrices,
                     ));
                 });
             }
@@ -1134,9 +1207,27 @@ function dgaBuildAddSectionButton() {
     return btn;
 }
 
+// The detail header's priced-total badge is Edition-Locked-decks-only: an
+// unlocked deck's value is never shown or fetched. Hides the badge for an
+// unlocked deck, otherwise (re)loads it. Called on deck open, on every count
+// change, and when the Edition Locked pill is toggled.
+function dgaRefreshDetailValue() {
+    const badge = document.getElementById('dga-detail-value');
+    if (!badge) return;
+    const locked = !!gaDecks[activeDeck]?.edition_locked;
+    badge.classList.toggle('hidden', !locked);
+    if (locked && activeDeck) {
+        loadDeckValue(badge, `/api/decks/${encodeURIComponent(activeDeck)}/value`);
+    }
+}
+
 function updateDeckCounts(unique, total) {
     const countEl = document.getElementById('dga-detail-counts');
     if (countEl) countEl.textContent = `${unique} card${unique !== 1 ? 's' : ''} · ${total} cop${total !== 1 ? 'ies' : 'y'}`;
+
+    // Re-price on every count change (add / remove / qty edit / import) — same
+    // refresh trigger as Inventory's updateInvCounts → loadBinValue.
+    dgaRefreshDetailValue();
 }
 
 // ── Deck tile edit mode — uses TileEditMode from tiles.js ──
@@ -1256,7 +1347,7 @@ function _dgaFoilBadgeEmoji(rarity, kind) {
 }
 
 function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index, total,
-                            rowEditionId = null, rowFoilId = null, editionsInfo = {}, foilsInfo = {}) {
+                            rowEditionId = null, rowFoilId = null, editionsInfo = {}, foilsInfo = {}, cardPrices = {}) {
     const tile = document.createElement('div');
     tile.className = 'dga-card-tile inv-card-tile tile-hoverable';
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
@@ -1266,6 +1357,13 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
     const foilEmoji = rowEditionId
         ? _dgaFoilBadgeEmoji(editionsInfo[rowEditionId]?.rarity, foilsInfo[rowFoilId]?.kind)
         : '';
+
+    // Sale / listing badges — top-right of the tile, same as Inventory bin
+    // cards (priceBadgesHTML, tiles.js). cardPrices is populated only for
+    // Edition Locked decks, and only a pinned printing (rowEditionId/rowFoilId)
+    // resolves an entry, so an Unlocked deck or collapsed tile shows nothing.
+    const priceEntry = rowEditionId ? cardPrices[card_id]?.[rowEditionId]?.[rowFoilId] : undefined;
+    const priceBadges = priceEntry ? priceBadgesHTML(priceEntry.price, priceEntry.lowest_listing) : '';
 
     // An empty src (no resolved edition yet) never fires load or error at
     // all — so it can't rely on revealTileImage to ever clear the "loading"
@@ -1280,6 +1378,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
                 onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
         </div>
+        ${priceBadges}
         <span class="inv-qty-badge">x${qty}</span>
         ${foilEmoji ? `<span class="dga-foil-badge">${foilEmoji}</span>` : ''}
         <div class="inv-card-tile-overlay">
@@ -2493,6 +2592,9 @@ async function submitDgaAddCard() {
                 }
                 closeDeckAddModal();
                 renderDeckSections(activeDeckData);
+                // Optimistic render above shows the tile immediately; reload to
+                // pull in the new printing's card_prices entry for its badge.
+                dgaReloadActiveDeck();
             } else {
                 // Not locked — the server picked a random printing and/or
                 // merged into an existing row for this card_id; reload

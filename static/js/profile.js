@@ -146,8 +146,11 @@ function renderProfileDecks(decks) {
         return `
             <div class="dga-deck-tile admin-user-tile ${d.banner ? 'has-banner' : ''}">
                 ${banner}
-                <div class="dga-tile-icon">⬡</div>
-                <div class="dga-tile-name">${escapeHtml(d.name)}${format}</div>
+                <div class="dga-tile-icon-row">
+                    <span class="dga-tile-icon">⬡</span>
+                    ${format}
+                </div>
+                <div class="dga-tile-name">${escapeHtml(d.name)}</div>
                 <div class="dga-tile-desc">${escapeHtml(d.desc || '')}</div>
                 <div class="dga-tile-meta">${d.card_count} card${d.card_count !== 1 ? 's' : ''}</div>
             </div>`;

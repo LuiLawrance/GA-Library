@@ -32,7 +32,23 @@
                     </div>
                 </div>
                 <div class="dga-detail-header-right">
-                    <div class="dga-detail-counts" id="pd-detail-counts"></div>
+                    <div class="inv-detail-counts-row">
+                        <div class="dga-detail-counts" id="pd-detail-counts"></div>
+                        <span class="inv-bin-value-badge inv-bin-value-loading" id="pd-detail-value">…</span>
+                    </div>
+                    <!-- Viewer-only display toggle (no server write) — only shown
+                         when the owner made the deck Edition Locked, i.e. there
+                         are specific printings to reveal. Locked = the owner's
+                         exact editions/foils; Unlocked = collapse to bare cards.
+                         See setPdEditionView / renderPublicDeckSections. -->
+                    <div class="pill-toggle dga-edition-lock-toggle hidden" id="pd-edition-view-toggle"
+                         title="Locked: the specific editions and foils the deck's owner chose, each listed separately. Unlocked: collapse to one bare-bones tile per card.">
+                        <span class="pill-indicator"></span>
+                        <button type="button" class="pill-toggle-btn" data-value="false"
+                                onclick="setPdEditionView(false)">Unlocked</button>
+                        <button type="button" class="pill-toggle-btn active" data-value="true"
+                                onclick="setPdEditionView(true)">Locked</button>
+                    </div>
                 </div>
             </div>
         </div>

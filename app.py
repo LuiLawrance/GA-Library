@@ -4073,6 +4073,89 @@ def _deck_card_count(sections: dict) -> int:
     return sum(row["quantity"] for cards in sections.values() for row in cards)
 
 
+def _deck_value(sections: dict, sales_data: dict, listings_data: dict) -> dict:
+    """Priced total for a deck's rows — same calculation as api_bin_value, just
+    walking the deck's list-of-rows section shape instead of an Inventory bin's
+    nested card/edition/foil dict. Each row is priced by its own recorded
+    (edition_id, foil_id): last sale price, else last listing price, else it
+    counts as unpriced. Rows with no pinned printing (an Unlocked deck that has
+    never had a real printing rolled for a card) are treated as unpriced.
+
+    Returns the same shape api_bin_value does, so the client's loadBinValue /
+    showBinValuePopup handle a deck badge with no changes."""
+    total = 0.0
+    sale_quantity = listing_quantity = unpriced_quantity = total_quantity = 0
+
+    for cards in sections.values():
+        for row in cards:
+            quantity = row.get("quantity", 0)
+            if quantity <= 0:
+                continue
+
+            total_quantity += quantity
+            card_id = row["card_id"]
+            edition_id = row.get("edition_id")
+            foil_id = row.get("foil_id")
+
+            price = None
+            if edition_id and foil_id:
+                records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                price = _last_sale_price_from_records(records)
+                if price is not None:
+                    sale_quantity += quantity
+                else:
+                    listing_records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                    price = _last_listing_price_from_records(listing_records)
+                    if price is not None:
+                        listing_quantity += quantity
+
+            if price is None:
+                unpriced_quantity += quantity
+                continue
+
+            total += price * quantity
+
+    return {
+        "total": round(total, 2),
+        "priced_quantity": sale_quantity + listing_quantity,
+        "total_quantity": total_quantity,
+        "sale_quantity": sale_quantity,
+        "listing_quantity": listing_quantity,
+        "unpriced_quantity": unpriced_quantity,
+    }
+
+
+def _deck_prices(sections: dict, sales_data: dict, listings_data: dict) -> dict:
+    """Per-printing last-sale / lowest-listing prices for a deck's rows — the
+    deck counterpart of api_bin_prices, in the same
+    {card_id: {edition_id: {foil_id: {price, lowest_listing}}}} shape the
+    client's priceBadgesHTML (tiles.js) already consumes. Only rows with a
+    pinned (edition_id, foil_id) contribute, so an Unlocked deck yields {}."""
+    prices: dict = {}
+    for cards in sections.values():
+        for row in cards:
+            edition_id = row.get("edition_id")
+            foil_id = row.get("foil_id")
+            if not (edition_id and foil_id):
+                continue
+            card_id = row["card_id"]
+            if prices.get(card_id, {}).get(edition_id, {}).get(foil_id) is not None:
+                continue
+
+            sale_records = sales_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+            listing_records = listings_data.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+            last_price = _last_sale_price_from_records(sale_records)
+            lowest_listing = _lowest_listing_price_from_records(listing_records)
+            if last_price is None and lowest_listing is None:
+                continue
+
+            prices.setdefault(card_id, {}).setdefault(edition_id, {})[foil_id] = {
+                "price": last_price,
+                "lowest_listing": lowest_listing,
+            }
+    return prices
+
+
 def _make_deck_data(desc: str, fmt: str) -> dict:
     return {
         "desc": desc,
@@ -4148,6 +4231,7 @@ def _public_decks_list() -> list[dict]:
                 "desc": row.desc or "",
                 "banner": row.banner,
                 "card_count": counts.get(row.id, 0),
+                "edition_locked": bool(row.edition_locked),
             }
             for row, username, omnidex_id in rows
         ]
@@ -4172,6 +4256,7 @@ def _public_decks_list() -> list[dict]:
                 "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
                 "banner": entry.get("banner"),
                 "card_count": count,
+                "edition_locked": bool(entry.get("edition_locked", False)),
             })
     decks.sort(key=lambda d: d["name"].lower())
     return decks
@@ -4415,8 +4500,29 @@ async def api_public_deck_get(omnidex_id: str, deck_name: str):
     deck_data = _deck_load(username, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
+    edition_locked = bool(entry.get("edition_locked", False))
+    # Per-card price badges are Edition-Locked-only (see the client's
+    # renderPublicDeckSections) — skip the price lookup entirely otherwise.
+    card_prices = _deck_prices(deck_data["sections"], load_sales_data(), load_listings_data()) if edition_locked else {}
     return JSONResponse({**_deck_detail_payload(deck_data), "username": username, "omnidex_id": omnidex_id,
-                          "banner": entry.get("banner"), "edition_locked": entry.get("edition_locked", False)})
+                          "banner": entry.get("banner"), "edition_locked": edition_locked,
+                          "card_prices": card_prices})
+
+
+@app.get("/api/decks/public/{omnidex_id}/{deck_name}/value")
+async def api_public_deck_value(omnidex_id: str, deck_name: str):
+    """Priced total for a public deck — the read-only counterpart of
+    api_deck_value, addressed by Omnidex ID like api_public_deck_get."""
+    username = user_find_by_omnidex(omnidex_id.strip())
+    if username is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    entry = _deck_index_load(username).get(deck_name)
+    if entry is None or not entry.get("public"):
+        raise HTTPException(status_code=404, detail="Deck not found")
+    deck_data = _deck_load(username, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return JSONResponse(_deck_value(deck_data.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
 @app.get("/api/decks/{deck_name}")
@@ -4428,7 +4534,24 @@ async def api_deck_get(deck_name: str, request: Request):
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
     entry = _deck_index_load(user).get(deck_name, {})
-    return JSONResponse({**_deck_detail_payload(deck_data), "edition_locked": entry.get("edition_locked", False)})
+    edition_locked = bool(entry.get("edition_locked", False))
+    # Per-card price badges are Edition-Locked-only — see renderDeckSections.
+    card_prices = _deck_prices(deck_data["sections"], load_sales_data(), load_listings_data()) if edition_locked else {}
+    return JSONResponse({**_deck_detail_payload(deck_data), "edition_locked": edition_locked,
+                          "card_prices": card_prices})
+
+
+@app.get("/api/decks/{deck_name}/value")
+async def api_deck_value(deck_name: str, request: Request):
+    """Priced total for one of the caller's decks — mirrors api_bin_value
+    (same response shape, same sale→listing→unpriced fallback). See _deck_value."""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    deck_data = _deck_load(user, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+    return JSONResponse(_deck_value(deck_data.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
 @app.patch("/api/decks/{deck_name}")

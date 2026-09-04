@@ -111,7 +111,14 @@
                     </div>
                 </div>
                 <div class="dga-detail-header-right">
-                    <div class="dga-detail-counts" id="dga-detail-counts"></div>
+                    <!-- Card counts + priced-total badge — same pairing as an
+                         Inventory bin's detail header (inventory.html). The
+                         badge streams in from /api/decks/{name}/value; see
+                         loadDeckValue / updateDeckCounts in decks_ga.js. -->
+                    <div class="inv-detail-counts-row">
+                        <div class="dga-detail-counts" id="dga-detail-counts"></div>
+                        <span class="inv-bin-value-badge inv-bin-value-loading" id="dga-detail-value">…</span>
+                    </div>
                     <div class="inv-detail-controls">
                         <div class="pill-toggle dga-edition-lock-toggle" id="dga-edition-locked-toggle"
                              title="Locked: pick a specific printing when adding cards, and list every printing separately. Unlocked: printings are assigned randomly and collapsed into one card.">

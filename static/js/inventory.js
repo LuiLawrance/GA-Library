@@ -193,7 +193,9 @@ function showBinValuePopup(badgeEl, data) {
     const row = badgeEl.parentElement;
     row.appendChild(popup);
 
-    const tile = row.closest('.inv-bin-tile');
+    // .dga-deck-tile too — deck tiles reuse this popup for their value badge
+    // (loadDeckValue in decks_ga.js) and get the same revealUp stacking context.
+    const tile = row.closest('.inv-bin-tile, .dga-deck-tile');
     if (tile) {
         // Every tile gets its own stacking context from its entrance
         // animation (opacity/transform in @keyframes revealUp), so a

@@ -116,6 +116,14 @@
     transform: translateY(-2px);
 }
 
+/* Glyph + Format/Public badges on one line — mirrors .inv-bin-icon-row, which
+   holds the ⬡/📦 glyph and the "Default" badge on Inventory bin tiles. */
+.dga-tile-icon-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .dga-tile-icon {
     font-size: 1.4rem;
     line-height: 1;
@@ -127,9 +135,6 @@
     font-weight: 500;
     color: var(--text);
     word-break: break-word;
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 .dga-tile-format {
@@ -214,7 +219,27 @@
     font-family: var(--font-mono);
     font-size: 0.68rem;
     color: var(--text-muted);
+}
+
+/* Card count + value badge on one baseline row, pinned to the tile's bottom —
+   the row itself carries .inv-bin-meta-row (inventory.css) for the flex/
+   space-between/position:relative the value popup anchors against, so this
+   only needs the bottom-pin that .dga-tile-meta used to own. */
+.dga-tile-meta-row {
     margin-top: auto;
+}
+
+/* The value badge reuses Inventory's hover popup, which lifts the hovered
+   tile's z-index so the popup clears its neighbours (each deck tile is its
+   own stacking context after the revealUp animation's forwards fill — same
+   as bin tiles). See showBinValuePopup in inventory.js. */
+.dga-deck-tile.inv-bin-tile-popup-active {
+    position: relative;
+    z-index: 50;
+}
+
+.dga-deck-tile.inv-bin-tile-popup-active:hover {
+    transform: none;
 }
 
 /* ── Create outline tile ── */

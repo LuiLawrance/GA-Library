@@ -4,6 +4,10 @@
 
 let pdDecks = [];
 let pdActiveDeck = null; // {omnidexId, name}
+let pdActiveDeckData = null; // last-fetched detail payload, kept so the view toggle can re-render
+// Viewer's chosen display mode for the open deck — starts at the deck's own
+// edition_locked value, then the reader can flip it. Purely local: no server write.
+let pdViewLocked = false;
 
 async function loadPublicDecks() {
     const container = document.getElementById('pd-sections');
@@ -67,12 +71,33 @@ function buildPublicDeckTile(deck, index, total) {
     const fmt = deck.format ? `<span class="dga-tile-format">${deck.format}</span>` : '';
     const count = deck.card_count || 0;
 
+    // Format badge sits in the icon row, to the right of the ⬡ glyph — same
+    // placement as Inventory's "Default" bin badge (see buildBinTile). Meta row
+    // mirrors .inv-bin-meta-row: card count left, priced-total badge bottom-right
+    // — badge only for Edition Locked decks (an unlocked deck pins no real
+    // printings, so there's nothing meaningful to total).
+    const valueBadge = deck.edition_locked
+        ? '<span class="inv-bin-value-badge inv-bin-value-loading">…</span>'
+        : '';
     tile.innerHTML = `
-        <div class="dga-tile-icon">⬡</div>
-        <div class="dga-tile-name">${deck.name}${fmt}</div>
+        <div class="dga-tile-icon-row">
+            <span class="dga-tile-icon">⬡</span>
+            ${fmt}
+        </div>
+        <div class="dga-tile-name">${deck.name}</div>
         <div class="pd-tile-owner">by ${deck.username}</div>
         <div class="dga-tile-desc">${deck.desc || ''}</div>
-        <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>`;
+        <div class="dga-tile-meta-row inv-bin-meta-row">
+            <div class="dga-tile-meta">${count} card${count !== 1 ? 's' : ''}</div>
+            ${valueBadge}
+        </div>`;
+
+    if (deck.edition_locked && deck.omnidex_id) {
+        loadDeckValue(
+            tile.querySelector('.inv-bin-value-badge'),
+            `/api/decks/public/${encodeURIComponent(deck.omnidex_id)}/${encodeURIComponent(deck.name)}/value`,
+        );
+    }
 
     if (deck.banner) {
         tile.classList.add('has-banner');
@@ -103,6 +128,15 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
     const grid = document.getElementById('pd-card-grid');
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
 
+    const valEl = document.getElementById('pd-detail-value');
+    if (valEl) {
+        // Shown only for Edition Locked decks — see the fetch below.
+        valEl.classList.add('hidden');
+        valEl.textContent = '…';
+        valEl.classList.add('inv-bin-value-loading');
+        valEl.classList.remove('inv-bin-value-partial');
+    }
+
     if (pushUrl) {
         window.history.pushState({}, '', `/decks?omni=${encodeURIComponent(omnidexId)}&deck=${encodeURIComponent(deckName)}`);
     }
@@ -116,7 +150,21 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
         document.getElementById('pd-detail-desc').textContent = data.desc || '';
         document.getElementById('pd-detail-owner').textContent = `by ${data.username}`;
 
+        pdActiveDeckData = data;
+        _pdSyncViewToggle(!!data.edition_locked);
         renderPublicDeckSections(data);
+
+        // Priced total — Edition Locked decks only (an unlocked deck pins no
+        // real printings). The value is from the deck's stored rows, so it's
+        // the same number regardless of the viewer's Locked/Unlocked toggle.
+        const valEl2 = document.getElementById('pd-detail-value');
+        if (valEl2) valEl2.classList.toggle('hidden', !data.edition_locked);
+        if (data.edition_locked) {
+            loadDeckValue(
+                valEl2,
+                `/api/decks/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(deckName)}/value`,
+            );
+        }
     } catch {
         if (grid) grid.innerHTML = '<p class="dga-loading">Failed to load deck.</p>';
     }
@@ -124,9 +172,39 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
 
 function closePublicDeckDetail() {
     pdActiveDeck = null;
+    pdActiveDeckData = null;
     document.getElementById('pd-detail-view').classList.add('hidden');
     document.getElementById('pd-list-view').classList.remove('hidden');
     window.history.pushState({}, '', '/decks');
+}
+
+// Show the pill only when the owner curated printings (edition_locked); default
+// the viewer's mode to match the deck, so they first see it as the owner built it.
+function _pdSyncViewToggle(deckLocked) {
+    const toggle = document.getElementById('pd-edition-view-toggle');
+    if (!toggle) return;
+    toggle.classList.toggle('hidden', !deckLocked);
+    pdViewLocked = deckLocked;
+    _pdPaintViewToggle();
+}
+
+function _pdPaintViewToggle() {
+    const toggle = document.getElementById('pd-edition-view-toggle');
+    if (!toggle) return;
+    toggle.querySelectorAll('.pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'true') === pdViewLocked);
+    });
+    positionPillIndicator(toggle);
+}
+
+// Reader flips between the owner's exact editions/foils (Locked) and a
+// collapsed bare-card view (Unlocked). Local only — re-renders from the
+// payload already in hand, no refetch.
+function setPdEditionView(locked) {
+    if (locked === pdViewLocked) return;
+    pdViewLocked = locked;
+    _pdPaintViewToggle();
+    if (pdActiveDeckData) renderPublicDeckSections(pdActiveDeckData);
 }
 
 // Groups a section's rows by card_id, preserving first-seen order — same
@@ -152,7 +230,12 @@ function renderPublicDeckSections(deckData) {
     const editionMap = deckData.edition_map || {};
     const editionsInfo = deckData.editions_info || {};
     const foilsInfo = deckData.foils_info || {};
-    const editionLocked = !!deckData.edition_locked;
+    // {card_id: {edition_id: {foil_id: {price, lowest_listing}}}} — server sends
+    // it only for Edition Locked decks (see api_public_deck_get). Only tiles
+    // that pin a printing (Locked view) resolve an entry from it.
+    const cardPrices = deckData.card_prices || {};
+    // Viewer's toggle, not the deck's stored flag — see setPdEditionView.
+    const editionLocked = pdViewLocked;
 
     let totalUnique = 0, totalQty = 0;
     for (const cards of Object.values(sections)) {
@@ -196,7 +279,7 @@ function renderPublicDeckSections(deckData) {
                 const displayEditionId = row.edition_id || editionMap[row.card_id] || null;
                 sectionGrid.appendChild(buildPublicCardTile(
                     row.card_id, cardName, displayEditionId, row.quantity, i, cards.length,
-                    row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo,
+                    row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo, cardPrices,
                 ));
             });
         } else {
@@ -213,7 +296,7 @@ function renderPublicDeckSections(deckData) {
                 const displayEditionId = editionMap[cardId] || null;
                 sectionGrid.appendChild(buildPublicCardTile(
                     cardId, cardName, displayEditionId, qty, i, groups.length,
-                    null, null, editionsInfo, foilsInfo,
+                    null, null, editionsInfo, foilsInfo, cardPrices,
                 ));
             });
         }
@@ -235,7 +318,7 @@ function _pdFoilBadgeEmoji(rarity, kind) {
 }
 
 function buildPublicCardTile(card_id, cardName, editionId, qty, index, total,
-                              rowEditionId = null, rowFoilId = null, editionsInfo = {}, foilsInfo = {}) {
+                              rowEditionId = null, rowFoilId = null, editionsInfo = {}, foilsInfo = {}, cardPrices = {}) {
     const tile = document.createElement('div');
     tile.className = 'dga-card-tile inv-card-tile tile-hoverable';
     const delay = total <= 1 ? 0 : Math.min(index * 40, Math.round((index / (total - 1)) * 600));
@@ -246,6 +329,11 @@ function buildPublicCardTile(card_id, cardName, editionId, qty, index, total,
         ? _pdFoilBadgeEmoji(editionsInfo[rowEditionId]?.rarity, foilsInfo[rowFoilId]?.kind)
         : '';
 
+    // Sale / listing badges (priceBadgesHTML, tiles.js) — only a pinned printing
+    // in the Locked view resolves an entry, so the Unlocked view shows none.
+    const priceEntry = rowEditionId ? cardPrices[card_id]?.[rowEditionId]?.[rowFoilId] : undefined;
+    const priceBadges = priceEntry ? priceBadgesHTML(priceEntry.price, priceEntry.lowest_listing) : '';
+
     tile.innerHTML = `
         <div class="edition-tile-wrap tile-zoom">
             ${imgSrc ? `<div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>` : ''}
@@ -254,6 +342,7 @@ function buildPublicCardTile(card_id, cardName, editionId, qty, index, total,
                 onerror="this.style.opacity='0.1'; revealTileImage(this)">
             <div class="card-tile-dim"></div>
         </div>
+        ${priceBadges}
         <span class="inv-qty-badge">x${qty}</span>
         ${foilEmoji ? `<span class="dga-foil-badge">${foilEmoji}</span>` : ''}
         <div class="inv-card-tile-overlay">
