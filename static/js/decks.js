@@ -116,6 +116,20 @@ function buildPublicDeckTile(deck, index, total) {
 // optional immediate value for the "by ..." byline, shown before the deck
 // fetch resolves (which also carries username, confirming/filling it in for
 // a direct/deep-linked visit where no tile click supplied it upfront).
+// Owner byline in the deck detail view is a link to their public profile
+// (/@<omnidexId>) — underline-on-hover to match the drawer's set link.
+// Tile-view "by <username>" bylines stay plain text; this is deliberately
+// not reused there.
+function _pdSetDetailOwner(omnidexId, username) {
+    const el = document.getElementById('pd-detail-owner');
+    if (!el) return;
+    if (!username) {
+        el.textContent = '';
+        return;
+    }
+    el.innerHTML = `by <a class="pd-owner-link" href="/@${encodeURIComponent(omnidexId)}" data-link>${escapeHtml(username)}</a>`;
+}
+
 async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, displayUsername = null) {
     pdActiveDeck = {omnidexId, name: deckName};
 
@@ -123,7 +137,7 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
     document.getElementById('pd-detail-view').classList.remove('hidden');
 
     document.getElementById('pd-detail-name').textContent = deckName;
-    document.getElementById('pd-detail-owner').textContent = displayUsername ? `by ${displayUsername}` : '';
+    _pdSetDetailOwner(omnidexId, displayUsername);
 
     const grid = document.getElementById('pd-card-grid');
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
@@ -148,7 +162,7 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
 
         document.getElementById('pd-detail-format').textContent = data.format ? `[${data.format}]` : '';
         document.getElementById('pd-detail-desc').textContent = data.desc || '';
-        document.getElementById('pd-detail-owner').textContent = `by ${data.username}`;
+        _pdSetDetailOwner(omnidexId, data.username);
 
         pdActiveDeckData = data;
         _pdSyncViewToggle(!!data.edition_locked);

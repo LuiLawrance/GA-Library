@@ -684,11 +684,14 @@ PROFILE_BIO_MAX = 2000
 _OMNIDEX_ID_RE = re.compile(r"^\d{1,20}$")
 
 
-def _profile_payload(username: str) -> dict | None:
+def _profile_payload(username: str, *, public_view: bool = False) -> dict | None:
     """The profile blob shared by the self page (/api/profile) and the public
     page (/api/users/{omnidex_id}) — identity, bio, Omnidex ID, stats, and the
     deck / bin lists. Contains nothing account-sensitive (no password hash,
-    no settings), so it's safe to serve publicly."""
+    no settings), so it's safe to serve publicly.
+
+    public_view drops decks the owner hasn't made public (mirrors the /decks
+    browse page) — the stats.decks count reflects the same filtered list."""
     profile = user_get_profile(username)
 
     if profile is None:
@@ -696,6 +699,8 @@ def _profile_payload(username: str) -> dict | None:
 
     bins = _user_bins_list(username)
     decks = _user_decks_list(username)
+    if public_view:
+        decks = [d for d in decks if d.get("is_public")]
 
     profile["bins"] = bins
     profile["decks"] = decks
@@ -729,7 +734,7 @@ async def api_public_profile(omnidex_id: str):
     if username is None:
         raise HTTPException(status_code=404, detail="No user with that Omnidex ID")
 
-    profile = _profile_payload(username)
+    profile = _profile_payload(username, public_view=True)
 
     if profile is None:
         raise HTTPException(status_code=404, detail="No user with that Omnidex ID")
@@ -1788,6 +1793,7 @@ def _user_decks_list(username: str) -> list[dict]:
                 "desc": c.get("desc", entry.get("desc", "")),
                 "banner": entry.get("banner"),
                 "card_count": c.get("card_count", 0),
+                "is_public": entry.get("public", False),
             })
         decks.sort(key=lambda d: d["name"].lower())
         return decks
@@ -1801,6 +1807,7 @@ def _user_decks_list(username: str) -> list[dict]:
             "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
             "banner": entry.get("banner"),
             "card_count": count,
+            "is_public": entry.get("public", False),
         })
     decks.sort(key=lambda d: d["name"].lower())
     return decks
