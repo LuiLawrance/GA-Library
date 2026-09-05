@@ -1,13 +1,33 @@
 // ── State ──
 let currentUser = null;
 let isAdmin = false;
+// The signed-in user's raw auth_type (e.g. 'super_admin'), or null. admin.js
+// reads this to gate the console's per-tab access; isAdmin stays as the
+// "can reach the console at all" shorthand.
+let authType = null;
 let loginMode = 'login';
 
 // Highest to lowest privilege — mirrors RANK_ORDER in user.py. Shared
 // globally (classic <script>s on one page see each other's top-level
-// const/let) so admin.js's promote/demote logic can reuse it.
-const RANK_ORDER = ['owner', 'admin', 'moderator', 'user'];
-const ADMIN_CONSOLE_RANKS = new Set(['owner', 'admin', 'moderator']);
+// const/let) so admin.js's promote/demote logic can reuse it. Each tier set
+// below is a superset of the next: Users tab (moderator+), Cards tab and
+// user-management (admin+), System tab (super_admin+).
+const RANK_ORDER = ['owner', 'super_admin', 'admin', 'moderator', 'user'];
+const ADMIN_CONSOLE_RANKS = new Set(['owner', 'super_admin', 'admin', 'moderator']);
+const ADMIN_CARDS_RANKS = new Set(['owner', 'super_admin', 'admin']);
+const ADMIN_SYSTEM_RANKS = new Set(['owner', 'super_admin']);
+
+// Display label for a stored auth_type value. Used wherever a role is shown
+// to a human (admin user list/profile, the self-service profile page).
+function formatRole(t) {
+    return {
+        owner: 'Owner',
+        super_admin: 'Super Admin',
+        admin: 'Admin',
+        moderator: 'Moderator',
+        user: 'User',
+    }[t] || (t || '—');
+}
 
 // ── Router ──
 const routes = {
@@ -291,16 +311,19 @@ async function checkAuth() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
-            isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
+            authType = data.auth_type;
+            isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
             setLoggedIn(currentUser);
             maybeShowAccountSetup(data);
         } else {
             currentUser = null;
+            authType = null;
             isAdmin = false;
             setLoggedOut();
         }
     } catch {
         currentUser = null;
+        authType = null;
         isAdmin = false;
         setLoggedOut();
     }
@@ -443,6 +466,7 @@ async function handleLogout() {
     closeUserMenu();
     await fetch('/api/logout', {method: 'POST'});
     currentUser = null;
+    authType = null;
     isAdmin = false;
     setLoggedOut();
     navigate('/');
@@ -525,7 +549,8 @@ async function handleLogin() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
-            isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
+            authType = data.auth_type;
+            isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
             setLoggedIn(currentUser);
             if (!maybeShowAccountSetup(data)) navigate('/');
         } else {

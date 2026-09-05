@@ -21,8 +21,12 @@ DIR_WISH = "DATA_GA/WISH_GA"
 JSON_USERS = "DATA_GENERAL/USERS.json"
 
 # Highest to lowest privilege. The first user ever created becomes "owner";
-# everyone who signs up after that starts at the base "user" rank.
-RANK_ORDER = ["owner", "admin", "moderator", "user"]
+# everyone who signs up after that starts at the base "user" rank. Each rank
+# inherits everything the rank below it can do, plus more — see the tier sets
+# and require_* helpers in app.py for what each one unlocks in the admin
+# console (moderator → Users tab, admin → Cards tab + user management,
+# super_admin → System tab).
+RANK_ORDER = ["owner", "super_admin", "admin", "moderator", "user"]
 
 
 def _load_users_data() -> dict:
@@ -276,14 +280,20 @@ def user_find_by_omnidex(omnidex_id: str) -> str | None:
 
 
 def user_list() -> list[dict]:
-    """[{username, auth_type}, ...] for every user — feeds the Admin Users panel."""
+    """[{username, auth_type, omnidex_id}, ...] for every user — feeds the Admin
+    Users panel. omnidex_id is None until the user sets one."""
     if is_db_mode():
         with get_session() as session:
-            rows = session.execute(select(UserModel.username, UserModel.auth_type)).all()
-            return [{"username": row.username, "auth_type": row.auth_type} for row in rows]
+            rows = session.execute(
+                select(UserModel.username, UserModel.auth_type, UserModel.omnidex_id)
+            ).all()
+            return [
+                {"username": row.username, "auth_type": row.auth_type, "omnidex_id": row.omnidex_id}
+                for row in rows
+            ]
 
     return [
-        {"username": username, "auth_type": info.get("auth_type")}
+        {"username": username, "auth_type": info.get("auth_type"), "omnidex_id": info.get("omnidex_id")}
         for username, info in _load_users_data().items()
     ]
 

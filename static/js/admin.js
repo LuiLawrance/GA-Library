@@ -208,6 +208,11 @@ function syncAdminUrl() {
 function switchAdminSection(section) {
     if (adminActiveSection === section) return;
 
+    // Defensive — the disallowed buttons are hidden in initAdmin, but never
+    // route to a tab this rank can't use.
+    if (section === 'system' && !ADMIN_SYSTEM_RANKS.has(authType)) return;
+    if (section === 'pricing' && !ADMIN_CARDS_RANKS.has(authType)) return;
+
     let path;
     if (section === 'system') {
         path = '/admin/system';
@@ -1220,7 +1225,8 @@ function renderAdminUserRows() {
 
     const filtered = adminUsersData.filter(u => {
         if (!query) return true;
-        return u.username.toLowerCase().includes(query);
+        return u.username.toLowerCase().includes(query)
+            || (u.omnidex_id || '').toLowerCase().includes(query);
     });
 
     summary.textContent = `${adminUsersData.length} user(s)`
@@ -1243,11 +1249,18 @@ function renderAdminUserRows() {
         // Right-click anywhere on a manageable row also opens the action menu.
         const rowContext = canManage ? `oncontextmenu="openAdminUserRowMenuFromRow(event, '${un}')"` : '';
 
+        // title carries the full value so a clipped username / Omni ID is
+        // still readable on hover (the list column is narrow by design).
+        const omni = u.omnidex_id
+            ? `<span class="admin-user-col-omnidex" title="Omni ID ${escapeHtml(u.omnidex_id)}">#${escapeHtml(u.omnidex_id)}</span>`
+            : '<span class="admin-user-col-omnidex is-empty" title="No Omni ID set">—</span>';
+
         return `
             <div class="admin-user-row ${u.username === adminUserDetailSelected ? 'admin-user-row-active' : ''}"
                  onclick="selectAdminUserDetail('${un}')" ${rowContext}>
-                <span class="admin-user-col-name">${un}</span>
-                <span class="admin-user-col-role">${escapeHtml(u.auth_type || '—')}</span>
+                <span class="admin-user-col-name" title="${un}">${un}</span>
+                ${omni}
+                <span class="admin-user-col-role">${escapeHtml(formatRole(u.auth_type))}</span>
                 <span class="admin-user-col-delete">${menuBtn}</span>
             </div>
         `;
@@ -1279,6 +1292,12 @@ function _openAdminUserRowMenu(username, right, top, btn) {
     _adminUserRowMenuFor = username;
     menu.dataset.username = username;
     menu.classList.remove('hidden');
+
+    // Deleting users is admin-and-up; moderators keep Reset Omni / Reset
+    // Password only. Toggled before the size is measured below so the menu is
+    // positioned at its actual height.
+    menu.querySelector('.admin-user-row-menu-item-danger')
+        ?.classList.toggle('hidden', !ADMIN_CARDS_RANKS.has(authType));
 
     const z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
     const vw = (window.innerWidth || 99999) / z;
@@ -1365,6 +1384,13 @@ async function _adminUserActionRequest(username, action, failMsg) {
             alert(data.detail || failMsg);
             return;
         }
+        // Keep the list's Omni ID column in step with a reset.
+        if (action === 'reset-omnidex') {
+            const row = adminUsersData.find(u => u.username === username);
+            if (row) row.omnidex_id = null;
+            renderAdminUserRows();
+        }
+
         // Refresh the detail panel if this user is open.
         if (adminUserDetailSelected === username) await loadAdminUserProfile();
     } catch (err) {
@@ -1448,7 +1474,7 @@ function demoteAdminUser() {
     setAdminUserRole(RANK_ORDER[idx + 1]);
 }
 
-async function setAdminUserRole(authType) {
+async function setAdminUserRole(newRole) {
     const username = adminUserDetailSelected;
     if (!username) return;
 
@@ -1461,7 +1487,7 @@ async function setAdminUserRole(authType) {
         const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/role`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({auth_type: authType}),
+            body: JSON.stringify({auth_type: newRole}),
         });
 
         if (!res.ok) {
@@ -1472,7 +1498,7 @@ async function setAdminUserRole(authType) {
         }
 
         const record = adminUsersData.find(u => u.username === username);
-        if (record) record.auth_type = authType;
+        if (record) record.auth_type = newRole;
 
         renderAdminUserRows();
         renderAdminUserProfileCol();
@@ -1494,6 +1520,17 @@ function updateAdminUserRoleButtons() {
     const promoteBtn = document.getElementById('admin-user-promote-btn');
     const demoteBtn = document.getElementById('admin-user-demote-btn');
     if (!promoteBtn || !demoteBtn) return;
+
+    // Changing roles is an admin-and-up action — moderators can view users and
+    // reset Omni/password but never promote or demote. Hide the controls
+    // outright for them (the backend also 403s POST /role).
+    const canManageRoles = ADMIN_CARDS_RANKS.has(authType);
+    document.querySelector('.admin-user-role-actions')?.classList.toggle('hidden', !canManageRoles);
+    if (!canManageRoles) {
+        promoteBtn.disabled = true;
+        demoteBtn.disabled = true;
+        return;
+    }
 
     const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
     const viewerRecord = adminUsersData.find(u => u.username === currentUser);
@@ -1686,7 +1723,14 @@ function renderAdminUserProfileCol() {
             : '<span class="admin-user-meta-empty">No bio</span>')
         : '…';
 
-    const noteBlock = profileLoaded
+    // Admin notes are visible only for a user who ranks strictly below the
+    // viewer (matches the backend: api_admin_user blanks admin_note otherwise,
+    // and api_admin_user_note 403s the save). Same rule as the row action menu.
+    const viewerRec = adminUsersData.find(u => u.username === currentUser);
+    const canManageTarget = !!viewerRec && record.username !== currentUser
+        && RANK_ORDER.indexOf(record.auth_type) > RANK_ORDER.indexOf(viewerRec.auth_type);
+
+    const noteBlock = profileLoaded && canManageTarget
         ? `<div class="admin-user-meta admin-user-note-block">
             <span class="admin-user-meta-label label label--muted label--sm">Notes</span>
             <textarea class="admin-user-note-input scroll-thin" id="admin-user-note" rows="3"
@@ -1703,7 +1747,7 @@ function renderAdminUserProfileCol() {
     col.innerHTML = `
         <div class="admin-pid-detail-header">
             <span class="admin-user-profile-name">${escapeHtml(record.username)}${omnidexTrailing}</span>
-            <span class="admin-user-profile-role">${escapeHtml(record.auth_type || '—')}</span>
+            <span class="admin-user-profile-role">${escapeHtml(formatRole(record.auth_type))}</span>
         </div>
         <div class="admin-user-meta">
             <span class="admin-user-meta-label label label--muted label--sm">Bio</span>
@@ -4873,12 +4917,32 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
 //   /admin/users                                → Users section
 function initAdmin() {
     const path = window.location.pathname;
+
+    // No console access at all (regular user, or signed out) — bounce home
+    // rather than render a shell whose every API call 403s. The nav link is
+    // already hidden for them; this covers a typed/bookmarked /admin URL.
+    if (!ADMIN_CONSOLE_RANKS.has(authType)) {
+        navigate('/');
+        return;
+    }
+
+    const canCards = ADMIN_CARDS_RANKS.has(authType);
+    const canSystem = ADMIN_SYSTEM_RANKS.has(authType);
+
     if (path.startsWith('/admin/system')) {
         adminActiveSection = 'system';
     } else if (path.startsWith('/admin/users')) {
         adminActiveSection = 'users';
     } else {
         adminActiveSection = 'pricing';
+    }
+
+    // Deep-linked to a tab this rank can't see — fall back to the best one
+    // they can (Cards if allowed, else Users, which every console rank has).
+    if (adminActiveSection === 'system' && !canSystem) {
+        adminActiveSection = canCards ? 'pricing' : 'users';
+    } else if (adminActiveSection === 'pricing' && !canCards) {
+        adminActiveSection = 'users';
     }
     // The Cards section's own Info/Pricing sub-view — reset (from the URL,
     // defaulting to Pricing) rather than left at whatever it was, since
@@ -4945,7 +5009,12 @@ function initAdmin() {
     // their own guards compare against the values just set above).
     const page = document.getElementById('admin-page');
     page?.querySelectorAll('.admin-subnav-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.section === adminActiveSection);
+        const sec = btn.dataset.section;
+        const allowed = sec === 'users'
+            || (sec === 'pricing' && canCards)
+            || (sec === 'system' && canSystem);
+        btn.classList.toggle('hidden', !allowed);
+        btn.classList.toggle('active', sec === adminActiveSection);
     });
     page?.querySelectorAll('.admin-section').forEach(panel => {
         panel.classList.toggle('hidden', panel.id !== `admin-section-${adminActiveSection}`);

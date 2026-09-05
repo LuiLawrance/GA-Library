@@ -75,7 +75,7 @@ function renderProfile() {
         ? `<span class="profile-omnidex-trail">#${escapeHtml(profileData.omnidex_id)}</span>`
         : '';
     document.getElementById('profile-name').innerHTML = escapeHtml(profileData.username) + omniTrail;
-    document.getElementById('profile-role').textContent = profileData.auth_type || '—';
+    document.getElementById('profile-role').textContent = formatRole(profileData.auth_type);
 
     const sinceBlock = document.getElementById('profile-since-block');
     if (profileData.created_at) {

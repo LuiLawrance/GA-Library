@@ -1878,14 +1878,14 @@
     overflow: hidden;
 }
 
-/* Kept to roughly 10-15% of the admin content width — just wide enough for
-   a username and a short role label, so the profile/inventory/decks panels
-   get the rest of the space. The +50px gives the (flexible) username column
-   some breathing room beyond that baseline. */
+/* Kept narrow — just wide enough for a username, an Omni ID and a short role
+   label — so the profile/inventory/decks panels (which repeat the same info in
+   full) still get the bulk of the space. The +130px covers the three text
+   columns beyond the percentage baseline. */
 .admin-user-list {
-    flex: 0 0 calc(14% + 50px);
-    min-width: 200px;
-    max-width: 270px;
+    flex: 0 0 calc(16% + 130px);
+    min-width: 260px;
+    max-width: 380px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1921,7 +1921,7 @@
 
 .admin-user-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 86px 20px;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 92px 20px;
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
@@ -2218,6 +2218,20 @@
     color: var(--text-muted);
     text-transform: capitalize;
     text-align: left;
+}
+
+.admin-user-col-omnidex {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Dimmer dash for a user who hasn't set an Omni ID yet. */
+.admin-user-col-omnidex.is-empty {
+    opacity: 0.5;
 }
 
 .admin-user-col-delete {

@@ -154,19 +154,42 @@ def get_user_auth_type(username: str) -> str | None:
     return user_get_auth_type(username)
 
 
-# Ranks that can reach the admin console at all. Finer-grained permissions
-# between these three (e.g. what a moderator can't do that an admin can)
-# aren't split out yet — for now they get equal access once inside.
-ADMIN_CONSOLE_RANKS = {"owner", "admin", "moderator"}
+# Admin-console rank tiers. Each is a superset of the one below it (mirrors the
+# RANK_ORDER ladder in user.py), so a check against a lower tier also admits
+# every higher rank:
+#   ADMIN_CONSOLE_RANKS  moderator+  → can reach the console (Users tab)
+#   ADMIN_CARDS_RANKS    admin+      → Cards tab + all user-management mutations
+#   ADMIN_SYSTEM_RANKS   super_admin+→ System tab
+ADMIN_CONSOLE_RANKS = {"owner", "super_admin", "admin", "moderator"}
+ADMIN_CARDS_RANKS = {"owner", "super_admin", "admin"}
+ADMIN_SYSTEM_RANKS = {"owner", "super_admin"}
 
 
-def require_admin(request: Request) -> str:
+def _require_rank(request: Request, allowed: set[str]) -> str:
     user = get_current_user(request)
 
-    if not user or get_user_auth_type(user) not in ADMIN_CONSOLE_RANKS:
+    if not user or get_user_auth_type(user) not in allowed:
         raise HTTPException(status_code=403, detail="Admin access required")
 
     return user
+
+
+def require_admin(request: Request) -> str:
+    """Any rank that can reach the admin console at all — the Users tab and its
+    read endpoints. Reset-omni / reset-password add their own strict-rank check
+    (see _require_manageable_target)."""
+    return _require_rank(request, ADMIN_CONSOLE_RANKS)
+
+
+def require_cards_admin(request: Request) -> str:
+    """Admin and up — the Cards tab (catalog, pricing, set searches) and every
+    user-management mutation (role change, delete)."""
+    return _require_rank(request, ADMIN_CARDS_RANKS)
+
+
+def require_system_admin(request: Request) -> str:
+    """Super Admin and up — the System tab (settings, DB mode, sync/wipe)."""
+    return _require_rank(request, ADMIN_SYSTEM_RANKS)
 
 
 # API paths a user with a pending account-setup (Omnidex / password cleared by
@@ -996,7 +1019,7 @@ def _run_pricing_refresh_job(job_id: str, edition_id: str, target: str = "both")
 
 @app.post("/api/pricing/{edition_id}/refresh/start")
 async def api_pricing_refresh_start(edition_id: str, request: Request, target: str = "both"):
-    require_admin(request)
+    require_cards_admin(request)
 
     if target not in ("both", "sales", "listings"):
         raise HTTPException(status_code=400, detail="target must be 'both', 'sales', or 'listings'")
@@ -1023,7 +1046,7 @@ async def api_pricing_refresh_start(edition_id: str, request: Request, target: s
 
 @app.get("/api/pricing/refresh/status/{job_id}")
 async def api_pricing_refresh_status(job_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     with _pricing_jobs_lock:
         job = _pricing_jobs.get(job_id)
@@ -1068,7 +1091,7 @@ def _run_pricing_batch_job(job_id: str, edition_ids: list, target: str, foil_sco
 
 @app.post("/api/pricing/refresh/batch/start")
 async def api_pricing_refresh_batch_start(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     body = await request.json()
     edition_ids = body.get("edition_ids", [])
@@ -1114,7 +1137,7 @@ async def api_pricing_refresh_batch_start(request: Request):
 
 @app.get("/api/pricing/refresh/batch/status/{job_id}")
 async def api_pricing_refresh_batch_status(job_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     with _pricing_batch_jobs_lock:
         job = _pricing_batch_jobs.get(job_id)
@@ -1158,7 +1181,7 @@ def _run_product_id_job(job_id: str, edition_ids: list) -> None:
 
 @app.post("/api/admin/pricing/find-product-ids/start")
 async def api_find_product_ids_start(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     body = await request.json()
     edition_ids = body.get("edition_ids") or []
@@ -1195,7 +1218,7 @@ async def api_find_product_ids_start(request: Request):
 
 @app.get("/api/admin/pricing/find-product-ids/status/{job_id}")
 async def api_find_product_ids_status(job_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     with _product_id_jobs_lock:
         job = _product_id_jobs.get(job_id)
@@ -1238,7 +1261,7 @@ def _run_sync_job(job_id: str) -> None:
 
 @app.post("/api/admin/system/sync-to-database/start")
 async def api_admin_sync_to_database_start(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     job_id = uuid.uuid4().hex
     with _sync_jobs_lock:
@@ -1252,7 +1275,7 @@ async def api_admin_sync_to_database_start(request: Request):
 
 @app.get("/api/admin/system/sync-to-database/status/{job_id}")
 async def api_admin_sync_to_database_status(job_id: str, request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     with _sync_jobs_lock:
         job = _sync_jobs.get(job_id)
@@ -1272,7 +1295,7 @@ async def api_admin_sync_to_database_status(job_id: str, request: Request):
 # background-job-plus-polling needed here.
 @app.post("/api/admin/system/wipe-database")
 async def api_admin_wipe_database(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     from scripts.migrate_json_to_pg import wipe_database
 
@@ -1434,14 +1457,14 @@ def _db_mode_switch_blocker() -> str | None:
 
 @app.get("/api/admin/system/database-url")
 async def api_admin_get_database_url(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     return JSONResponse(parse_database_url(resolved_database_url()))
 
 
 @app.post("/api/admin/system/database-url")
 async def api_admin_set_database_url(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     body = await request.json()
 
@@ -1463,7 +1486,7 @@ async def api_admin_set_database_url(request: Request):
 
 @app.post("/api/admin/system/database-url/test")
 async def api_admin_test_database_url(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     body = await request.json()
 
@@ -1490,7 +1513,7 @@ async def api_admin_test_database_url(request: Request):
 # _db_mode_switch_blocker, called from api_admin_set_settings below.
 @app.get("/api/admin/system/db-mode-precheck")
 async def api_admin_db_mode_precheck(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     from scripts.migrate_json_to_pg import find_owner_username
 
@@ -1513,7 +1536,7 @@ async def api_admin_db_mode_precheck(request: Request):
 
 @app.post("/api/admin/system/port-owner-to-database")
 async def api_admin_port_owner_to_database(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     from scripts.migrate_json_to_pg import port_owner_to_database
 
@@ -1531,7 +1554,7 @@ async def api_admin_port_owner_to_database(request: Request):
 # network-bound) DDL doesn't block the event loop.
 @app.post("/api/admin/system/init-schema")
 async def api_admin_init_schema(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     result = await asyncio.to_thread(run_schema_migration)
 
@@ -1588,7 +1611,7 @@ def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
 
 @app.get("/api/admin/settings")
 async def api_admin_get_settings(request: Request):
-    require_admin(request)
+    require_system_admin(request)
     # The DB connection string (with its password) lives in SETTINGS.json too
     # but has its own dedicated endpoint — don't ship it in this toggle blob.
     return JSONResponse({k: v for k, v in load_settings().items() if k != "database_url"})
@@ -1596,7 +1619,7 @@ async def api_admin_get_settings(request: Request):
 
 @app.post("/api/admin/settings")
 async def api_admin_set_settings(request: Request):
-    require_admin(request)
+    require_system_admin(request)
 
     body = await request.json()
 
@@ -1639,7 +1662,7 @@ async def api_admin_users(request: Request):
 
 @app.post("/api/admin/users/{username}/role")
 async def api_admin_set_user_role(username: str, request: Request):
-    admin = require_admin(request)
+    admin = require_cards_admin(request)
 
     body = await request.json()
     auth_type = body.get("auth_type")
@@ -1674,7 +1697,7 @@ async def api_admin_set_user_role(username: str, request: Request):
 
 @app.delete("/api/admin/users/{username}")
 async def api_admin_delete_user(username: str, request: Request):
-    admin = require_admin(request)
+    admin = require_cards_admin(request)
 
     target_auth_type = user_get_auth_type(username)
 
@@ -1695,10 +1718,20 @@ async def api_admin_delete_user(username: str, request: Request):
     return JSONResponse({"deleted": username})
 
 
+def _outranks(username: str, target_username: str) -> bool:
+    """Whether `username` sits strictly above `target_username` in RANK_ORDER —
+    the rule for every per-user action (reset omni/password, notes, role,
+    delete). Both must exist."""
+    a, b = user_get_auth_type(username), user_get_auth_type(target_username)
+    if a is None or b is None:
+        return False
+    return RANK_ORDER.index(a) < RANK_ORDER.index(b)
+
+
 def _require_manageable_target(request: Request, username: str, verb: str) -> None:
-    """Shared guard for the per-user admin actions (delete / reset omni /
-    reset password): caller must be an admin, target must exist, must not be
-    the caller, and must rank strictly below the caller."""
+    """Shared guard for the per-user admin actions (delete / reset omni / reset
+    password / notes): caller must be able to reach the console, target must
+    exist, must not be the caller, and must rank strictly below the caller."""
     admin = require_admin(request)
 
     target_auth_type = user_get_auth_type(username)
@@ -1708,7 +1741,7 @@ def _require_manageable_target(request: Request, username: str, verb: str) -> No
     if username == admin:
         raise HTTPException(status_code=400, detail=f"Cannot {verb} your own account")
 
-    if RANK_ORDER.index(target_auth_type) <= RANK_ORDER.index(user_get_auth_type(admin)):
+    if not _outranks(admin, username):
         raise HTTPException(status_code=400, detail=f"Cannot {verb} a user at or above your own rank")
 
 
@@ -1717,8 +1750,10 @@ ADMIN_NOTE_MAX = 4000
 
 @app.post("/api/admin/users/{username}/note")
 async def api_admin_user_note(username: str, request: Request):
-    require_admin(request)
-    _require_existing_user(username)
+    # Notes are readable/writable only by a rank strictly above the target
+    # (same rule as reset omni/password) — a moderator can note a regular
+    # user, an admin can note moderators and below, and so on.
+    _require_manageable_target(request, username, "edit notes for")
 
     body = await request.json()
     note = (body.get("note") or "")
@@ -1822,12 +1857,17 @@ def _user_decks_list(username: str) -> list[dict]:
 async def api_admin_user(username: str, request: Request):
     """Identity fields for the Admin → Users profile panel — role, Omnidex ID,
     bio, join date. (Inventory / decks have their own endpoints below.)"""
-    require_admin(request)
+    caller = require_admin(request)
 
     profile = user_get_profile(username)
 
     if profile is None:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # The admin note is only visible to a rank strictly above the target
+    # (mirrors api_admin_user_note's write guard and the UI's canManage check).
+    if not _outranks(caller, username):
+        profile = {**profile, "admin_note": ""}
 
     return JSONResponse(profile)
 
@@ -1850,7 +1890,7 @@ async def api_admin_user_decks(username: str, request: Request):
 
 @app.get("/api/admin/pricing/product-ids")
 async def api_admin_pricing_product_ids(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
     info_data = load_info_data()
@@ -1945,7 +1985,7 @@ async def api_admin_pricing_product_ids(request: Request):
 # external API every time an admin just opens the page.
 @app.get("/api/admin/featured-sets")
 async def api_admin_featured_sets(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     featured = load_featured_sets_data()
 
@@ -1959,7 +1999,7 @@ async def api_admin_featured_sets(request: Request):
 # "$prefix" search already starts), not a separate admin-only endpoint.
 @app.get("/api/admin/set-searches")
 async def api_admin_set_searches(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     searches = load_set_searches_data() if is_db_mode() else _set_search_cache
     return JSONResponse({"searches": searches})
@@ -1974,7 +2014,7 @@ async def api_admin_set_searches(request: Request):
 # app never reads.
 @app.patch("/api/admin/set-searches/{slug}")
 async def api_admin_set_group_id(slug: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     body = await request.json()
     group_id = body.get("tcgplayer_group_id", "").strip()
@@ -2007,7 +2047,7 @@ async def api_admin_set_group_id(slug: str, request: Request):
 # fast enough not to need polling.
 @app.post("/api/admin/set-searches/{slug}/import-tcgcsv")
 async def api_admin_import_tcgcsv(slug: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     slug = slug.strip().lower().replace(" ", "_")
     if is_db_mode():
@@ -2043,7 +2083,7 @@ async def api_admin_import_tcgcsv(slug: str, request: Request):
 # already in ID_TCGPLAYER.json for this set's editions.
 @app.post("/api/admin/set-searches/{slug}/clear-product-ids")
 async def api_admin_clear_set_product_ids(slug: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     slug = slug.strip().lower().replace(" ", "_")
 
@@ -2060,7 +2100,7 @@ async def api_admin_clear_set_product_ids(slug: str, request: Request):
 # Featured Sets change infrequently (new set releases).
 @app.post("/api/admin/featured-sets/refresh")
 async def api_admin_featured_sets_refresh(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     try:
         featured = sync_featured_sets()
@@ -2072,7 +2112,7 @@ async def api_admin_featured_sets_refresh(request: Request):
 
 @app.post("/api/admin/pricing/product-id")
 async def api_admin_set_product_id(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     body = await request.json()
     edition_id = body.get("edition_id", "").strip()
@@ -2103,7 +2143,7 @@ async def api_admin_set_product_id(request: Request):
 
 @app.post("/api/admin/pricing/clear-last-updated")
 async def api_admin_clear_last_updated(request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     body = await request.json()
     edition_id = body.get("edition_id", "").strip()
@@ -2138,7 +2178,7 @@ async def api_admin_clear_last_updated(request: Request):
 
 @app.get("/api/admin/pricing/{edition_id}/history")
 async def api_admin_pricing_history(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
 
@@ -2199,7 +2239,7 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
 # look up the card by slug.
 @app.post("/api/admin/pricing/{edition_id}/refresh-card")
 async def api_admin_refresh_card(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
 
@@ -2225,7 +2265,7 @@ async def api_admin_refresh_card(edition_id: str, request: Request):
 
 @app.get("/api/admin/pricing/{edition_id}/foils")
 async def api_admin_pricing_foils(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
 
@@ -2277,7 +2317,7 @@ async def api_admin_pricing_foils(edition_id: str, request: Request):
 
 @app.post("/api/admin/pricing/{edition_id}/entry")
 async def api_admin_pricing_add_entry(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
 
@@ -2334,7 +2374,7 @@ async def api_admin_pricing_add_entry(edition_id: str, request: Request):
 
 @app.delete("/api/admin/pricing/{edition_id}/entry")
 async def api_admin_pricing_delete_entry(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     body = await request.json()
     entry_type = body.get("entry_type")
@@ -2359,7 +2399,7 @@ async def api_admin_pricing_delete_entry(edition_id: str, request: Request):
 
 @app.post("/api/admin/pricing/{edition_id}/import-sales")
 async def api_admin_pricing_import_sales(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
 
@@ -2383,7 +2423,7 @@ async def api_admin_pricing_import_sales(edition_id: str, request: Request):
 
 @app.post("/api/admin/pricing/{edition_id}/import-gal")
 async def api_admin_pricing_import_gal(edition_id: str, request: Request):
-    require_admin(request)
+    require_cards_admin(request)
 
     editions_data = load_editions_data()
 

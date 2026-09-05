@@ -51,7 +51,8 @@ async function handleLogin() {
         if (res.ok) {
             const data = await res.json();
             currentUser = data.username;
-            isAdmin = ADMIN_CONSOLE_RANKS.has(data.auth_type);
+            authType = data.auth_type;
+            isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
             setLoggedIn(currentUser);
             if (typeof maybeShowAccountSetup !== 'function' || !maybeShowAccountSetup(data)) navigate('/');
         } else {
