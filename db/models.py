@@ -302,6 +302,7 @@ class InventoryBin(Base):
     symbol: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSONB)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class InventorySection(Base):

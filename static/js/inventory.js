@@ -11,6 +11,11 @@ let cardModalRow = null;   // the row being edited in the card detail modal
 let invAcIndex = -1;
 let addAcIndex = -1;
 
+// ── Banner search modal state ──
+let invBannerTargetBin = null;
+let invBannerModalEditionId = null;
+let invBannerAcIndex = -1;
+
 const rarityMapInv = {1: "C", 2: "U", 3: "R", 4: "SR", 5: "UR", 6: "PR", 7: "CSR", 8: "CUR", 9: "CPR"};
 
 // ── Quantity font scaling ──
@@ -100,10 +105,11 @@ function buildBinTile(name, bin, index, total = 1) {
     const maxDelay = 400;
     const delay = total <= 1 ? 0 : Math.min(index * 50, Math.round((index / (total - 1)) * maxDelay));
     tile.style.animationDelay = `${delay}ms`;
+    const pub = bin.public ? '<span class="dga-tile-public" title="Listed on the public Collection page">Public</span>' : '';
     tile.innerHTML = `
         <div class="inv-bin-icon-row">
             <span class="inv-bin-icon">${bin.default ? '📦' : '⬡'}</span>
-            ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
+            ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}${pub}
         </div>
         <div class="inv-bin-name">${name}</div>
         <div class="inv-bin-desc">${bin.desc || ''}</div>
@@ -1877,9 +1883,20 @@ function openBinContextMenu(e, binName) {
     const divider = document.querySelector('#inv-bin-context-menu .inv-context-divider');
     if (divider) divider.style.display = isDefault ? 'none' : '';
 
-    // Only offer Clear Banner when the bin has one
+    // Set Banner and Clear Banner are mutually exclusive — only offer the one
+    // that applies to the bin's current state, to keep the menu shorter.
+    const hasBanner = !!invBins[binName]?.banner;
+    const setBannerBtn = document.getElementById('ctx-set-banner');
     const clearBannerBtn = document.getElementById('ctx-clear-banner');
-    if (clearBannerBtn) clearBannerBtn.style.display = invBins[binName]?.banner ? '' : 'none';
+    if (setBannerBtn) setBannerBtn.style.display = hasBanner ? 'none' : '';
+    if (clearBannerBtn) clearBannerBtn.style.display = hasBanner ? '' : 'none';
+
+    // Same mutual-exclusivity pattern for Make Public / Make Private.
+    const isPublic = !!invBins[binName]?.public;
+    const makePublicBtn = document.getElementById('ctx-make-public');
+    const makePrivateBtn = document.getElementById('ctx-make-private');
+    if (makePublicBtn) makePublicBtn.style.display = isPublic ? 'none' : '';
+    if (makePrivateBtn) makePrivateBtn.style.display = isPublic ? '' : 'none';
 
     menu.classList.remove('hidden');
 
@@ -2049,6 +2066,31 @@ async function ctxClearBanner() {
     }
 }
 
+function ctxOpenBannerSearch() {
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+    if (!name) return;
+    openBinBannerModal(name);
+}
+
+async function ctxSetPublic(value) {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({public: value})
+        });
+        if (!res.ok) return;
+        if (invBins[name]) invBins[name].public = value;
+        renderBinGrid();
+    } catch {
+        console.error('Failed to update bin visibility');
+    }
+}
+
 async function ctxSetDefault() {
     if (!ctxTargetBin) return;
     const name = ctxTargetBin;
@@ -2110,7 +2152,7 @@ async function submitCreateBin() {
             body: JSON.stringify({name, desc})
         });
         if (res.ok) {
-            invBins[name] = {banner: null, default: false, desc, symbol: null, tags: null, sections: {}};
+            invBins[name] = {banner: null, default: false, public: false, desc, symbol: null, tags: null, sections: {}};
             closeCreateModal();
             renderBinGrid();
         } else {
@@ -2138,6 +2180,18 @@ function openBinSettings() {
     const defaultBtn = document.getElementById('settings-default-btn');
     if (defaultBtn) defaultBtn.style.display = bin?.default ? 'none' : '';
     document.getElementById('inv-settings-modal').classList.remove('hidden');
+    // After the modal is unhidden so the pill track has real layout for
+    // positionPillIndicator to measure — offsetWidth is 0 while display:none.
+    setInvPublicValue(!!bin?.public);
+}
+
+function setInvPublicValue(value) {
+    document.getElementById('settings-bin-public').value = value;
+    const toggle = document.getElementById('inv-settings-public-toggle');
+    toggle.querySelectorAll('.pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', (btn.dataset.value === 'true') === value);
+    });
+    positionPillIndicator(toggle);
 }
 
 function closeBinSettings() {
@@ -2168,6 +2222,7 @@ async function settingsSetDefault() {
 async function submitBinSettings() {
     const newName = document.getElementById('settings-bin-name').value.trim();
     const desc = document.getElementById('settings-bin-desc').value.trim();
+    const isPublic = document.getElementById('settings-bin-public').value === 'true';
     const errEl = document.getElementById('settings-bin-error');
     errEl.classList.add('hidden');
 
@@ -2186,11 +2241,12 @@ async function submitBinSettings() {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: newName, desc})
+            body: JSON.stringify({name: newName, desc, public: isPublic})
         });
         if (res.ok) {
             const bin = invBins[activeBin];
             bin.desc = desc;
+            bin.public = isPublic;
             if (newName !== activeBin) {
                 invBins[newName] = bin;
                 delete invBins[activeBin];
@@ -2769,6 +2825,247 @@ async function submitImport() {
         btn.disabled = false;
     }
 }
+
+// ═══════════════════════════════════════
+// SET BANNER MODAL (bin grid → search a specific card edition)
+// ═══════════════════════════════════════
+
+function openBinBannerModal(binName) {
+    invBannerTargetBin = binName;
+    invBannerModalEditionId = null;
+
+    document.getElementById('inv-banner-search').value = '';
+    const results = document.getElementById('inv-banner-results');
+    results.style.gridTemplateColumns = ''; // a prior search may have left this widened
+    results.classList.remove('has-scroll');
+    results.innerHTML = `
+        <div class="inv-search-placeholder" style="padding:30px 0">
+            <span class="inv-empty-icon">⬡</span><p>Search for a card to set as the banner.</p>
+        </div>`;
+    document.getElementById('inv-banner-step-search').classList.remove('hidden');
+    document.getElementById('inv-banner-step-confirm').classList.add('hidden');
+    document.getElementById('inv-banner-back-btn').classList.add('hidden');
+    document.querySelector('#inv-banner-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
+    document.getElementById('inv-banner-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('inv-banner-search').focus(), 60);
+}
+
+function closeBinBannerModal() {
+    document.getElementById('inv-banner-modal').classList.add('hidden');
+    hideInvBannerAc();
+    resetBoxResize(document.querySelector('#inv-banner-modal .inv-modal-wide'));
+    invBannerTargetBin = null;
+}
+
+function invAnimateBannerModalResize(mutate) {
+    animateBoxResize(document.querySelector('#inv-banner-modal .inv-modal-wide'), mutate);
+}
+
+function invBannerBackToSearch() {
+    if (document.getElementById('inv-banner-step-confirm').classList.contains('hidden')) return;
+    invAnimateBannerModalResize(() => {
+        document.getElementById('inv-banner-step-confirm').classList.add('hidden');
+        document.getElementById('inv-banner-step-search').classList.remove('hidden');
+        document.getElementById('inv-banner-back-btn').classList.add('hidden');
+        document.querySelector('#inv-banner-modal .inv-modal-wide').classList.remove('inv-modal-foil-step');
+    });
+}
+
+async function searchInvBannerCards() {
+    const query = document.getElementById('inv-banner-search')?.value?.trim();
+    const results = document.getElementById('inv-banner-results');
+    if (!results || !query) return;
+
+    const resetResultsGrid = () => {
+        results.style.gridTemplateColumns = '';
+        results.classList.remove('has-scroll');
+    };
+
+    invAnimateBannerModalResize(() => {
+        resetResultsGrid();
+        results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Searching...</p></div>`;
+    });
+
+    try {
+        // all_prints=1 — a banner needs a specific printing, not a random
+        // edition of the card (see api_cards_search in app.py).
+        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(query)}&all_prints=1`);
+        const data = await res.json();
+
+        if (!data.cards?.length) {
+            invAnimateBannerModalResize(() => {
+                resetResultsGrid();
+                results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>${data.message || 'No cards found.'}</p></div>`;
+            });
+            return;
+        }
+
+        const cards = [...data.cards].sort((a, b) => {
+            if (a.name !== b.name) return a.name.localeCompare(b.name);
+            return (a.collector_number || '').localeCompare(b.collector_number || '', undefined, {numeric: true});
+        });
+
+        invAnimateBannerModalResize(() => {
+            results.innerHTML = '';
+            const cols = Math.min(cards.length, 5);
+            results.style.gridTemplateColumns = `repeat(${cols}, 255px)`;
+            results.classList.toggle('has-scroll', cards.length >= 6);
+
+            cards.forEach((card, i) => {
+                const tile = document.createElement('div');
+                tile.className = 'inv-search-tile tile-hoverable';
+                tile.style.animationDelay = `${Math.min(i, 20) * 30}ms`;
+                const setLabel = dgaCardSetLabel(card);
+                const captionParts = [setLabel, card.collector_number ? `#${card.collector_number}` : ''].filter(Boolean);
+                tile.innerHTML = `
+                    <div class="edition-tile-wrap tile-zoom">
+                        <img src="/images/${card.edition_id}.jpg" alt="${card.name}">
+                        <div class="card-tile-dim"></div>
+                        <div class="inv-search-tile-add tile-action-btn">🖼</div>
+                    </div>
+                    <div class="dga-banner-tile-caption">
+                        <div class="dga-banner-tile-name">${card.name}</div>
+                        <div class="dga-banner-tile-set">${captionParts.join(' · ')}</div>
+                    </div>`;
+                tile.onclick = () => invGoToBannerConfirm(card.name, card.edition_id, setLabel);
+                tile.addEventListener('animationend', () => tile.classList.add('animated'));
+                results.appendChild(tile);
+            });
+        });
+    } catch {
+        invAnimateBannerModalResize(() => {
+            resetResultsGrid();
+            results.innerHTML = `<div class="inv-search-placeholder" style="padding:20px 0"><span class="inv-empty-icon">⬡</span><p>Search failed.</p></div>`;
+        });
+    }
+}
+
+function invGoToBannerConfirm(cardName, editionId, setLabel = '') {
+    invBannerModalEditionId = editionId;
+
+    document.getElementById('inv-banner-modal-name').textContent = cardName;
+    const setEl = document.getElementById('inv-banner-modal-set');
+    if (setEl) setEl.textContent = setLabel;
+    document.getElementById('inv-banner-modal-img').src = editionId ? `/images/${editionId}.jpg` : '';
+
+    invAnimateBannerModalResize(() => {
+        document.getElementById('inv-banner-step-search').classList.add('hidden');
+        document.getElementById('inv-banner-step-confirm').classList.remove('hidden');
+        document.getElementById('inv-banner-back-btn').classList.remove('hidden');
+        document.querySelector('#inv-banner-modal .inv-modal-wide').classList.add('inv-modal-foil-step');
+    });
+}
+
+async function submitInvBanner() {
+    if (!invBannerModalEditionId || !invBannerTargetBin) return;
+
+    const binName = invBannerTargetBin;
+    const editionId = invBannerModalEditionId;
+    const btn = document.getElementById('inv-banner-modal-submit');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(binName)}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({banner: editionId})
+        });
+
+        if (res.ok) {
+            btn.disabled = false;
+            btn.textContent = 'Set as Banner';
+
+            if (invBins[binName]) invBins[binName].banner = editionId;
+
+            closeBinBannerModal();
+            renderBinGrid();
+        } else {
+            btn.textContent = 'Error';
+            setTimeout(() => {
+                btn.textContent = 'Set as Banner';
+                btn.disabled = false;
+            }, 1500);
+        }
+    } catch {
+        btn.textContent = 'Failed';
+        setTimeout(() => {
+            btn.textContent = 'Set as Banner';
+            btn.disabled = false;
+        }, 1500);
+    }
+}
+
+// ── Autocomplete ──
+
+async function fetchInvBannerSuggestions(value) {
+    const list = document.getElementById('inv-banner-autocomplete');
+    if (value.length < 2) {
+        hideInvBannerAc();
+        return;
+    }
+    try {
+        const res = await fetch(`/api/cards/suggest?q=${encodeURIComponent(value)}`);
+        const data = await res.json();
+        if (!data.suggestions?.length) {
+            hideInvBannerAc();
+            return;
+        }
+        invBannerAcIndex = -1;
+        list.innerHTML = '';
+        data.suggestions.forEach(name => {
+            const item = document.createElement('div');
+            item.className = 'autocomplete-item';
+            item.textContent = name;
+            item.onclick = () => {
+                document.getElementById('inv-banner-search').value = name;
+                hideInvBannerAc();
+                searchInvBannerCards();
+            };
+            list.appendChild(item);
+        });
+        list.classList.remove('hidden');
+    } catch {
+        hideInvBannerAc();
+    }
+}
+
+function hideInvBannerAc() {
+    const list = document.getElementById('inv-banner-autocomplete');
+    if (list) {
+        list.classList.add('hidden');
+        list.innerHTML = '';
+    }
+    invBannerAcIndex = -1;
+}
+
+function handleInvBannerKeydown(e) {
+    const list = document.getElementById('inv-banner-autocomplete');
+    const items = list?.querySelectorAll('.autocomplete-item') || [];
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        invBannerAcIndex = Math.min(invBannerAcIndex + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('selected', i === invBannerAcIndex));
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        invBannerAcIndex = Math.max(invBannerAcIndex - 1, -1);
+        items.forEach((el, i) => el.classList.toggle('selected', i === invBannerAcIndex));
+    } else if (e.key === 'Enter') {
+        if (invBannerAcIndex >= 0 && items[invBannerAcIndex]) {
+            document.getElementById('inv-banner-search').value = items[invBannerAcIndex].textContent;
+        }
+        hideInvBannerAc();
+        searchInvBannerCards();
+    } else if (e.key === 'Escape') {
+        hideInvBannerAc();
+        closeBinBannerModal();
+    }
+}
+
+document.addEventListener('click', e => {
+    if (!document.getElementById('inv-banner-modal')) return;
+    if (!e.target.closest('#inv-banner-search') && !e.target.closest('#inv-banner-autocomplete')) hideInvBannerAc();
+}, true);
 
 // ═══════════════════════════════════════
 // INIT

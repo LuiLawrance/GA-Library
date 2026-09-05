@@ -1,0 +1,13 @@
+/* Public "Collection" browse page (public Inventory bins) — layout/tile
+   visuals ride on decks_ga.css (dga-*) and inventory.css (inv-*), both loaded
+   globally. Only page-specific bits live here — mirrors decks.css, which does
+   the same for the public Decks page. */
+
+/* .dga-deck-grid's own 32px page padding is redundant once it's nested inside
+   a section block, which already sits in .dga-card-grid's padding — this
+   strips it back down to just the grid/gap sizing. Same fix as decks.css's
+   .pd-section-deck-grid. */
+.col-section-bin-grid {
+    padding: 0;
+    overflow: visible;
+}

@@ -1,4 +1,73 @@
-<div class="hero">
-    <span class="hero-label label">Collection</span>
-    <p class="hero-sub">Coming soon.</p>
+<div class="col-page page" id="col-page">
+
+    <!-- ── Public bins list view ──
+         No page-level header — grouped into .dga-section-block sections
+         (the same pattern the public Decks page and a bin's own card grid
+         use), so more sections (e.g. featured) can be added later alongside
+         "All Bins" without a layout change. -->
+    <div class="dga-list-view" id="col-list-view">
+        <div class="dga-card-grid-wrap scroll-thin">
+            <div class="dga-card-grid" id="col-sections"></div>
+        </div>
+    </div>
+
+    <!-- ── Public bin read-only detail view ── -->
+    <div class="dga-detail-view hidden" id="col-detail-view">
+        <div class="dga-detail-header detail-header">
+            <div class="dga-detail-back" onclick="closePublicBinDetail()">
+                <span class="dga-back-arrow">←</span>
+                <span>Collection</span>
+            </div>
+            <div class="dga-detail-title-row">
+                <div>
+                    <div class="dga-detail-title-wrap">
+                        <span class="dga-detail-name" id="col-detail-name"></span>
+                    </div>
+                    <div class="dga-detail-meta-group">
+                        <span class="dga-detail-meta" id="col-detail-desc"></span>
+                    </div>
+                    <div class="dga-detail-meta-group">
+                        <span class="dga-detail-meta pd-detail-owner" id="col-detail-owner"></span>
+                    </div>
+                </div>
+                <div class="dga-detail-header-right">
+                    <div class="inv-detail-counts-row">
+                        <div class="dga-detail-counts" id="col-detail-counts"></div>
+                        <span class="inv-bin-value-badge inv-bin-value-loading" id="col-detail-value">…</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="dga-cards-body">
+            <div class="dga-card-grid-wrap scroll-thin">
+                <div class="dga-card-grid" id="col-card-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Card drawer ──
+         A direct child of .col-page (not nested in .dga-cards-body) so it
+         sizes against the full page height, matching Admin/Prices/Decks —
+         see .page in main.css. Reuses the generic drawer ids/functions
+         (openCardDrawer, switchDrawerTab) that /cards and /decks already
+         share, rather than Inventory's own #inv-card-drawer variant. -->
+    <div class="card-drawer hidden" id="card-drawer">
+        <div class="drawer-inner">
+            <div id="drawer-content"></div>
+        </div>
+    </div>
+    <div class="drawer-sidebar hidden" id="drawer-sidebar">
+        <button class="drawer-sidebar-close" onclick="closeCardDrawer()">✕</button>
+        <div class="drawer-sidebar-divider"></div>
+        <button class="drawer-sidebar-btn btn btn--icon active" data-tab="info"
+                onclick="switchDrawerTab('info', 'card-drawer')" title="Info">ℹ️
+        </button>
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="thema" onclick="switchDrawerTab('thema', 'card-drawer')"
+                title="Thema">🏷️
+        </button>
+        <button class="drawer-sidebar-btn btn btn--icon" data-tab="pricing" onclick="switchDrawerTab('pricing', 'card-drawer')"
+                title="Pricing">💵
+        </button>
+    </div>
+
 </div>

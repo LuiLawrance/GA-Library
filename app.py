@@ -690,8 +690,9 @@ def _profile_payload(username: str, *, public_view: bool = False) -> dict | None
     deck / bin lists. Contains nothing account-sensitive (no password hash,
     no settings), so it's safe to serve publicly.
 
-    public_view drops decks the owner hasn't made public (mirrors the /decks
-    browse page) — the stats.decks count reflects the same filtered list."""
+    public_view drops decks/bins the owner hasn't made public (mirrors the
+    /decks and /collection browse pages) — the stats reflect the same
+    filtered lists."""
     profile = user_get_profile(username)
 
     if profile is None:
@@ -701,6 +702,7 @@ def _profile_payload(username: str, *, public_view: bool = False) -> dict | None
     decks = _user_decks_list(username)
     if public_view:
         decks = [d for d in decks if d.get("is_public")]
+        bins = [b for b in bins if b.get("is_public")]
 
     profile["bins"] = bins
     profile["decks"] = decks
@@ -1759,8 +1761,10 @@ def _bin_card_count(bin_info: dict) -> int:
 
 def _user_bins_list(username: str) -> list[dict]:
     """Every inventory bin for a user as {name, section_count, card_count, desc,
-    banner, default}, name-sorted — feeds both the admin profile panel and the
-    self-service Profile page's Bins menu."""
+    banner, default, is_public}, name-sorted — feeds both the admin profile
+    panel and the self-service Profile page's Bins menu. Callers that need the
+    public-facing view (see _profile_payload) filter on is_public themselves —
+    the admin panel still needs every bin, private ones included."""
     bins = [
         {
             "name": name,
@@ -1769,6 +1773,7 @@ def _user_bins_list(username: str) -> list[dict]:
             "desc": bin_info.get("desc", ""),
             "banner": bin_info.get("banner"),
             "default": bool(bin_info.get("default")),
+            "is_public": bool(bin_info.get("public")),
         }
         for name, bin_info in _inv_load(username).items()
     ]
@@ -2812,7 +2817,7 @@ DEFAULT_BIN = "Inventory"
 
 
 def _inv_default_structure() -> dict:
-    return {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None, "sections": {}}}
+    return {DEFAULT_BIN: {"banner": None, "default": True, "public": False, "desc": "", "symbol": None, "tags": None, "sections": {}}}
 
 
 def _inv_load(username: str) -> dict:
@@ -2842,6 +2847,8 @@ def _inv_load(username: str) -> dict:
     for b in raw.values():
         if isinstance(b, dict) and "sections" not in b:
             b["sections"] = {}
+        if isinstance(b, dict) and "public" not in b:
+            b["public"] = False
 
     return raw
 
@@ -2920,6 +2927,7 @@ def _inv_load_db(username: str) -> dict:
             result[bin_row.name] = {
                 "banner": bin_row.banner,
                 "default": bin_row.is_default,
+                "public": bin_row.is_public,
                 "desc": bin_row.desc or "",
                 "symbol": bin_row.symbol,
                 "tags": bin_row.tags,
@@ -2981,6 +2989,7 @@ def _inv_save_db(username: str, data: dict) -> None:
             bin_row.symbol = bin_data.get("symbol")
             bin_row.tags = bin_data.get("tags")
             bin_row.is_default = bool(bin_data.get("default"))
+            bin_row.is_public = bool(bin_data.get("public"))
 
             new_sections = bin_data.get("sections", {})
 
@@ -3028,26 +3037,16 @@ async def api_inventory_get(request: Request):
     return JSONResponse({"bins": _inv_load(user)})
 
 
-@app.get("/api/inventory/bins/{bin_name}/value")
-async def api_bin_value(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
-
-    sales_data = load_sales_data()
-    listings_data = load_listings_data()
-
+def _bin_value(sections: dict, sales_data: dict, listings_data: dict) -> dict:
+    """Priced total for a bin's sections — shared by the owner's
+    api_bin_value and the read-only api_public_bin_value."""
     total = 0.0
     sale_quantity = 0
     listing_quantity = 0
     unpriced_quantity = 0
     total_quantity = 0
 
-    for cards in inv[bin_name].get("sections", {}).values():
+    for cards in sections.values():
         for card_id, editions in cards.items():
             for edition_id, foils in editions.items():
                 for foil_id, quantity in foils.items():
@@ -3072,32 +3071,22 @@ async def api_bin_value(bin_name: str, request: Request):
 
                     total += price * quantity
 
-    return JSONResponse({
+    return {
         "total": round(total, 2),
         "priced_quantity": sale_quantity + listing_quantity,
         "total_quantity": total_quantity,
         "sale_quantity": sale_quantity,
         "listing_quantity": listing_quantity,
         "unpriced_quantity": unpriced_quantity,
-    })
+    }
 
 
-@app.get("/api/inventory/bins/{bin_name}/prices")
-async def api_bin_prices(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
-
-    sales_data = load_sales_data()
-    listings_data = load_listings_data()
-
+def _bin_prices(sections: dict, sales_data: dict, listings_data: dict) -> dict:
+    """Per-card price badges for a bin's sections — shared by the owner's
+    api_bin_prices and the read-only api_public_bin_prices."""
     prices: dict = {}
 
-    for cards in inv[bin_name].get("sections", {}).values():
+    for cards in sections.values():
         for card_id, editions in cards.items():
             for edition_id, foils in editions.items():
                 for foil_id in foils:
@@ -3113,7 +3102,100 @@ async def api_bin_prices(bin_name: str, request: Request):
                         "lowest_listing": lowest_listing,
                     }
 
-    return JSONResponse(prices)
+    return prices
+
+
+@app.get("/api/inventory/bins/{bin_name}/value")
+async def api_bin_value(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    return JSONResponse(_bin_value(inv[bin_name].get("sections", {}), load_sales_data(), load_listings_data()))
+
+
+@app.get("/api/inventory/bins/{bin_name}/prices")
+async def api_bin_prices(bin_name: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    inv = _inv_load(user)
+    if bin_name not in inv:
+        raise HTTPException(status_code=404, detail="Bin not found")
+
+    return JSONResponse(_bin_prices(inv[bin_name].get("sections", {}), load_sales_data(), load_listings_data()))
+
+
+def _public_bins_list() -> list[dict]:
+    """Every inventory bin marked public, across all users — feeds the public
+    Collection browse page. Mirrors _public_decks_list."""
+    bins = []
+    for user in user_list():
+        username = user["username"]
+        profile = user_get_profile(username)
+        omnidex_id = profile.get("omnidex_id") if profile else None
+        for name, entry in _inv_load(username).items():
+            if not entry.get("public"):
+                continue
+            bins.append({
+                "name": name,
+                "username": username,
+                "omnidex_id": omnidex_id,
+                "desc": entry.get("desc", ""),
+                "banner": entry.get("banner"),
+                "card_count": _bin_card_count(entry),
+            })
+    bins.sort(key=lambda b: b["name"].lower())
+    return bins
+
+
+@app.get("/api/inventory/public")
+async def api_public_bins_list():
+    return JSONResponse({"bins": _public_bins_list()})
+
+
+@app.get("/api/inventory/public/{omnidex_id}/{bin_name}")
+async def api_public_bin_get(omnidex_id: str, bin_name: str):
+    # Looked up by Omnidex ID rather than username — same rationale as the
+    # public deck route (api_public_deck_get).
+    username = user_find_by_omnidex(omnidex_id.strip())
+    if username is None:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    entry = _inv_load(username).get(bin_name)
+    if entry is None or not entry.get("public"):
+        raise HTTPException(status_code=404, detail="Bin not found")
+    return JSONResponse({**entry, "username": username, "omnidex_id": omnidex_id})
+
+
+@app.get("/api/inventory/public/{omnidex_id}/{bin_name}/value")
+async def api_public_bin_value(omnidex_id: str, bin_name: str):
+    """Priced total for a public bin — the read-only counterpart of
+    api_bin_value, addressed by Omnidex ID like api_public_deck_value."""
+    username = user_find_by_omnidex(omnidex_id.strip())
+    if username is None:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    entry = _inv_load(username).get(bin_name)
+    if entry is None or not entry.get("public"):
+        raise HTTPException(status_code=404, detail="Bin not found")
+    return JSONResponse(_bin_value(entry.get("sections", {}), load_sales_data(), load_listings_data()))
+
+
+@app.get("/api/inventory/public/{omnidex_id}/{bin_name}/prices")
+async def api_public_bin_prices(omnidex_id: str, bin_name: str):
+    """Per-card price badges for a public bin — the read-only counterpart of
+    api_bin_prices, addressed by Omnidex ID like api_public_deck_get."""
+    username = user_find_by_omnidex(omnidex_id.strip())
+    if username is None:
+        raise HTTPException(status_code=404, detail="Bin not found")
+    entry = _inv_load(username).get(bin_name)
+    if entry is None or not entry.get("public"):
+        raise HTTPException(status_code=404, detail="Bin not found")
+    return JSONResponse(_bin_prices(entry.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
 @app.get("/api/inv/info")
@@ -3472,7 +3554,7 @@ async def api_bin_create(request: Request):
     if name in inv:
         raise HTTPException(status_code=400, detail="Bin already exists")
 
-    inv[name] = {"banner": None, "default": False, "desc": desc, "symbol": None, "tags": None,
+    inv[name] = {"banner": None, "default": False, "public": False, "desc": desc, "symbol": None, "tags": None,
                  "sections": {}}
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
@@ -3502,6 +3584,8 @@ async def api_bin_patch(bin_name: str, request: Request):
     if "banner" in body:
         banner = body["banner"]
         inv[bin_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
+    if "public" in body:
+        inv[bin_name]["public"] = bool(body["public"])
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
 

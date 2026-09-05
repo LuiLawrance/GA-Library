@@ -129,8 +129,17 @@
     <button class="inv-context-item" onclick="ctxEditDesc()">
         <span class="inv-context-icon">≡</span> Edit Description
     </button>
+    <button class="inv-context-item" id="ctx-set-banner" onclick="ctxOpenBannerSearch()">
+        <span class="inv-context-icon">🖼</span> Set Banner
+    </button>
     <button class="inv-context-item" id="ctx-clear-banner" onclick="ctxClearBanner()">
         <span class="inv-context-icon">🖼</span> Clear Banner
+    </button>
+    <button class="inv-context-item" id="ctx-make-public" onclick="ctxSetPublic(true)">
+        <span class="inv-context-icon">🌐</span> Make Public
+    </button>
+    <button class="inv-context-item" id="ctx-make-private" onclick="ctxSetPublic(false)">
+        <span class="inv-context-icon">🔒</span> Make Private
     </button>
     <div class="inv-context-divider"></div>
     <button class="inv-context-item inv-context-item-danger" id="ctx-delete" onclick="ctxDelete()">
@@ -252,6 +261,15 @@
                 <label class="inv-field-label label label--muted">Description</label>
                 <input type="text" id="settings-bin-desc" class="inv-text-input" maxlength="100" placeholder="...">
             </div>
+            <div class="inv-field-group dga-public-field">
+                <label class="inv-field-label label label--muted">Visibility</label>
+                <div class="pill-toggle dga-public-toggle" id="inv-settings-public-toggle">
+                    <span class="pill-indicator"></span>
+                    <button class="pill-toggle-btn active" data-value="false" onclick="setInvPublicValue(false)">Private</button>
+                    <button class="pill-toggle-btn" data-value="true" onclick="setInvPublicValue(true)">Public</button>
+                </div>
+                <input type="hidden" id="settings-bin-public" value="false">
+            </div>
         </div>
         <div id="settings-bin-error" class="inv-modal-error hidden"></div>
         <div class="inv-modal-actions">
@@ -371,6 +389,57 @@
         <div class="inv-modal-actions">
             <button class="inv-modal-submit" onclick="saveCardModal()">Save</button>
             <button class="inv-modal-danger" onclick="removeCardModal()">Remove</button>
+        </div>
+    </div>
+</div>
+<!-- ── Set Banner modal — search a specific card edition to use as the bin's banner ── -->
+<div class="inv-modal-overlay overlay hidden" id="inv-banner-modal" onclick="closeBinBannerModal()">
+    <div class="inv-modal modal inv-modal-wide" onclick="event.stopPropagation()">
+        <div class="inv-modal-header inv-add-modal-header">
+            <button class="inv-btn-back-arrow hidden" id="inv-banner-back-btn" onclick="invBannerBackToSearch()">‹</button>
+            <span class="inv-modal-title">Set Banner</span>
+            <button class="inv-modal-close" onclick="closeBinBannerModal()">✕</button>
+        </div>
+
+        <!-- Search step -->
+        <div id="inv-banner-step-search">
+            <div class="inv-add-search-wrap">
+                <div class="autocomplete-wrap" style="flex:1">
+                    <input autocomplete="off" class="inv-text-input" id="inv-banner-search"
+                           oninput="fetchInvBannerSuggestions(this.value)"
+                           onkeydown="handleInvBannerKeydown(event)"
+                           placeholder="Search cards..."
+                           type="text">
+                    <div class="autocomplete-list hidden" id="inv-banner-autocomplete"></div>
+                </div>
+                <button class="btn-search btn btn--primary" onclick="searchInvBannerCards()">Search</button>
+            </div>
+            <div class="inv-add-results scroll-none" id="inv-banner-results">
+                <div class="inv-search-placeholder" style="padding:30px 0">
+                    <span class="inv-empty-icon">⬡</span>
+                    <p>Search for a card to set as the banner.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Confirm step: specific edition selected -->
+        <div class="hidden" id="inv-banner-step-confirm">
+            <div class="inv-foil-step-body">
+                <img alt="" class="inv-modal-img-large" id="inv-banner-modal-img" src="">
+                <div class="inv-foil-step-right">
+                    <div class="inv-foil-step-top">
+                        <div>
+                            <div class="inv-modal-title" id="inv-banner-modal-name"></div>
+                            <div class="inv-modal-set" id="inv-banner-modal-set"></div>
+                        </div>
+                    </div>
+                    <div class="inv-foil-step-bottom">
+                        <button class="inv-modal-submit" id="inv-banner-modal-submit" onclick="submitInvBanner()">
+                            Set as Banner
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

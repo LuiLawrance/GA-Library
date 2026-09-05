@@ -163,6 +163,13 @@ async function navigate(path, pushState = true) {
         setTimeout(setupDgaFooterScroll, 100);
     }
 
+    if (pathname === '/collection') {
+        if (typeof window.initCollection === 'function') {
+            await window.initCollection();
+        }
+        setTimeout(setupDgaFooterScroll, 100);
+    }
+
     if (pathname === '/admin' || pathname.startsWith('/admin/')) {
         if (typeof window.initAdmin === 'function') {
             window.initAdmin();
