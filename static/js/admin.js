@@ -2642,6 +2642,7 @@ function renderAdminPidRows() {
     if (!summary || !table) return;
 
     const infoMode = adminCardsView === 'info';
+    reconcileAdminPidSelection();
     const filtered = adminPidFilteredEditions();
     updateAdminPidSummaryText();
 
@@ -2678,15 +2679,7 @@ function renderAdminPidRows() {
     // Select-all/refresh state only exists in Pricing mode's markup — Info
     // mode has no checkboxes at all, so there's nothing for these to sync.
     if (!infoMode) {
-        const filteredIds = filtered.map(e => e.edition_id);
-        const selectedInFiltered = filteredIds.filter(id => adminPidSelected.has(id));
-        const selectAllBox = document.getElementById('admin-pid-select-all');
-
-        if (selectAllBox) {
-            selectAllBox.checked = filteredIds.length > 0 && selectedInFiltered.length === filteredIds.length;
-            selectAllBox.indeterminate = selectedInFiltered.length > 0 && !selectAllBox.checked;
-        }
-
+        syncAdminPidSelectAllBox();
         updateAdminPidRefreshButton();
         updateAdminPidCurioSelectAllState();
     }
@@ -3152,6 +3145,39 @@ function adminPidDaysSinceLabel(days, verbose) {
     return verbose ? `${days} day(s) ago` : `${days}d`;
 }
 
+// Drop any checked edition_ids that are no longer in adminPidData — a set
+// (re-)download (searchSelectedAdminSet) swaps the whole edition list out from
+// under the selection, and a stale id would otherwise ride along into the
+// refresh job via getAdminPidRefreshTargets() and inflate the "Refresh
+// Selected N" badge past what's actually refreshable. Rows merely hidden by a
+// filter are NOT pruned: a selection built up across more than one filter view
+// is deliberate. The whole set is dropped automatically once a refresh runs
+// (clearAdminPidSelection, called from refreshSelectedAdminPricing).
+function reconcileAdminPidSelection() {
+    if (adminPidSelected.size === 0) return;
+    const known = new Set(adminPidData.map(e => e.edition_id));
+    for (const id of adminPidSelected) {
+        if (!known.has(id)) adminPidSelected.delete(id);
+    }
+}
+
+// Sync the header select-all box to the row checkboxes currently on screen.
+// "On screen" = rendered rows only — filtered-out rows have no checkbox and
+// don't count toward all/none, matching toggleSelectAllAdminPricing's scope.
+// Shared by renderAdminPidRows() (rows just rebuilt from adminPidSelected) and
+// onAdminPidRowCheckToggle() so the two can't compute it differently.
+function syncAdminPidSelectAllBox() {
+    const selectAllBox = document.getElementById('admin-pid-select-all');
+    if (!selectAllBox) return;
+
+    const boxes = document.querySelectorAll('.admin-pid-row-check');
+    let checked = 0;
+    boxes.forEach(cb => { if (cb.checked) checked++; });
+
+    selectAllBox.checked = boxes.length > 0 && checked === boxes.length;
+    selectAllBox.indeterminate = checked > 0 && checked < boxes.length;
+}
+
 function onAdminPidRowCheckToggle(checkbox) {
     const editionId = checkbox.dataset.editionId;
 
@@ -3162,16 +3188,7 @@ function onAdminPidRowCheckToggle(checkbox) {
     }
 
     updateAdminPidRefreshButton();
-
-    const selectAllBox = document.getElementById('admin-pid-select-all');
-    if (selectAllBox) {
-        const allChecked = Array.from(document.querySelectorAll('.admin-pid-row-check'))
-            .every(cb => cb.checked);
-        const anyChecked = Array.from(document.querySelectorAll('.admin-pid-row-check'))
-            .some(cb => cb.checked);
-        selectAllBox.checked = allChecked;
-        selectAllBox.indeterminate = anyChecked && !allChecked;
-    }
+    syncAdminPidSelectAllBox();
 }
 
 function toggleSelectAllAdminPricing(headerCheckbox) {
@@ -3186,6 +3203,21 @@ function toggleSelectAllAdminPricing(headerCheckbox) {
     });
 
     headerCheckbox.indeterminate = false;
+    updateAdminPidRefreshButton();
+}
+
+// Wipes the row multiselect and reflects it in the UI (checkboxes, header
+// select-all, refresh button). Called after a refresh job finishes — see
+// refreshSelectedAdminPricing — so the next refresh starts from a clean slate
+// instead of silently re-running whatever was left checked, including cards
+// checked under a filter that's since been changed and so aren't on screen.
+// Leaves adminPidDetailSelected alone (that's the open detail panel, and the
+// refresh-button fallback target when nothing is checked).
+function clearAdminPidSelection() {
+    if (adminPidSelected.size === 0) return;
+    adminPidSelected.clear();
+    document.querySelectorAll('.admin-pid-row-check').forEach(cb => { cb.checked = false; });
+    syncAdminPidSelectAllBox();
     updateAdminPidRefreshButton();
 }
 
@@ -3228,6 +3260,17 @@ function updateAdminPidRefreshButton() {
     bothBtn.innerHTML = targets.length > 0
         ? `Refresh Selected <span class="admin-pid-refresh-count">${targets.length}</span>`
         : 'Refresh Selected';
+
+    // "Refresh Selected" acts on the whole checked set, not just the rows
+    // visible under the current filter — spell that out when some of the
+    // selection is off-screen so the count doesn't look wrong. (The set is
+    // wiped after each refresh run — see clearAdminPidSelection — so this only
+    // matters while a selection is being built up.)
+    const filteredIds = new Set(adminPidFilteredEditions().map(e => e.edition_id));
+    const hidden = Array.from(adminPidSelected).filter(id => !filteredIds.has(id)).length;
+    bothBtn.title = hidden > 0
+        ? `${adminPidSelected.size} selected — ${hidden} hidden by the current filter`
+        : '';
 }
 
 // The Link button (opens the active marketplace — TCGPlayer builds a per-card
@@ -3598,6 +3641,13 @@ async function refreshSelectedAdminPricing(target) {
     }
 
     adminPidRefreshing = false;
+
+    // The refresh has run — drop the selection so the next one starts from a
+    // clean slate rather than silently re-refreshing whatever's still checked
+    // (including cards checked under a since-changed filter). Only the row
+    // multiselect is cleared; a single-card refresh via the detail-panel
+    // fallback had nothing checked to begin with.
+    clearAdminPidSelection();
 
     if (progress) {
         progress.textContent = `Done refreshing ${editionIds.length} edition(s)`
