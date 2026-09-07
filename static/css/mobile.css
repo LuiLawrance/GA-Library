@@ -1,0 +1,501 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   mobile.css — phone / small-tablet layout
+
+   Loaded LAST in index.html so every rule here wins the cascade over the
+   feature stylesheets at equal specificity. The desktop build is untouched:
+   nothing here applies above 900px, and the only non-media rules elsewhere
+   are the two inert base rules in main.css (.nav-toggle / .navbar-menu).
+
+   The app keeps its "shell" model on mobile too — html/body never scroll,
+   each route owns an inner scroll container. This file only reflows the
+   chrome and the wide fixed-size pieces so nothing clips off-screen.
+
+   Breakpoints:
+     900px — tablet: header rows begin to wrap, grids loosen.
+     768px — phone: hamburger nav, bottom-sheet drawer, single/2-up grids.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ╔══════════════════════════════════════╗
+   ║  TABLET  (≤ 900px)                    ║
+   ╚══════════════════════════════════════╝ */
+@media (max-width: 900px) {
+    /* The 2K-monitor down-scale from main.css also fires here — cancel it so
+       phones render at their true CSS pixel size. */
+    html {
+        zoom: 1;
+    }
+
+    /* Header rows: stop forcing title and actions onto one line. */
+    .page-header,
+    .list-header,
+    .detail-header,
+    .cards-header,
+    .inv-detail-title-row,
+    .dga-detail-title-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .inv-detail-header-right,
+    .dga-detail-header-right {
+        align-items: stretch;
+    }
+
+    /* Prices: drop the 2-column named-area grid to a stacked, scrolling column. */
+    .prices-content {
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        gap: 14px;
+        grid-template-rows: none;
+    }
+
+    .prices-panel {
+        min-height: 300px;
+    }
+
+    .prices-graph-panel {
+        min-height: 260px;
+    }
+
+    /* Kill the hover-to-expand-search choreography — no hover on touch, and
+       it fights the plain scrolling column above. */
+    .prices-content:has(.prices-search-panel:hover),
+    .prices-content:has(.prices-search-panel:focus-within),
+    .prices-page:has(#watchlist-add-modal:not(.hidden)) .prices-content {
+        grid-template-rows: none;
+    }
+
+    .prices-content:has(.prices-search-panel:hover) .prices-graph-panel,
+    .prices-content:has(.prices-search-panel:focus-within) .prices-graph-panel,
+    .prices-page:has(#watchlist-add-modal:not(.hidden)) .prices-content .prices-graph-panel {
+        pointer-events: auto;
+        opacity: 1;
+    }
+
+    /* Profile: the page's own 880px block already stacks the columns; just
+       make the tile menus single-column here too. */
+    .profile-tile-grid,
+    .admin-user-tile-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ╔══════════════════════════════════════╗
+   ║  PHONE  (≤ 768px)                     ║
+   ╚══════════════════════════════════════╝ */
+@media (max-width: 768px) {
+
+    /* ── Global padding trim ──
+       32px side gutters everywhere → 14px. */
+    .topbar,
+    .footer {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .topbar {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .page-header,
+    .list-header,
+    .detail-header,
+    .cards-header {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+    }
+
+    /* ── Top bar ── */
+    .topbar-brand {
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+    }
+
+    .btn-login {
+        padding: 7px 14px;
+        font-size: 0.8rem;
+    }
+
+    /* ══ Hamburger nav ══
+       main.css keeps .nav-toggle hidden and .navbar-menu as display:contents;
+       flip both here to build a slide-down panel. */
+    .navbar {
+        position: relative;
+        flex-wrap: wrap;
+        padding: 0;
+    }
+
+    .nav-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 46px;
+        padding: 0;
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-size: 1.2rem;
+        cursor: pointer;
+        transition: color 0.2s;
+    }
+
+    .nav-toggle:hover,
+    .nav-toggle.open {
+        color: var(--text);
+    }
+
+    .navbar-menu {
+        display: none;
+    }
+
+    .navbar-menu.open {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        box-shadow: var(--shadow-menu);
+        z-index: 400;
+    }
+
+    .navbar-menu.open .navbar-right {
+        display: contents;
+    }
+
+    .navbar-menu.open a {
+        padding: 15px 16px;
+        border-bottom: 1px solid var(--border);
+        border-left: 3px solid transparent;
+        border-bottom-color: var(--border);
+    }
+
+    .navbar-menu.open a:last-child {
+        border-bottom: none;
+    }
+
+    /* Active link: accent moves from the (now-hidden) bottom border to the
+       left edge. */
+    .navbar-menu.open a.active {
+        border-bottom-color: var(--border);
+        border-left-color: var(--accent);
+        color: var(--text);
+    }
+
+    /* ── Headers ── */
+    .detail-header {
+        padding: 12px 14px;
+    }
+
+    .inv-detail-header-right,
+    .dga-detail-header-right {
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .inv-detail-counts-row,
+    .dga-detail-counts-row {
+        justify-content: flex-start;
+    }
+
+    /* List-view "+ New Bin / + New Deck" — full-width tap target. */
+    .inv-bins-create-btn,
+    .dga-create-btn {
+        width: 100%;
+        text-align: center;
+        padding: 12px 16px;
+    }
+
+    /* ── Search / filter rows ── */
+    .search-wrap,
+    .inv-add-search-wrap {
+        flex-wrap: wrap;
+    }
+
+    .search-wrap input,
+    .search-wrap .autocomplete-wrap,
+    .inv-add-search-wrap .autocomplete-wrap {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .btn-search {
+        flex: 1 1 100%;
+    }
+
+    .cards-header-left,
+    .set-dropdown-wrap,
+    .cards-filter-wrap {
+        width: 100%;
+    }
+
+    .set-dropdown-btn,
+    .cards-filter-btn {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .inv-detail-controls {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+
+    .inv-detail-search,
+    .inv-detail-controls input {
+        width: 100%;
+        flex: 1 1 100%;
+        order: -1;
+    }
+
+    .inv-filter-dropdown-wrap {
+        flex: 1;
+    }
+
+    .inv-filter-dropdown-btn {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    /* Popover menus: keep them anchored to their trigger (position stays
+       absolute — the shared .menu default) but cap the width so a wide one
+       can't push the page sideways, and cap the height so a long one stays
+       on screen. NOTE: do not switch these to position:fixed — .menu sets
+       top:calc(100% + 6px), which under fixed resolves against the viewport
+       and drops the menu a full screen-height below where it belongs. */
+    .menu,
+    .set-dropdown-menu,
+    .cards-filter-menu,
+    .inv-filter-menu,
+    .default-bin-menu,
+    .topbar-user-dropdown {
+        max-width: calc(100vw - 20px);
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+
+    /* The Sets menu anchors left:0 and can be wide — clamp it to the screen. */
+    .set-dropdown-menu {
+        min-width: 0;
+    }
+
+    #set-dropdown-options {
+        grid-template-columns: 1fr;
+    }
+
+    /* ── Card / tile grids ──
+       Only trim the outer padding. The card-art grids (Cards search results,
+       Inventory-bin sections, Deck-detail sections) keep their native fixed
+       255px tracks — those tiles pair with fixed-size siblings (the dashed
+       "+ Add Card" tile at height:355px, the hover overlays) that are all
+       cut for a 255px column, so widening the track desyncs their heights.
+       255px still fits a 375px screen with a small centred margin. */
+    .card-grid,
+    .inv-bins-grid,
+    .dga-deck-grid,
+    .prices-watchlist-grid {
+        padding: 14px;
+        gap: 12px;
+    }
+
+    /* Deck-detail and bin-detail card areas must land on the SAME side
+       padding. Decks: the 32px lives on .dga-card-grid (wrap has none).
+       Inventory: the 32px lives on .inv-card-grid-WRAP, and .inv-card-grid
+       has none — so zero the wrap's sides here and put the identical
+       16px/14px on both inner grids. */
+    .dga-card-grid,
+    .inv-card-grid {
+        padding: 16px 14px;
+    }
+
+    .inv-card-grid-wrap {
+        padding-left: 0;
+        padding-right: 0;
+    }
+
+    /* Cards search results have no fixed-size sibling tiles, so they can go
+       fluid 2-up for a denser browse. (Inventory/Deck detail grids use their
+       own .*-section-grid class and are left at native 255px — see above.) */
+    #card-results.card-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        justify-content: stretch;
+    }
+
+    #card-results.card-grid--featured {
+        grid-template-columns: 1fr;
+    }
+
+    .card-grid--featured {
+        grid-template-columns: 1fr;
+    }
+
+    /* ── Card tiles: no hover on touch ──
+       On desktop, hovering a card tile zooms it and reveals a dim layer +
+       quick controls (add-to-bin, qty +/-). None of that translates to
+       touch, and forcing the controls always-on buried the card art. So on
+       mobile the tiles just show clean art — a tap opens the card's drawer
+       (Cards / Decks) or its edit modal (Inventory bin), which is where the
+       real controls live. Only the hover-zoom transform needs neutralising
+       so it can't get stuck after a tap. */
+    .tile-hoverable .tile-zoom,
+    .tile-hoverable:hover .tile-zoom {
+        transform: none !important;
+    }
+
+    /* ── Bottom-sheet card drawer ──
+       The 820px right-hand slab becomes a sheet that rises from the bottom.
+       position:fixed so it covers the topbar/navbar too. */
+    .card-drawer {
+        position: fixed;
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: 88vh;
+        transform: translateY(100%);
+        border-radius: var(--radius) var(--radius) 0 0;
+        border: 1px solid var(--border);
+        border-bottom: none;
+        z-index: 600;
+    }
+
+    .card-drawer.open {
+        transform: translateY(0);
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Visual scrim behind the sheet (close is via the ✕ in the tab bar). */
+    body:has(.card-drawer.open)::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        z-index: 599;
+    }
+
+    /* The floating icon rail docks as a bar across the top of the sheet. */
+    .drawer-sidebar {
+        position: fixed;
+        top: 12vh;
+        right: 0;
+        left: 0;
+        flex-direction: row;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 8px;
+        border: none;
+        border-bottom: 1px solid var(--border);
+        border-radius: var(--radius) var(--radius) 0 0;
+        background: var(--bg-card);
+        box-shadow: none;
+        z-index: 601;
+    }
+
+    .drawer-sidebar-divider {
+        width: 1px;
+        height: 20px;
+        margin: 0 2px;
+    }
+
+    /* Clear the docked bar. */
+    .drawer-inner {
+        padding: 62px 16px 24px;
+    }
+
+    .drawer-top {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .drawer-stats {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    /* ── Modals ── */
+    .modal,
+    .inv-modal {
+        width: calc(100vw - 24px);
+        min-width: 0;
+        max-width: none;
+        max-height: 90vh;
+        padding: 18px;
+    }
+
+    .inv-modal-wide,
+    .inv-modal-wide.inv-modal-foil-step {
+        width: calc(100vw - 24px);
+        max-width: none;
+    }
+
+    /* Side-by-side image + form → stacked. */
+    .inv-foil-step-body,
+    .inv-add-card-preview {
+        flex-direction: column;
+        height: auto;
+        gap: 14px;
+    }
+
+    .inv-foil-step-body .inv-modal-img-large,
+    .inv-modal-img-large,
+    .inv-modal-img {
+        width: 55%;
+        max-width: 180px;
+        height: auto;
+        margin: 0 auto;
+    }
+
+    .inv-add-results,
+    #add-card-results,
+    #inv-banner-results,
+    #watchlist-card-results {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        gap: 8px;
+    }
+
+    .inv-import-textarea {
+        height: 180px;
+    }
+
+    .inv-modal-actions {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .inv-modal-actions > * {
+        flex: 1 1 auto;
+    }
+
+    /* ── Profile ── */
+    .profile-body {
+        padding: 14px;
+    }
+
+    /* ── Home / Login ── */
+    .hero {
+        padding: 48px 20px;
+    }
+
+    .hero-title {
+        font-size: 2rem;
+    }
+
+    .login-wrap {
+        padding: 32px 16px;
+    }
+
+    .login-card {
+        padding: 26px;
+    }
+}

@@ -22,6 +22,8 @@
     <link rel="stylesheet" href="/static/css/decks_ga.css">
     <link rel="stylesheet" href="/static/css/admin.css">
     <link rel="stylesheet" href="/static/css/profile.css">
+    <!-- Loaded last: mobile.css overrides everything above under its breakpoint. -->
+    <link rel="stylesheet" href="/static/css/mobile.css">
 </head>
 <body>
 
@@ -45,15 +47,19 @@
 
 <!-- Navbar -->
 <nav class="navbar">
-    <a href="/" data-link>Home</a>
-    <a href="/cards" data-link>Cards</a>
-    <a href="/collection" data-link>Collection</a>
-    <a href="/decks" data-link>Decks</a>
-    <a href="/prices" data-link>Prices</a>
-    <div class="navbar-right">
-        <a href="/admin" id="nav-admin" class="nav-admin hidden" data-link>Admin</a>
-        <a href="/decks_ga" id="nav-decks-ga" class="nav-decks-ga" data-link>My Decks</a>
-        <a href="/inventory" id="nav-inventory" class="nav-inventory" data-link>Inventory</a>
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Menu"
+            aria-expanded="false" onclick="toggleNav(event)">&#9776;</button>
+    <div class="navbar-menu" id="navbar-menu">
+        <a href="/" data-link>Home</a>
+        <a href="/cards" data-link>Cards</a>
+        <a href="/collection" data-link>Collection</a>
+        <a href="/decks" data-link>Decks</a>
+        <a href="/prices" data-link>Prices</a>
+        <div class="navbar-right">
+            <a href="/admin" id="nav-admin" class="nav-admin hidden" data-link>Admin</a>
+            <a href="/decks_ga" id="nav-decks-ga" class="nav-decks-ga" data-link>My Decks</a>
+            <a href="/inventory" id="nav-inventory" class="nav-inventory" data-link>Inventory</a>
+        </div>
     </div>
 </nav>
 

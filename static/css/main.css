@@ -157,6 +157,19 @@ body {
     background: var(--bg);
 }
 
+/* ── Mobile nav plumbing ──
+   On desktop the hamburger button is hidden and .navbar-menu dissolves
+   (display: contents) so its children — the page links and .navbar-right —
+   lay out as direct flex items of .navbar exactly as before. mobile.css
+   flips both under its breakpoint to build the slide-down panel. */
+.nav-toggle {
+    display: none;
+}
+
+.navbar-menu {
+    display: contents;
+}
+
 .navbar a {
     font-family: var(--font-mono);
     font-size: 0.78rem;

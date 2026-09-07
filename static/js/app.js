@@ -55,6 +55,7 @@ async function navigate(path, pushState = true) {
     const content = document.getElementById('content');
 
     closeUserMenu();
+    closeNav();
 
     let pathname;
     await fadeSwap(content, async () => {
@@ -469,6 +470,85 @@ async function handleLogout() {
     setLoggedOut();
     navigate('/');
 }
+
+// ── Mobile nav (hamburger) ──
+// Toggles the slide-down link panel built by mobile.css. On desktop the
+// button is display:none and .navbar-menu is display:contents, so `.open`
+// has no visual effect — these run harmlessly at any width.
+//
+// The panel extends/retracts with animateHeightWipe (animation.js) — the
+// same 0↔natural-height wipe admin's collapsible panels use. On the way out
+// the wipe holds the collapsed frame until `.open` is removed, so the menu
+// can't flash to full height before it disappears.
+// A monotonic token guards the async wipe: any open/close bumps it, and a
+// wipe's deferred completion only lands if it's still the latest operation —
+// so a rapid open→close→open can't leave a half-finished state behind.
+// menu.dataset.navState ('opening' | 'open' | 'closing' | 'closed') lets a
+// fresh openNav tell "already open" from "currently retracting".
+let _navToken = 0;
+
+function navIsMobile() {
+    const btn = document.getElementById('nav-toggle');
+    return !!btn && getComputedStyle(btn).display !== 'none';
+}
+
+function toggleNav(e) {
+    e?.stopPropagation();
+    const menu = document.getElementById('navbar-menu');
+    if (!menu) return;
+    const closing = menu.dataset.navState === 'closing';
+    if (menu.classList.contains('open') && !closing) closeNav();
+    else openNav();
+}
+
+function openNav() {
+    const menu = document.getElementById('navbar-menu');
+    const btn = document.getElementById('nav-toggle');
+    if (!menu) return;
+    if (menu.classList.contains('open') && menu.dataset.navState !== 'closing') return;
+
+    const token = ++_navToken;
+    menu.dataset.navState = 'opening';
+    if (typeof resetHeightWipe === 'function') resetHeightWipe(menu);
+    menu.classList.add('open');
+    btn?.classList.add('open');
+    btn?.setAttribute('aria-expanded', 'true');
+
+    const settle = () => { if (token === _navToken) menu.dataset.navState = 'open'; };
+    if (navIsMobile() && typeof animateHeightWipe === 'function') {
+        animateHeightWipe(menu, true, {duration: 220}).then(settle);
+    } else {
+        settle();
+    }
+}
+
+function closeNav() {
+    const menu = document.getElementById('navbar-menu');
+    const btn = document.getElementById('nav-toggle');
+    btn?.classList.remove('open');
+    btn?.setAttribute('aria-expanded', 'false');
+    if (!menu || !menu.classList.contains('open') || menu.dataset.navState === 'closing') return;
+
+    const token = ++_navToken;
+    menu.dataset.navState = 'closing';
+
+    const finish = () => {
+        if (token !== _navToken) return;   // a later openNav took over
+        menu.classList.remove('open');
+        menu.dataset.navState = 'closed';
+        if (typeof resetHeightWipe === 'function') resetHeightWipe(menu);
+    };
+    if (navIsMobile() && typeof animateHeightWipe === 'function') {
+        animateHeightWipe(menu, false, {duration: 200}).then(finish);
+    } else {
+        finish();
+    }
+}
+
+// Close the nav panel on any click outside the navbar.
+document.addEventListener('click', e => {
+    if (!e.target.closest('.navbar')) closeNav();
+});
 
 // ── Top-bar user dropdown ──
 function toggleUserMenu(e) {
