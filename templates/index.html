@@ -61,6 +61,13 @@
             <a href="/inventory" id="nav-inventory" class="nav-inventory" data-link>Inventory</a>
         </div>
     </div>
+    <!-- Mobile only: collapses the current page's control strip (search /
+         filters / bin & deck name / counts). Hidden on desktop and on pages
+         with no such strip — see refreshPageControls() in app.js. -->
+    <button class="page-ctrl-toggle" id="page-ctrl-toggle" type="button" hidden
+            aria-label="Page controls" aria-expanded="false" onclick="togglePageControls(event)">
+        <span class="dropdown-arrow">&#8249;</span>
+    </button>
 </nav>
 
 <!-- Content area -->

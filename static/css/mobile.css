@@ -191,6 +191,41 @@
         color: var(--text);
     }
 
+    /* ══ Page-control caret ══
+       Right-aligned on the navbar row, opposite the hamburger. app.js
+       unsets [hidden] only on routes that carry a control strip. */
+    .page-ctrl-toggle:not([hidden]) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: color 0.2s;
+    }
+
+    .page-ctrl-toggle:hover,
+    .page-ctrl-toggle.open {
+        color: var(--text);
+    }
+
+    /* .dropdown-arrow (components.css) points down at rest, flips up on .open. */
+
+    /* Control strip (bin/deck name, counts, search box, filter & sort menus)
+       is collapsed by default on mobile — the caret toggles `.page-ctrl-open`
+       on <body>. animateHeightWipe drives the open/close transition; this is
+       just the resting state for freshly-swapped pages and detail views. */
+    body:not(.page-ctrl-open) .cards-header,
+    body:not(.page-ctrl-open) .list-header,
+    body:not(.page-ctrl-open) .detail-header {
+        display: none;
+    }
+
     /* ── Headers ── */
     .detail-header {
         padding: 12px 14px;
@@ -205,6 +240,24 @@
     .inv-detail-counts-row,
     .dga-detail-counts-row {
         justify-content: flex-start;
+    }
+
+    /* Unlocked/Locked edition toggle in the deck-detail headers. On desktop
+       it's a compact inline pill in an icon-button row; on mobile stretch it
+       to a full-width segmented control (its own row when it sits in the
+       wrapping .inv-detail-controls). Without this the pill track already
+       spans the header — align-items:stretch above — but the two buttons
+       stay bunched at the left, leaving a large dead zone on the right.
+       app.js re-runs positionPillIndicator when the strip expands / on
+       resize so the sliding highlight matches the new button widths. */
+    .dga-edition-lock-toggle {
+        display: flex;
+        width: 100%;
+        flex: 1 1 100%;
+    }
+
+    .dga-edition-lock-toggle .pill-toggle-btn {
+        flex: 1;
     }
 
     /* List-view "+ New Bin / + New Deck" — full-width tap target. */
@@ -292,12 +345,8 @@
     }
 
     /* ── Card / tile grids ──
-       Only trim the outer padding. The card-art grids (Cards search results,
-       Inventory-bin sections, Deck-detail sections) keep their native fixed
-       255px tracks — those tiles pair with fixed-size siblings (the dashed
-       "+ Add Card" tile at height:355px, the hover overlays) that are all
-       cut for a 255px column, so widening the track desyncs their heights.
-       255px still fits a 375px screen with a small centred margin. */
+       Trim the outer padding on the list grids (bin list, deck list,
+       watchlist) and the card-search grid. */
     .card-grid,
     .inv-bins-grid,
     .dga-deck-grid,
@@ -307,10 +356,10 @@
     }
 
     /* Deck-detail and bin-detail card areas must land on the SAME side
-       padding. Decks: the 32px lives on .dga-card-grid (wrap has none).
-       Inventory: the 32px lives on .inv-card-grid-WRAP, and .inv-card-grid
-       has none — so zero the wrap's sides here and put the identical
-       16px/14px on both inner grids. */
+       padding as the card-search grid (14px). Decks: the 32px lives on
+       .dga-card-grid (wrap has none). Inventory: the 32px lives on
+       .inv-card-grid-WRAP, and .inv-card-grid has none — so zero the wrap's
+       sides here and put the identical 16px/14px on both inner grids. */
     .dga-card-grid,
     .inv-card-grid {
         padding: 16px 14px;
@@ -321,20 +370,39 @@
         padding-right: 0;
     }
 
-    /* Cards search results have no fixed-size sibling tiles, so they can go
-       fluid 2-up for a denser browse. (Inventory/Deck detail grids use their
-       own .*-section-grid class and are left at native 255px — see above.) */
-    #card-results.card-grid {
+    /* Every card-art grid — search results, bin-detail sections, deck-detail
+       sections — uses the identical fluid 2-up tracks, gap and stretch as
+       the card search. The dashed "+ Add Card" tile is switched off its
+       fixed 355px height to the 5:7 card aspect so it keeps matching the
+       now-variable tile height. Card-tile hover overlays are already
+       suppressed on touch (see below), so a narrower tile doesn't crowd
+       them. */
+    #card-results.card-grid,
+    .inv-section-grid,
+    .dga-section-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         justify-content: stretch;
+        gap: 12px;
     }
 
-    #card-results.card-grid--featured {
-        grid-template-columns: 1fr;
+    .inv-card-add-tile {
+        height: auto;
+        aspect-ratio: 5 / 7;
     }
 
+    /* Featured-set banners: at least two per row on the narrowest phone,
+       more as the viewport widens. */
+    #card-results.card-grid--featured,
     .card-grid--featured {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+
+    .featured-set-name {
+        font-size: 0.92rem;
+    }
+
+    .featured-set-prefixes {
+        font-size: 0.68rem;
     }
 
     /* ── Card tiles: no hover on touch ──

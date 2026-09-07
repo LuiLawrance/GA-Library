@@ -224,6 +224,9 @@ async function navigate(path, pushState = true) {
     }
 
     _renderedLocation = window.location.pathname + window.location.search + window.location.hash;
+
+    // Show/hide the navbar caret for this route (mobile only).
+    refreshPageControls();
 }
 
 // ── Location routing ──
@@ -548,6 +551,97 @@ function closeNav() {
 // Close the nav panel on any click outside the navbar.
 document.addEventListener('click', e => {
     if (!e.target.closest('.navbar')) closeNav();
+});
+
+// ── Mobile page-control strip (collapsible) ──
+// On phones the routed page's header row — bin/deck name, counts, search box,
+// filter & sort menus — eats a lot of vertical space. The caret in the navbar
+// collapses it; CSS (mobile.css) hides `body:not(.page-ctrl-open) .cards-header
+// / .list-header / .detail-header`, so newly-swapped pages and detail views
+// inherit the current state automatically. The preference sticks per browser.
+const PAGE_CTRL_SEL = '.cards-header, .list-header, .detail-header';
+
+let _pageCtrlOpen = false;
+try { _pageCtrlOpen = localStorage.getItem('pageCtrlOpen') === '1'; } catch { /* private mode */ }
+
+function pageControlEls() {
+    const content = document.getElementById('content');
+    return content ? [...content.querySelectorAll(PAGE_CTRL_SEL)] : [];
+}
+
+// Only those actually on screen right now (a page can carry both a hidden
+// list-header and a hidden detail-header in its fragment).
+function visiblePageControlEls() {
+    return pageControlEls().filter(el =>
+        !el.closest('.hidden') && el.getClientRects().length);
+}
+
+// Sync the caret to the current route: shown only on mobile and only when the
+// page actually has a control strip. The open/closed state is global (body
+// class), so nothing per-element to do here.
+function refreshPageControls() {
+    const btn = document.getElementById('page-ctrl-toggle');
+    if (!btn) return;
+    btn.hidden = !(navIsMobile() && pageControlEls().length > 0);
+    btn.classList.toggle('open', _pageCtrlOpen);
+    btn.setAttribute('aria-expanded', _pageCtrlOpen ? 'true' : 'false');
+}
+
+function togglePageControls(e) {
+    e?.stopPropagation();
+    closeNav();
+
+    const btn = document.getElementById('page-ctrl-toggle');
+    const opening = !_pageCtrlOpen;
+    _pageCtrlOpen = opening;
+    try { localStorage.setItem('pageCtrlOpen', opening ? '1' : '0'); } catch { /* private mode */ }
+    btn?.classList.toggle('open', opening);
+    btn?.setAttribute('aria-expanded', opening ? 'true' : 'false');
+
+    const canAnimate = navIsMobile() && typeof animateHeightWipe === 'function';
+
+    if (opening) {
+        // Reveal first (CSS un-hides the strip), then wipe it down from 0.
+        document.body.classList.add('page-ctrl-open');
+        if (canAnimate) {
+            Promise.all(visiblePageControlEls().map(el =>
+                animateHeightWipe(el, true, {duration: 220, collapsePadding: true})
+            )).then(repositionStripPills);
+        } else {
+            repositionStripPills();
+        }
+    } else if (canAnimate) {
+        // Wipe every visible strip to 0, THEN drop the body class (→ display:
+        // none) and release the held-collapsed styles — doing it per-element
+        // would flash the others back to full height.
+        const els = visiblePageControlEls();
+        if (!els.length) { document.body.classList.remove('page-ctrl-open'); return; }
+        Promise.all(els.map(el =>
+            animateHeightWipe(el, false, {duration: 200, collapsePadding: true})
+        )).then(() => {
+            document.body.classList.remove('page-ctrl-open');
+            if (typeof resetHeightWipe === 'function') els.forEach(resetHeightWipe);
+        });
+    } else {
+        document.body.classList.remove('page-ctrl-open');
+    }
+}
+
+// The .pill-toggle sliding highlight is positioned from measured button
+// widths (positionPillIndicator, animation.js). A pill that was measured
+// while its control strip was collapsed (offsetWidth 0), or before mobile.css
+// stretched its buttons to full width, ends up with a stale highlight — so
+// re-measure every on-screen pill once the strip is revealed and on resize.
+function repositionStripPills() {
+    if (typeof positionPillIndicator !== 'function') return;
+    document.querySelectorAll('#content .pill-toggle').forEach(pill => {
+        if (pill.getClientRects().length) positionPillIndicator(pill);
+    });
+}
+
+window.addEventListener('resize', () => {
+    refreshPageControls();
+    repositionStripPills();
 });
 
 // ── Top-bar user dropdown ──
