@@ -58,6 +58,7 @@ async function navigate(path, pushState = true) {
     closeNav();
 
     let pathname;
+    let mobileBlocked = false;
     await fadeSwap(content, async () => {
         // Reset drawer tab states when navigating away
         if (typeof drawerActiveTab !== 'undefined') drawerActiveTab = 'info';
@@ -88,6 +89,18 @@ async function navigate(path, pushState = true) {
             const active = href === '/' ? pathname === '/' : (pathname === href || pathname.startsWith(href + '/'));
             a.classList.toggle('active', active);
         });
+
+        // The Prices and Admin pages are dense desktop tools that don't work
+        // on a phone yet — show a stub instead of loading (and half-running)
+        // their fragments. Their nav links are also hidden at this width
+        // (mobile.css), so this only catches direct links / bookmarks.
+        mobileBlocked = navIsMobile() &&
+            (pathname === '/prices' || pathname === '/admin' || pathname.startsWith('/admin/'));
+
+        if (mobileBlocked) {
+            content.innerHTML = mobileUnavailableHTML(pathname);
+            return;
+        }
 
         // "/@<omnidex_id>" is how the public profile is routed internally
         // (the user-facing URL is the hash "/#<omnidex_id>" — see
@@ -191,13 +204,13 @@ async function navigate(path, pushState = true) {
         setTimeout(setupDgaFooterScroll, 100);
     }
 
-    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    if (!mobileBlocked && (pathname === '/admin' || pathname.startsWith('/admin/'))) {
         if (typeof window.initAdmin === 'function') {
             window.initAdmin();
         }
     }
 
-    if (pathname === '/prices') {
+    if (!mobileBlocked && pathname === '/prices') {
         if (typeof window.initPrices === 'function') {
             await window.initPrices();
         }
@@ -552,6 +565,19 @@ function closeNav() {
 document.addEventListener('click', e => {
     if (!e.target.closest('.navbar')) closeNav();
 });
+
+// Stub shown in place of the Prices / Admin fragments on a phone — see the
+// mobileBlocked branch in navigate().
+function mobileUnavailableHTML(pathname) {
+    const name = pathname.startsWith('/admin') ? 'The Admin console' : 'The Prices page';
+    return `
+        <div class="mobile-unavailable">
+            <div class="mobile-unavailable-icon">🖥️</div>
+            <h2 class="mobile-unavailable-title">${name} isn't available on mobile yet</h2>
+            <p class="mobile-unavailable-text">Open GA Library on a larger screen to use this page.</p>
+            <a href="/" data-link class="btn btn--ghost mobile-unavailable-home">Back to Home</a>
+        </div>`;
+}
 
 // ── Mobile page-control strip (collapsible) ──
 // On phones the routed page's header row — bin/deck name, counts, search box,

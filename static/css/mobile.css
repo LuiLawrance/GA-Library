@@ -74,12 +74,6 @@
         opacity: 1;
     }
 
-    /* Profile: the page's own 880px block already stacks the columns; just
-       make the tile menus single-column here too. */
-    .profile-tile-grid,
-    .admin-user-tile-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 /* ╔══════════════════════════════════════╗
@@ -174,8 +168,15 @@
         z-index: 400;
     }
 
+    /* The right-hand nav group (Admin / My Decks / Inventory) becomes its own
+       stacked block. A single brighter rule between it and the left-hand
+       links (Home … Prices) marks the divide — no gap. */
     .navbar-menu.open .navbar-right {
-        display: contents;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        margin-left: 0;
+        border-top: 1px solid var(--border-focus);
     }
 
     .navbar-menu.open a {
@@ -185,6 +186,9 @@
         border-bottom-color: var(--border);
     }
 
+    /* The last left link sits directly on the group rule (no doubled line),
+       and the final item has no trailing hairline. */
+    .navbar-menu.open > a:last-of-type,
     .navbar-menu.open a:last-child {
         border-bottom: none;
     }
@@ -195,6 +199,23 @@
         border-bottom-color: var(--border);
         border-left-color: var(--accent);
         color: var(--text);
+    }
+
+    /* Prices and Admin don't work on a phone yet — keep the links visible but
+       mark them out. They still route (navigate() shows a "not available"
+       stub via mobileBlocked), just dimmed with a trailing tag. */
+    .navbar-menu.open a[href="/prices"],
+    .navbar-menu.open a[href="/admin"] {
+        color: var(--text-muted);
+        opacity: 0.6;
+    }
+
+    .navbar-menu.open a[href="/prices"]::after,
+    .navbar-menu.open a[href="/admin"]::after {
+        content: " · desktop only";
+        font-size: 0.8em;
+        letter-spacing: 0.02em;
+        opacity: 0.8;
     }
 
     /* ══ Page-control caret ══
@@ -361,6 +382,29 @@
         gap: 12px;
     }
 
+    /* Bin / deck LIST tiles (Inventory, My Decks, public Decks & Collection,
+       Profile's deck/bin menus) drop from their native ~280px tracks to a
+       fluid 2-up so a phone shows at least two per row. 140px keeps two
+       columns even in the narrow Profile side panels. Tighter tile padding
+       to keep the name + description legible in the smaller box. */
+    .inv-bins-grid,
+    .dga-deck-grid,
+    .admin-user-tile-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 10px;
+    }
+
+    .inv-bin-tile,
+    .dga-deck-tile {
+        padding: 14px 15px;
+    }
+
+    /* Give the Profile side panels more room so their tile grid clears the
+       140px x 2 threshold. */
+    .profile-panel {
+        padding: 12px 12px;
+    }
+
     /* Deck-detail and bin-detail card areas must land on the SAME side
        padding as the card-search grid (14px). Decks: the 32px lives on
        .dga-card-grid (wrap has none). Inventory: the 32px lives on
@@ -504,11 +548,6 @@
         grid-template-columns: 1fr 1fr;
     }
 
-    /* Centre the printings grid rather than left-anchoring it. */
-    .drawer-editions {
-        justify-content: center;
-    }
-
     /* ── Modals ── */
     .modal,
     .inv-modal {
@@ -585,4 +624,43 @@
     .login-card {
         padding: 26px;
     }
+}
+
+/* ── Desktop-only page stub ──
+   Rendered into #content by navigate()'s mobileBlocked branch for /prices and
+   /admin. Outside the media query since it's only ever inserted on a phone
+   anyway; harmless if a viewport-resize leaves it on screen. */
+.mobile-unavailable {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 12px;
+    padding: 48px 28px;
+}
+
+.mobile-unavailable-icon {
+    font-size: 2.4rem;
+}
+
+.mobile-unavailable-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.mobile-unavailable-text {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    max-width: 320px;
+    line-height: 1.5;
+}
+
+.mobile-unavailable-home {
+    margin-top: 8px;
+    padding: 10px 22px;
+    font-size: 0.85rem;
+    text-decoration: none;
 }

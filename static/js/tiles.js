@@ -8,6 +8,19 @@ function toFoilLabel(s) {
     return s ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '';
 }
 
+// ── Compact price formatter for tile badges — space is tight, so once a price
+// reaches the thousands we switch to a "k" suffix (1000 → 1k, 1500 → 1.5k,
+// 12345 → 12.3k). Below 1000 the usual 2-decimal dollars-and-cents is kept.
+// Returns the number only; callers prepend the "$". ──
+function formatBadgePrice(value) {
+    const n = Number(value);
+    if (!isFinite(n)) return '0.00';
+    if (Math.abs(n) < 1000) return n.toFixed(2);
+    // One decimal place, but drop a trailing ".0" so 1000 shows as "1k".
+    const compact = (num, suffix) => `${(n / num).toFixed(1).replace(/\.0$/, '')}${suffix}`;
+    return Math.abs(n) < 1_000_000 ? compact(1000, 'k') : compact(1_000_000, 'M');
+}
+
 // ── Sale/listing price badge markup — shared by Cards, Inventory, and the
 // drawer's edition grid. Sale (green) always sits on top; the listing (red)
 // badge stacks under it, or takes its spot via .inv-listing-badge--solo
@@ -15,11 +28,11 @@ function toFoilLabel(s) {
 function priceBadgesHTML(lastPrice, lowestListing) {
     let html = '';
     if (lastPrice != null) {
-        html += `<span class="inv-price-badge">$${Number(lastPrice).toFixed(2)}</span>`;
+        html += `<span class="inv-price-badge">$${formatBadgePrice(lastPrice)}</span>`;
     }
     if (lowestListing != null) {
         const solo = lastPrice == null ? ' inv-listing-badge--solo' : '';
-        html += `<span class="inv-listing-badge${solo}">$${Number(lowestListing).toFixed(2)}</span>`;
+        html += `<span class="inv-listing-badge${solo}">$${formatBadgePrice(lowestListing)}</span>`;
     }
     return html;
 }

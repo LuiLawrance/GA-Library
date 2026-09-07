@@ -1147,7 +1147,41 @@ function _syncCardsDrawerUrl(cardId, editionId) {
 // Shared implementation behind openCardDrawer/openInvDrawer — see DRAWER_CONFIG above.
 // updateUrl is false only when restoring from a URL that already carries this
 // exact selection (see app.js's /cards restore) — no point replacing it with itself.
+// ── Click-outside-to-close ──
+// A click landing outside an open drawer (and outside its tab rail) closes it
+// — on desktop the page shows through beside the drawer, on mobile through the
+// scrim. The click that opens or switches a drawer runs openDrawer synchronously
+// during its own dispatch, which sets this guard so that same click, once it
+// bubbles to document, doesn't immediately close what it just opened.
+let _drawerOutsideCloseGuard = false;
+
+function _guardDrawerOpenClick() {
+    _drawerOutsideCloseGuard = true;
+    setTimeout(() => { _drawerOutsideCloseGuard = false; }, 0);
+}
+
+document.addEventListener('click', e => {
+    if (_drawerOutsideCloseGuard) return;
+
+    // Interacting with an overlay/menu/context-menu stacked over the page is
+    // not an "outside" click — leave the drawer as it is.
+    if (e.target.closest(
+        '.overlay, .inv-modal-overlay, .menu, .autocomplete-list, [class*="context-menu"], .setup-overlay, #app-confirm-modal'
+    )) return;
+
+    for (const id of ['card-drawer', 'inv-card-drawer']) {
+        const drawer = document.getElementById(id);
+        const cfg = DRAWER_CONFIG[id];
+        if (!drawer || !cfg.getIsOpen()) continue;
+        if (drawer.contains(e.target)) continue;
+        if (document.getElementById(cfg.sidebarId)?.contains(e.target)) continue;
+        closeDrawer(id);
+    }
+});
+
 async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = true) {
+    _guardDrawerOpenClick();
+
     const cfg = DRAWER_CONFIG[drawerId];
     const drawer = document.getElementById(drawerId);
     if (!drawer) return;
