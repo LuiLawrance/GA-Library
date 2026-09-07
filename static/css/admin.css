@@ -1725,17 +1725,16 @@
     gap: 6px;
 }
 
-/* Only rendered for editions with a Curio Foil variant (see e.curio). Same
-   size as .admin-pid-find-btn so the two read as a matched pair, but instead
+/* Only rendered for editions with a Curio Foil variant (see e.curio). Instead
    of sitting in-flow it's pinned outside the Product ID column — right edge
    flush with the column's own left edge (see the comment on
    .admin-pid-col-status) — so it never takes width away from the input. */
 .admin-pid-curio-toggle {
     position: absolute;
     right: 100%;
-    /* Same 6px gap .admin-pid-pid-wrap uses between the input and the find
-       button, mirrored here so the toggle reads as evenly spaced from the
-       column edge instead of sitting flush against it. */
+    /* Same 6px gap .admin-pid-pid-wrap uses for its own children, mirrored
+       here so the toggle reads as evenly spaced from the column edge instead
+       of sitting flush against it. */
     margin-right: 6px;
     top: 50%;
     transform: translateY(-50%);
@@ -1774,44 +1773,11 @@
     min-width: 0;
 }
 
-.admin-pid-find-btn {
-    flex-shrink: 0;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.75rem;
-    line-height: 1;
-    color: var(--text-muted);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
-}
-
-.admin-pid-find-btn:hover:not(:disabled) {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-.admin-pid-find-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-.admin-pid-find-btn.finding {
-    color: var(--accent);
-    font-family: var(--font-mono);
-}
-
 /* ── Non-TCGPlayer marketplace: collapsed Product ID column ──────────────
    Only TCGPlayer has scraper automation, so nothing stores product IDs for
    CoreTCG / Manual — the list's Product ID column shrinks to just its
    curio-foil ✨ toggles (row toggles + the header select-all), and the
-   input, auto-detect button and header label all hide.
+   input and header label both hide.
    Driven by .admin-pid-hide-pid on #admin-section-pricing (see
    updateAdminPidProductIdVisibility in admin.js) — which also eases the
    grid-template-columns change here via animateGridColumnsGroup (animation.js)
@@ -1828,7 +1794,6 @@
 }
 
 .admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-col-status .admin-pid-input,
-.admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-col-status .admin-pid-find-btn,
 .admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-row-header .admin-pid-col-status-label {
     display: none;
 }

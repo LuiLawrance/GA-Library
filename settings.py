@@ -24,9 +24,8 @@ SETTINGS_DEFAULTS = {
     # Marks this deployment as running on a local machine (True) vs a hosted
     # box such as Railway (False), which can't spawn the headless-Chromium
     # TCGPlayer scrapers. Independent of use_json — it gates the Cards page's
-    # live TCGPlayer controls (the per-row 🔍 auto product-ID finder and the
-    # Refresh Sales/Listings/Selected buttons — see adminPidProductIdFieldHtml
-    # / updateAdminPidRefreshButton in admin.js) in every storage mode. Turn
+    # live TCGPlayer controls (the Refresh Sales/Listings/Selected buttons —
+    # see updateAdminPidRefreshButton in admin.js) in every storage mode. Turn
     # it off on a hosted deployment so it never shows controls it can't run.
     "local_db": True,
 }

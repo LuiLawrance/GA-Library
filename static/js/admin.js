@@ -30,7 +30,6 @@ let adminPidRarityFilterOpen = false;
 // 'has_id' | 'no_id' | 'curio'. See adminPidIdFilterHtml/toggleAdminPidIdFilterOption.
 let adminPidIdFilter = null;
 let adminPidIdFilterOpen = false;
-let adminPidFindingIds = new Set();
 // Which column the Pricing table is sorted by, and its direction — 'name'
 // ascending (A-Z) is the default, matching the alphabetical order the
 // backend already returns adminPidData in (see api_admin_pricing_product_ids's
@@ -45,10 +44,10 @@ let adminDbModeOn = false;
 // Whether this instance is running on a local machine (System page's Local DB
 // toggle) — independent of adminDbModeOn / Use JSON. Hosted deployments like
 // Railway can't spawn the headless-Chromium TCGPlayer scrapers, so the live
-// TCGPlayer controls on the Pricing page (the per-row 🔍 auto product-ID
-// finder and Refresh Sales/Listings/Selected) are hidden and inert unless
-// this is on, in every storage mode. Mirrors settings.local_db, refreshed
-// from the same two endpoints as adminDbModeOn.
+// TCGPlayer controls on the Pricing page (the Refresh Sales/Listings/Selected
+// buttons) are hidden and inert unless this is on, in every storage mode.
+// Mirrors settings.local_db, refreshed from the same two endpoints as
+// adminDbModeOn.
 let adminLocalDbOn = false;
 // Edition IDs currently toggled to show/edit their Curio Foil's own product
 // ID (see e.curio, from GET /api/admin/pricing/product-ids) instead of the
@@ -194,8 +193,8 @@ function syncAdminUrl() {
 // Sub-nav clicks (System / Cards / Users) re-fetch the whole admin fragment
 // and re-run initAdmin() against a brand-new DOM, rather than an in-place
 // panel swap. System settings like Local Database change which Pricing-page
-// controls even render (the Refresh Sales/Listings group, the 🔍 product-ID
-// finder) and how wide the list columns are — and the measurement-based
+// controls even render (the Refresh Sales/Listings group) and how wide the
+// list columns are — and the measurement-based
 // layout here (pill indicators, the list's grid tracks) doesn't reliably
 // re-settle when those appear/disappear behind a still-hidden panel, so
 // switching sections used to carry stale positions that only a refresh fixed.
@@ -571,10 +570,10 @@ async function updateAdminSystemSetting(key, value) {
             return;
         }
 
-        // Local DB gates the Pricing page's live TCGPlayer controls (the 🔍
-        // auto product-ID finder and the Refresh Sales/Listings/Selected
-        // buttons); adminDbModeOn tracks the storage mode for the rest of that
-        // UI. Reflect a flip there right away, even though that section is a
+        // Local DB gates the Pricing page's live TCGPlayer controls (the
+        // Refresh Sales/Listings/Selected buttons); adminDbModeOn tracks the
+        // storage mode for the rest of that UI. Reflect a flip there right
+        // away, even though that section is a
         // different (currently hidden) tab, so it's already correct when the
         // admin navigates back to it (switchAdminSection doesn't re-render
         // it). The use_json path here only fires for Off → On (On → Off goes
@@ -2257,9 +2256,8 @@ async function searchSelectedAdminSet() {
 // /api/admin/set-searches/{slug}/clear-product-ids, see
 // api_admin_clear_set_product_ids in app.py and clear_product_ids_for_set in
 // pricing_ga.py). For when a batch of IDs turns out wrong — a tcgcsv
-// mismatch, a stale Playwright auto-detect, a manual typo, whatever the
-// cause — and needs to be wiped and rechecked from scratch rather than fixed
-// one card at a time.
+// mismatch, a manual typo, whatever the cause — and needs to be wiped and
+// rechecked from scratch rather than fixed one card at a time.
 async function clearSelectedAdminSetIds() {
     const slug = adminSetsSelectedSlug;
     if (!slug) return;
@@ -2711,27 +2709,12 @@ function syncAdminPidHeaderScrollbarOffset() {
 // also switches the open detail panel's field (and, via
 // renderAdminPricingDetail's curio filtering, its Sales/Listings) to match.
 //
-// The toggle button and the 🔍 find button always both render, at the same
-// size/spacing, regardless of e.curio or the toggle state — only the find
-// button's disabled/grayed state and the input's bound value/handlers change
-// between regular and Curio Foil view. This is deliberate: an earlier version
-// hid the find button and let the input grow into its place when toggled to
-// Curio Foil view, which meant the input visibly resized on every toggle
-// click — annoying since Curio Foils don't support auto-detect anyway (no
-// way to disambiguate which TCGPlayer listing is the Curio Foil one), so
-// graying out the (inert either way) find button instead keeps the layout
-// completely static across a toggle click.
-//
-// The find button IS fully hidden (findBtnHidden) unless Local DB is on —
-// auto-detect drives a headless Chromium scraper that hosted deployments like
-// Railway can't run (independent of the storage mode). That's a mode-level
-// state, not a per-toggle one, so it doesn't reintroduce the resize-on-toggle
-// problem above.
+// Product IDs are entered by hand — typed in, or backfilled in bulk from
+// tcgcsv.com via the Sets panel's ♻️ button. The ✨ toggle (curio editions
+// only) swaps the field between the edition's regular product ID and its
+// Curio Foil's own separate one.
 function adminPidProductIdFieldHtml(e) {
     const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
-    const finding = adminPidFindingIds.has(e.edition_id);
-    const findAvailable = adminLocalDbOn;
-    const findBtnHidden = findAvailable ? '' : 'hidden';
 
     const toggleHtml = e.curio ? `
         <button type="button" class="admin-pid-curio-toggle ${curioView ? 'active' : ''}"
@@ -2755,8 +2738,6 @@ function adminPidProductIdFieldHtml(e) {
                        title="${noListings ? 'Marked as having no TCGPlayer listings' : 'Curio Foil'}"
                        onkeydown="if (event.key === 'Enter') this.blur()"
                        onblur="saveAdminFoilProductId(this)">
-                <button type="button" class="admin-pid-find-btn ${findBtnHidden}" disabled
-                        title="Curio Foils require manual entry — auto-detect disabled">🔍</button>
             </div>
         `;
     }
@@ -2779,13 +2760,8 @@ function adminPidProductIdFieldHtml(e) {
                    value="${escapeHtml(e.product_id || '')}"
                    placeholder="${missingLabel}"
                    title="${noListings ? 'Marked as having no TCGPlayer listings' : e.curio_only ? 'Curio Foil' : ''}"
-                   ${finding ? 'disabled' : ''}
                    onkeydown="if (event.key === 'Enter') this.blur()"
                    onblur="saveAdminProductId(this)">
-            <button type="button" class="admin-pid-find-btn ${finding ? 'finding' : ''} ${findBtnHidden}"
-                    title="${noListings ? 'Marked as having no TCGPlayer listings — auto-detect disabled' : 'Auto-detect from TCGPlayer'}"
-                    ${finding || noListings || !findAvailable ? 'disabled' : ''}
-                    onclick="findAdminProductId('${escapeHtml(e.edition_id)}')">${finding ? '…' : noListings ? '🚫' : '🔍'}</button>
         </div>
     `;
 }
@@ -3366,13 +3342,12 @@ async function saveAdminProductId(input) {
             // dropdowns don't depend on this).
             renderAdminPidRows();
         } else {
-            // Regenerates the whole field (input + find button) rather than
-            // just toggling admin-pid-input-filled on the input — the "~"
-            // no-listings state also needs admin-pid-input-no-listings and
-            // the find button's disabled/🚫 state, which a lone class toggle
-            // here previously missed entirely (typing "~" wouldn't visibly
-            // gray anything out or lock auto-detect until the next full
-            // reload re-rendered the row from scratch).
+            // Regenerates the whole field rather than just toggling
+            // admin-pid-input-filled on the input — the "~" no-listings state
+            // also needs admin-pid-input-no-listings, which a lone class
+            // toggle here previously missed entirely (typing "~" wouldn't
+            // visibly change anything until the next full reload re-rendered
+            // the row from scratch).
             const row = document.querySelector(`#admin-pid-table .admin-pid-row[data-edition-id="${CSS.escape(editionId)}"]`);
             const statusCell = row?.querySelector('.admin-pid-col-status');
             if (statusCell) statusCell.innerHTML = adminPidProductIdFieldHtml(record);
@@ -3428,67 +3403,6 @@ async function clearAdminPidLastUpdated(field) {
         // No local state changed yet if the request itself failed — safe to
         // just leave the badge as-is; the admin can retry the click.
     }
-}
-
-// Starts a product-ID lookup job and polls it to completion, invoking
-// onResult(editionId, {ok, product_id, error}) as each edition finishes.
-async function runProductIdJob(editionIds, onResult) {
-    const startRes = await fetch('/api/admin/pricing/find-product-ids/start', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({edition_ids: editionIds}),
-    });
-
-    if (!startRes.ok) {
-        const errData = await startRes.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to start lookup');
-    }
-
-    const {job_id} = await startRes.json();
-    const seen = new Set();
-
-    while (true) {
-        await new Promise(r => setTimeout(r, 1200));
-
-        const statusRes = await fetch(`/api/admin/pricing/find-product-ids/status/${job_id}`);
-        if (!statusRes.ok) throw new Error('Lost track of lookup job');
-
-        const job = await statusRes.json();
-
-        for (const [editionId, result] of Object.entries(job.results || {})) {
-            if (seen.has(editionId)) continue;
-            seen.add(editionId);
-            onResult(editionId, result);
-        }
-
-        if (job.status === 'error') throw new Error(job.error || 'Unknown error');
-        if (job.status === 'done') break;
-    }
-}
-
-async function findAdminProductId(editionId) {
-    // Belt-and-suspenders — the 🔍 button is hidden and disabled unless Local
-    // DB is on (see adminPidProductIdFieldHtml), but never run the scraper
-    // job otherwise.
-    if (!adminLocalDbOn) return;
-    if (adminPidFindingIds.has(editionId)) return;
-
-    adminPidFindingIds.add(editionId);
-    renderAdminPricingIds();
-    if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
-
-    try {
-        await runProductIdJob([editionId], (eid, result) => {
-            const record = adminPidData.find(e => e.edition_id === eid);
-            if (record && result.ok) record.product_id = result.product_id;
-        });
-    } catch (err) {
-        // Leave the field as-is — the admin can still type it in manually.
-    }
-
-    adminPidFindingIds.delete(editionId);
-    renderAdminPricingIds();
-    if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
 }
 
 async function refreshSelectedAdminPricing(target) {
@@ -4240,8 +4154,8 @@ function refreshVisibleAdminPidClockBadges() {
 
 // Only marketplaces with product-ID/scraper automation (TCGPlayer for now)
 // need the list's Product ID column — for the rest it collapses to just its
-// curio-foil ✨ toggles (the input, auto-detect button and header label all
-// hide). What's hidden and the collapsed track width are CSS (.admin-pid-hide-pid
+// curio-foil ✨ toggles (the input and header label both hide). What's hidden
+// and the collapsed track width are CSS (.admin-pid-hide-pid
 // in admin.css); the :not(.admin-cards-mode-info) guard there keeps Info mode's
 // own reduced layout untouched.
 //

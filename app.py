@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
-    clear_product_ids_for_set, delete_entry, find_product_ids_by_editions, import_gal_pricing, \
+    clear_product_ids_for_set, delete_entry, import_gal_pricing, \
     import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, load_listings_data, \
     load_price_data_for_card, load_sales_data, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
@@ -113,11 +113,6 @@ _pricing_jobs_lock = threading.Lock()
 # job_id → {status, target, total, done, current_edition_id, results: {edition_id: {sales, listings}}, error}
 _pricing_batch_jobs = {}
 _pricing_batch_jobs_lock = threading.Lock()
-
-# ── Product ID auto-detect jobs (admin-only) — one shared browser across many editions ──
-# job_id → {status, total, done, current_edition_id, results: {edition_id: {ok, product_id, error}}, error}
-_product_id_jobs = {}
-_product_id_jobs_lock = threading.Lock()
 
 # ── JSON -> Postgres sync jobs (admin-only, System panel's Sync button) ──
 # job_id → {status: "running"|"done"|"error", ok, log, error}
@@ -1153,92 +1148,11 @@ async def api_pricing_refresh_batch_status(job_id: str, request: Request):
     return JSONResponse(snapshot)
 
 
-def _run_product_id_job(job_id: str, edition_ids: list) -> None:
-    def on_progress(edition_id, result):
-        with _product_id_jobs_lock:
-            job = _product_id_jobs.get(job_id)
-            if job is None:
-                return
-            job["results"][edition_id] = result
-            job["done"] += 1
-            job["current_edition_id"] = edition_id
-
-    try:
-        find_product_ids_by_editions(edition_ids, debug=False, headless=False, progress_callback=on_progress)
-
-        with _product_id_jobs_lock:
-            job = _product_id_jobs.get(job_id)
-            if job is not None:
-                job["status"] = "done"
-                job["current_edition_id"] = None
-    except Exception as e:
-        with _product_id_jobs_lock:
-            job = _product_id_jobs.get(job_id)
-            if job is not None:
-                job["status"] = "error"
-                job["error"] = str(e)
-
-
-@app.post("/api/admin/pricing/find-product-ids/start")
-async def api_find_product_ids_start(request: Request):
-    require_cards_admin(request)
-
-    body = await request.json()
-    edition_ids = body.get("edition_ids") or []
-
-    if not edition_ids:
-        # No specific editions given — default to every edition currently missing one
-        editions_data = load_editions_data()
-        ids_data = get_all_ids()
-        edition_ids = [eid for eid in editions_data if not ids_data.get(eid, {}).get("product_id")]
-
-    if not edition_ids:
-        raise HTTPException(status_code=400, detail="No editions to look up")
-
-    job_id = uuid.uuid4().hex
-    with _product_id_jobs_lock:
-        _product_id_jobs[job_id] = {
-            "status": "running",
-            "total": len(edition_ids),
-            "done": 0,
-            "current_edition_id": None,
-            "results": {},
-            "error": None,
-        }
-
-    thread = threading.Thread(
-        target=_run_product_id_job,
-        args=(job_id, edition_ids),
-        daemon=True
-    )
-    thread.start()
-
-    return JSONResponse({"job_id": job_id})
-
-
-@app.get("/api/admin/pricing/find-product-ids/status/{job_id}")
-async def api_find_product_ids_status(job_id: str, request: Request):
-    require_cards_admin(request)
-
-    with _product_id_jobs_lock:
-        job = _product_id_jobs.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job not found")
-        snapshot = dict(job)
-        snapshot["results"] = dict(job["results"])
-
-    if snapshot["status"] in ("done", "error"):
-        with _product_id_jobs_lock:
-            _product_id_jobs.pop(job_id, None)
-
-    return JSONResponse(snapshot)
-
-
 # A full run touches every DATA_GA/DATA_GENERAL domain (~7s against the real
 # local dataset) — long enough to freeze every other request for that whole
 # stretch if run directly in this async route, so it gets the same
-# background-thread-plus-job-polling treatment as the scrape/product-ID jobs
-# above rather than a synchronous call.
+# background-thread-plus-job-polling treatment as the scrape jobs above
+# rather than a synchronous call.
 def _run_sync_job(job_id: str) -> None:
     from scripts.migrate_json_to_pg import run_migration
 
@@ -1966,12 +1880,11 @@ async def api_admin_pricing_product_ids(request: Request):
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
 
     # local_db drives whether the Pricing page shows its live TCGPlayer
-    # controls (Refresh Sales/Listings/Selected and the per-row 🔍 auto
-    # product-ID buttons) — those need a headless Chromium that hosted boxes
-    # like Railway can't provide, independent of the storage mode. Gated
-    # client-side (see updateAdminPidRefreshButton / adminPidProductIdFieldHtml
-    # in admin.js). database_mode is still sent for the other mode-dependent
-    # bits of the Pricing UI.
+    # controls (the Refresh Sales/Listings/Selected buttons) — those need a
+    # headless Chromium that hosted boxes like Railway can't provide,
+    # independent of the storage mode. Gated client-side (see
+    # updateAdminPidRefreshButton in admin.js). database_mode is still sent for
+    # the other mode-dependent bits of the Pricing UI.
     return JSONResponse({
         "editions": results,
         "database_mode": is_db_mode(),
@@ -2042,9 +1955,9 @@ async def api_admin_set_group_id(slug: str, request: Request):
 # Backfills product IDs for every edition in one set from tcgcsv.com (see
 # import_product_ids_from_tcgcsv in pricing_ga.py), using its admin-entered
 # Group ID (see api_admin_set_group_id above). Runs synchronously rather than
-# as a background job like set-search/find-product-ids — it's a single tcgcsv
-# fetch plus local catalog matching, no Playwright browser involved, so it's
-# fast enough not to need polling.
+# as a background job like set-search — it's a single tcgcsv fetch plus local
+# catalog matching, no Playwright browser involved, so it's fast enough not to
+# need polling.
 @app.post("/api/admin/set-searches/{slug}/import-tcgcsv")
 async def api_admin_import_tcgcsv(slug: str, request: Request):
     require_cards_admin(request)

@@ -1684,72 +1684,6 @@ def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: boo
     return results
 
 
-def find_product_ids_by_editions(edition_ids: list[str], debug: bool = False,
-                                  headless: bool = False, progress_callback=None) -> dict[str, dict]:
-    """Looks up TCGPlayer product IDs for many editions using a single shared
-    browser session, matching each edition's card name + collector number
-    against TCGPlayer's search results. Persists any confident match via
-    api_tcgplayer.set_product_id(). progress_callback(edition_id, result), if
-    given, is called after each edition finishes.
-
-    `result` is {"ok": bool, "product_id": str | None, "error": str | None}."""
-    from api_ga import _build_collector_map, JSON_EDITIONS, JSON_INFO, JSON_SLUGS
-    from playwright.sync_api import sync_playwright
-
-    editions_file = new_json(JSON_EDITIONS)
-    with editions_file.open("r", encoding="utf-8") as f:
-        editions_data = json.load(f)
-
-    slug_file = new_json(JSON_SLUGS)
-    with slug_file.open("r", encoding="utf-8") as f:
-        slug_data = json.load(f)
-    name_by_card_id = {entry["card_id"]: entry["name"] for entry in slug_data.values()}
-
-    info_file = new_json(JSON_INFO)
-    with info_file.open("r", encoding="utf-8") as f:
-        info_data = json.load(f)
-
-    collector_map = _build_collector_map()
-
-    results = {}
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        page = browser.new_page()
-
-        for edition_id in edition_ids:
-            card_id = editions_data.get(edition_id, {}).get("card_id")
-            card_name = name_by_card_id.get(card_id)
-            collector_number = collector_map.get(edition_id)
-            set_name = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {}).get("set_name", "")
-
-            if not card_name or not collector_number:
-                result = {"ok": False, "product_id": None, "error": "Missing card name or collector number."}
-            else:
-                try:
-                    product_id = api_tcgplayer.find_product_id(
-                        card_name, collector_number, set_name, debug=debug, headless=headless, page=page
-                    )
-                except Exception as e:
-                    product_id = None
-                    result = {"ok": False, "product_id": None, "error": f"Unexpected error: {e}"}
-                else:
-                    if product_id:
-                        api_tcgplayer.set_product_id(edition_id, product_id, debug)
-                        result = {"ok": True, "product_id": product_id, "error": None}
-                    else:
-                        result = {"ok": False, "product_id": None, "error": "No confident match found."}
-
-            results[edition_id] = result
-
-            if progress_callback:
-                progress_callback(edition_id, result)
-
-        browser.close()
-
-    return results
-
-
 def _curio_variant_id(foils: dict) -> str | None:
     """Mirrors app.py's _curio_foil_id: exactly one variant across all of an
     edition's foils is TCGPlayer's separate "Curio Foil" product (its own
@@ -1769,11 +1703,9 @@ def _edition_rarity_code(edition_id: str, editions_data: dict, info_data: dict) 
 def import_product_ids_from_tcgcsv(set_slug: str, group_id: str, debug: bool = False) -> dict:
     """Backfills product IDs for every edition in one local set from
     tcgcsv.com (see api_tcgplayer.fetch_tcgcsv_products), matched by collector
-    number instead of the fuzzy name-based Playwright search
-    find_product_ids_by_editions() falls back to. A tcgcsv product whose name
-    contains "Curio Foil" is that edition's special foil variant (see
-    _curio_variant_id above); everything else is the edition's own regular
-    product. Matched as a substring rather than an exact "(Curio Foil)" suffix
+    number. A tcgcsv product whose name contains "Curio Foil" is that edition's
+    special foil variant (see _curio_variant_id above); everything else is the
+    edition's own regular product. Matched as a substring rather than an exact "(Curio Foil)" suffix
     since TCGPlayer doesn't keep the label consistent — Asphodel Paradise's
     products are named "(Interference Curio Foil)" instead, and there's no
     telling what future sets will call theirs; "Curio Foil" itself is the one
@@ -1905,10 +1837,10 @@ def import_product_ids_from_tcgcsv(set_slug: str, group_id: str, debug: bool = F
 def clear_product_ids_for_set(set_slug: str, debug: bool = False) -> dict:
     """Clears every product_id (main and Curio Foil override alike) recorded
     for editions in one local set — an admin's way to wipe a bad batch of
-    TCGPlayer IDs (from a tcgcsv mismatch, a stale Playwright auto-detect, a
-    manual typo, whatever the cause) so the set can be rechecked from
-    scratch, without also touching that edition's last_sales/last_listings
-    scrape-history clocks (see api_tcgplayer.clear_product_id/
+    TCGPlayer IDs (from a tcgcsv mismatch, a manual typo, whatever the cause)
+    so the set can be rechecked from scratch, without also touching that
+    edition's last_sales/last_listings scrape-history clocks (see
+    api_tcgplayer.clear_product_id/
     clear_foil_product_id) — those stay meaningful bookkeeping even once the
     ID that produced them is cleared, same as the existing per-card Clear
     buttons elsewhere in the admin console leave product_id alone.
