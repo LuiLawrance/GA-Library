@@ -87,6 +87,12 @@
    ╚══════════════════════════════════════╝ */
 @media (max-width: 768px) {
 
+    :root {
+        /* Bottom-sheet height for the card drawer; the tab-rail bar anchors
+           its bottom edge here so it lands flush on the sheet's top. */
+        --drawer-sheet-h: 84dvh;
+    }
+
     /* ── Global padding trim ──
        32px side gutters everywhere → 14px. */
     .topbar,
@@ -420,7 +426,11 @@
 
     /* ── Bottom-sheet card drawer ──
        The 820px right-hand slab becomes a sheet that rises from the bottom.
-       position:fixed so it covers the topbar/navbar too. */
+       The tab rail (✕ / info / thema / pricing) docks as its own bar sitting
+       flush ON TOP of the sheet — in the scrim gap, NOT overlapping the
+       scrollable content — so nothing scrolls under it and the first line of
+       content isn't hidden. --drawer-sheet-h is shared by the sheet height
+       and the bar's bottom anchor so they always meet. */
     .card-drawer {
         position: fixed;
         top: auto;
@@ -428,9 +438,10 @@
         right: 0;
         bottom: 0;
         width: 100%;
-        height: 88vh;
+        height: 82vh;            /* fallback for no-dvh browsers */
+        height: var(--drawer-sheet-h);
         transform: translateY(100%);
-        border-radius: var(--radius) var(--radius) 0 0;
+        border-radius: 0;
         border: 1px solid var(--border);
         border-bottom: none;
         z-index: 600;
@@ -447,26 +458,30 @@
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.55);
-        z-index: 599;
+        z-index: 598;
     }
 
-    /* The floating icon rail docks as a bar across the top of the sheet. */
+    /* Tab rail as a bar flush on top of the sheet — its rounded corners give
+       the sheet its top edge. */
     .drawer-sidebar {
         position: fixed;
-        top: 12vh;
-        right: 0;
+        top: auto;
         left: 0;
+        right: 0;
+        bottom: calc(82vh - 1px);
+        bottom: calc(var(--drawer-sheet-h) - 1px);
+        height: 46px;
         flex-direction: row;
         justify-content: center;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
         width: 100%;
-        padding: 8px;
-        border: none;
+        padding: 0 10px;
+        border: 1px solid var(--border);
         border-bottom: 1px solid var(--border);
         border-radius: var(--radius) var(--radius) 0 0;
         background: var(--bg-card);
-        box-shadow: none;
+        box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.4);
         z-index: 601;
     }
 
@@ -476,9 +491,8 @@
         margin: 0 2px;
     }
 
-    /* Clear the docked bar. */
     .drawer-inner {
-        padding: 62px 16px 24px;
+        padding: 18px 16px 32px;
     }
 
     .drawer-top {
@@ -488,6 +502,11 @@
 
     .drawer-stats {
         grid-template-columns: 1fr 1fr;
+    }
+
+    /* Centre the printings grid rather than left-anchoring it. */
+    .drawer-editions {
+        justify-content: center;
     }
 
     /* ── Modals ── */
