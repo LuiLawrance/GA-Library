@@ -443,8 +443,8 @@ function setLoggedIn(username) {
     document.getElementById('topbar-user-name').textContent = username;
     document.getElementById('topbar-user-menu').classList.remove('hidden');
     document.getElementById('topbar-login-btn').classList.add('hidden');
-    document.getElementById('nav-inventory').classList.remove('hidden');
-    document.getElementById('nav-decks-ga').classList.remove('hidden');
+    // My Decks / Inventory nav links stay visible for everyone (the pages
+    // themselves show a login prompt to guests) — only Admin is gated here.
     document.getElementById('nav-admin').classList.toggle('hidden', !isAdmin);
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.remove('hidden');
@@ -455,8 +455,6 @@ function setLoggedOut() {
     closeUserMenu();
     document.getElementById('topbar-user-menu').classList.add('hidden');
     document.getElementById('topbar-login-btn').classList.remove('hidden');
-    document.getElementById('nav-inventory').classList.add('hidden');
-    document.getElementById('nav-decks-ga').classList.add('hidden');
     document.getElementById('nav-admin').classList.add('hidden');
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.add('hidden');

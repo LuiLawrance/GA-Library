@@ -86,7 +86,10 @@ async function dgaCtxSetPublic(value) {
 }
 
 function dgaCloseContextMenu() {
-    document.getElementById('dga-context-menu').classList.add('hidden');
+    // Wired to global click/contextmenu listeners below, so this fires on
+    // every page — the menu element only exists while the My Decks fragment
+    // is mounted, hence the null-safe access.
+    document.getElementById('dga-context-menu')?.classList.add('hidden');
     dgaCtxTargetDeck = null;
 }
 
@@ -2934,8 +2937,26 @@ document.addEventListener('click', e => {
 }, true);
 
 
+function renderDecksGaGuestPrompt() {
+    const subtitle = document.getElementById('dga-subtitle');
+    const createBtn = document.querySelector('.dga-create-btn');
+    const grid = document.getElementById('dga-deck-grid');
+    if (subtitle) subtitle.textContent = '';
+    if (createBtn) createBtn.classList.add('hidden');
+    if (!grid) return;
+    grid.innerHTML = `
+        <div class="inv-empty-grid">
+            <span class="inv-empty-icon">🃏</span>
+            <p>Log in to build and manage your own decks.</p>
+            <a href="/login" data-link class="btn-login btn btn--ghost">Log In</a>
+        </div>`;
+}
+
 window.initDecksGa = async function () {
-    if (!currentUser) return;
+    if (!currentUser) {
+        renderDecksGaGuestPrompt();
+        return;
+    }
     await loadMyDecks();
 
     const urlParams = new URLSearchParams(window.location.search);

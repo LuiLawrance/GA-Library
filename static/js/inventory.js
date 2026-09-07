@@ -1908,7 +1908,10 @@ function openBinContextMenu(e, binName) {
 }
 
 function closeBinContextMenu() {
-    document.getElementById('inv-bin-context-menu').classList.add('hidden');
+    // Wired to global click/scroll listeners below, so this fires on every
+    // page — the menu element only exists while the inventory fragment is
+    // mounted, hence the null-safe access.
+    document.getElementById('inv-bin-context-menu')?.classList.add('hidden');
     ctxTargetBin = null;
 }
 
@@ -3071,8 +3074,26 @@ document.addEventListener('click', e => {
 // INIT
 // ═══════════════════════════════════════
 
+function renderInventoryGuestPrompt() {
+    const subtitle = document.getElementById('inv-bin-subtitle');
+    const createBtn = document.querySelector('.inv-bins-create-btn');
+    const grid = document.getElementById('inv-bins-grid');
+    if (subtitle) subtitle.textContent = '';
+    if (createBtn) createBtn.classList.add('hidden');
+    if (!grid) return;
+    grid.innerHTML = `
+        <div class="inv-empty-grid">
+            <span class="inv-empty-icon">📦</span>
+            <p>Log in to build your inventory and organize your cards into bins.</p>
+            <a href="/login" data-link class="btn-login btn btn--ghost">Log In</a>
+        </div>`;
+}
+
 window.initInventory = async function () {
-    if (!currentUser) return;
+    if (!currentUser) {
+        renderInventoryGuestPrompt();
+        return;
+    }
     await loadInventory();
 
     // Wire font scaling to static modal qty inputs
