@@ -3774,6 +3774,15 @@ DIR_DECKS_GA = "DATA_GA/DECKS_GA"
 DEFAULT_SECTIONS = ["Material Deck", "Main Deck"]
 
 
+def _deck_pubid_new(existing: set[str]) -> str:
+    """A fresh 8-hex-char deck handle not already in `existing` — the stable,
+    rename-proof second segment of a public deck URL. See Deck.pub_id."""
+    while True:
+        pid = uuid.uuid4().hex[:8]
+        if pid not in existing:
+            return pid
+
+
 def _deck_index_load(username: str) -> dict:
     if is_db_mode():
         return _deck_index_load_db(username)
@@ -3782,7 +3791,22 @@ def _deck_index_load(username: str) -> dict:
     if not os.path.exists(path):
         return {}
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        index = json.load(f)
+
+    # Lazy backfill: decks created before pub_ids existed get one on first
+    # load, persisted once so the handle is stable from then on. (DB mode is
+    # backfilled by its migration instead.)
+    missing = [name for name, entry in index.items() if not entry.get("pub_id")]
+    if missing:
+        used = {entry["pub_id"] for entry in index.values() if entry.get("pub_id")}
+        for name in missing:
+            pid = _deck_pubid_new(used)
+            used.add(pid)
+            index[name]["pub_id"] = pid
+        os.makedirs(DIR_DECK_INDEX, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(index, f, indent=4, ensure_ascii=False)
+    return index
 
 
 def _deck_index_save(username: str, data: dict) -> None:
@@ -3865,6 +3889,7 @@ def _deck_index_load_db(username: str) -> dict:
                 "tags": row.tags,
                 "public": row.is_public,
                 "edition_locked": row.edition_locked,
+                "pub_id": row.pub_id,
                 "created": row.created_at.isoformat() if row.created_at else None,
                 "modified": row.modified_at.isoformat() if row.modified_at else None,
             }
@@ -3882,13 +3907,20 @@ def _deck_index_save_db(username: str, data: dict) -> None:
         keep_names = list(data.keys())
         session.execute(delete(Deck).where(Deck.user_id == user_id, Deck.name.notin_(keep_names)))
 
+        used_pubids = {e["pub_id"] for e in data.values() if e.get("pub_id")}
         for name, entry in data.items():
             created = date.fromisoformat(entry["created"]) if entry.get("created") else None
             modified = date.fromisoformat(entry["modified"]) if entry.get("modified") else None
+            pub_id = entry.get("pub_id")
+            if not pub_id:
+                pub_id = _deck_pubid_new(used_pubids)
+                used_pubids.add(pub_id)
+                entry["pub_id"] = pub_id
             index_fields = {
                 "banner": entry.get("banner"), "symbol": entry.get("symbol"), "tags": entry.get("tags"),
                 "is_public": entry.get("public", False),
                 "edition_locked": entry.get("edition_locked", False),
+                "pub_id": pub_id,
                 "created_at": created, "modified_at": modified,
             }
             stmt = pg_insert(Deck).values(user_id=user_id, name=name, **index_fields).on_conflict_do_update(
@@ -4269,6 +4301,7 @@ def _public_decks_list() -> list[dict]:
         decks = [
             {
                 "name": row.name,
+                "pub_id": row.pub_id,
                 "username": username,
                 "omnidex_id": omnidex_id,
                 "format": row.format or "",
@@ -4294,6 +4327,7 @@ def _public_decks_list() -> list[dict]:
             count = _deck_card_count(deck_data["sections"]) if deck_data and "sections" in deck_data else 0
             decks.append({
                 "name": name,
+                "pub_id": entry.get("pub_id"),
                 "username": username,
                 "omnidex_id": omnidex_id,
                 "format": (deck_data or {}).get("format", entry.get("format", "")),
@@ -4370,8 +4404,9 @@ async def api_deck_create(request: Request):
     if name in index:
         raise HTTPException(status_code=400, detail="Deck already exists")
     created = date.today().isoformat()
+    pub_id = _deck_pubid_new({e.get("pub_id") for e in index.values() if e.get("pub_id")})
     index[name] = {"banner": None, "symbol": None, "tags": None, "public": False,
-                   "edition_locked": False, "created": created, "modified": created}
+                   "edition_locked": False, "pub_id": pub_id, "created": created, "modified": created}
     _deck_index_save(user, index)
     _deck_save(user, name, _make_deck_data(desc, fmt))
     return JSONResponse({"ok": True, "created": created})
@@ -4529,18 +4564,32 @@ async def api_public_decks_list():
     return JSONResponse({"decks": _public_decks_list()})
 
 
-@app.get("/api/decks/public/{omnidex_id}/{deck_name}")
-async def api_public_deck_get(omnidex_id: str, deck_name: str):
-    # Looked up by Omnidex ID rather than username — same rationale as the
-    # public profile route (api_public_profile): a stable, not-writable
-    # public id rather than the mutable username.
+def _deck_resolve_public(omnidex_id: str, ident: str) -> tuple[str, str, dict]:
+    """(username, deck_name, index_entry) for a public deck addressed as
+    /api/decks/public/<omnidex_id>/<ident>, where ident is the deck's stable
+    pub_id. Falls back to matching ident as a literal deck name so links
+    shared before pub_ids existed keep resolving (until that deck is renamed).
+    Raises 404 if the owner, deck, or its public flag doesn't check out."""
     username = user_find_by_omnidex(omnidex_id.strip())
     if username is None:
         raise HTTPException(status_code=404, detail="Deck not found")
     index = _deck_index_load(username)
-    entry = index.get(deck_name)
+    match = next(
+        (name for name, entry in index.items() if entry.get("pub_id") == ident),
+        ident if ident in index else None,
+    )
+    entry = index.get(match) if match else None
     if entry is None or not entry.get("public"):
         raise HTTPException(status_code=404, detail="Deck not found")
+    return username, match, entry
+
+
+@app.get("/api/decks/public/{omnidex_id}/{ident}")
+async def api_public_deck_get(omnidex_id: str, ident: str):
+    # Addressed by Omnidex ID + the deck's stable pub_id rather than
+    # username + deck name — both halves survive a rename. See
+    # _deck_resolve_public and api_public_profile.
+    username, deck_name, entry = _deck_resolve_public(omnidex_id, ident)
     deck_data = _deck_load(username, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
@@ -4549,20 +4598,16 @@ async def api_public_deck_get(omnidex_id: str, deck_name: str):
     # renderPublicDeckSections) — skip the price lookup entirely otherwise.
     card_prices = _deck_prices(deck_data["sections"], load_sales_data(), load_listings_data()) if edition_locked else {}
     return JSONResponse({**_deck_detail_payload(deck_data), "username": username, "omnidex_id": omnidex_id,
+                          "name": deck_name, "pub_id": entry.get("pub_id"),
                           "banner": entry.get("banner"), "edition_locked": edition_locked,
                           "card_prices": card_prices})
 
 
-@app.get("/api/decks/public/{omnidex_id}/{deck_name}/value")
-async def api_public_deck_value(omnidex_id: str, deck_name: str):
+@app.get("/api/decks/public/{omnidex_id}/{ident}/value")
+async def api_public_deck_value(omnidex_id: str, ident: str):
     """Priced total for a public deck — the read-only counterpart of
-    api_deck_value, addressed by Omnidex ID like api_public_deck_get."""
-    username = user_find_by_omnidex(omnidex_id.strip())
-    if username is None:
-        raise HTTPException(status_code=404, detail="Deck not found")
-    entry = _deck_index_load(username).get(deck_name)
-    if entry is None or not entry.get("public"):
-        raise HTTPException(status_code=404, detail="Deck not found")
+    api_deck_value, addressed like api_public_deck_get."""
+    username, deck_name, _ = _deck_resolve_public(omnidex_id, ident)
     deck_data = _deck_load(username, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")

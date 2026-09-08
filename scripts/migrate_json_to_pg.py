@@ -38,6 +38,7 @@ import contextlib
 import io
 import json
 import os
+import uuid
 
 load_dotenv(".env" if os.path.exists(".env") else "env")
 
@@ -651,14 +652,23 @@ def migrate_decks(user_ids: dict[str, int], known_card_ids: set[str]) -> None:
 
             index_data = _load(index_path)
             deck_dir = DIR_DECKS / username
+            used_pub_ids = {e["pub_id"] for e in index_data.values() if e.get("pub_id")}
 
             for deck_name, entry in index_data.items():
                 deck_path = deck_dir / f"{deck_name}.json"
                 deck_data = _load(deck_path) if deck_path.exists() else {}
 
+                pub_id = entry.get("pub_id")
+                while not pub_id:
+                    candidate = uuid.uuid4().hex[:8]
+                    if candidate not in used_pub_ids:
+                        pub_id = candidate
+                used_pub_ids.add(pub_id)
+
                 deck_row = {
                     "user_id": user_ids[username],
                     "name": deck_name,
+                    "pub_id": pub_id,
                     "desc": deck_data.get("desc", entry.get("desc", "")),
                     "format": deck_data.get("format", entry.get("format", "")),
                     "banner": entry.get("banner"),
@@ -669,7 +679,7 @@ def migrate_decks(user_ids: dict[str, int], known_card_ids: set[str]) -> None:
                 }
                 stmt = pg_insert(Deck).values(deck_row).on_conflict_do_update(
                     index_elements=["user_id", "name"],
-                    set_={k: v for k, v in deck_row.items() if k not in ("user_id", "name")},
+                    set_={k: v for k, v in deck_row.items() if k not in ("user_id", "name", "pub_id")},
                 )
                 deck_id = session.execute(stmt.returning(Deck.id)).scalar_one()
                 deck_count += 1

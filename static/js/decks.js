@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════
 
 let pdDecks = [];
-let pdActiveDeck = null; // {omnidexId, name}
+let pdActiveDeck = null; // {omnidexId, ident, name}
 let pdActiveDeckData = null; // last-fetched detail payload, kept so the view toggle can re-render
 // Viewer's chosen display mode for the open deck — starts at the deck's own
 // edition_locked value, then the reader can flip it. Purely local: no server write.
@@ -92,10 +92,14 @@ function buildPublicDeckTile(deck, index, total) {
             ${valueBadge}
         </div>`;
 
+    // pub_id is the deck's stable public handle; deck.name is the fallback
+    // for a deck not yet backfilled (see openPublicDeckDetail).
+    const deckIdent = deck.pub_id || deck.name;
+
     if (deck.edition_locked && deck.omnidex_id) {
         loadDeckValue(
             tile.querySelector('.inv-bin-value-badge'),
-            `/api/decks/public/${encodeURIComponent(deck.omnidex_id)}/${encodeURIComponent(deck.name)}/value`,
+            `/api/decks/public/${encodeURIComponent(deck.omnidex_id)}/${encodeURIComponent(deckIdent)}/value`,
         );
     }
 
@@ -107,19 +111,19 @@ function buildPublicDeckTile(deck, index, total) {
         tile.prepend(bg);
     }
 
-    tile.onclick = () => openPublicDeckDetail(deck.omnidex_id, deck.name, true, deck.username);
+    tile.onclick = () => openPublicDeckDetail(deck.omnidex_id, deckIdent, true, deck.username, deck.name);
     return tile;
 }
 
-// omnidexId (not username) addresses the deck in the URL/API — same rationale
-// as the public profile page (see api_public_deck_get). displayUsername is an
-// optional immediate value for the "by ..." byline, shown before the deck
-// fetch resolves (which also carries username, confirming/filling it in for
-// a direct/deep-linked visit where no tile click supplied it upfront).
-// Owner byline in the deck detail view is a link to their public profile
-// (/@<omnidexId>) — underline-on-hover to match the drawer's set link.
-// Tile-view "by <username>" bylines stay plain text; this is deliberately
-// not reused there.
+// omnidexId + ident (the deck's stable pub_id, not its name) address the deck
+// in the URL/API — both halves survive a rename (see _deck_resolve_public and
+// the public profile page). ident falls back to a raw deck name for a link
+// shared before pub_ids existed; the server resolves either, and the fetched
+// payload's pub_id is used to rewrite the address bar to the canonical form.
+// displayName / displayUsername are optional immediate values for the header
+// and "by ..." byline, shown before the fetch resolves (which also carries
+// name + username, filling them in for a deep-linked visit with no tile click).
+// Owner byline links to their public profile (/@<omnidexId>).
 function _pdSetDetailOwner(omnidexId, username) {
     const el = document.getElementById('pd-detail-owner');
     if (!el) return;
@@ -130,13 +134,13 @@ function _pdSetDetailOwner(omnidexId, username) {
     el.innerHTML = `by <a class="pd-owner-link" href="/@${encodeURIComponent(omnidexId)}" data-link>${escapeHtml(username)}</a>`;
 }
 
-async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, displayUsername = null) {
-    pdActiveDeck = {omnidexId, name: deckName};
+async function openPublicDeckDetail(omnidexId, ident, pushUrl = true, displayUsername = null, displayName = null) {
+    pdActiveDeck = {omnidexId, ident, name: displayName};
 
     document.getElementById('pd-list-view').classList.add('hidden');
     document.getElementById('pd-detail-view').classList.remove('hidden');
 
-    document.getElementById('pd-detail-name').textContent = deckName;
+    document.getElementById('pd-detail-name').textContent = displayName || '';
     _pdSetDetailOwner(omnidexId, displayUsername);
 
     const grid = document.getElementById('pd-card-grid');
@@ -152,17 +156,25 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
     }
 
     if (pushUrl) {
-        window.history.pushState({}, '', `/decks?omni=${encodeURIComponent(omnidexId)}&deck=${encodeURIComponent(deckName)}`);
+        window.history.pushState({}, '', `/decks?omni=${encodeURIComponent(omnidexId)}&deck=${encodeURIComponent(ident)}`);
     }
 
     try {
-        const res = await fetch(`/api/decks/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(deckName)}`);
+        const res = await fetch(`/api/decks/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(ident)}`);
         if (!res.ok) throw new Error();
         const data = await res.json();
 
+        document.getElementById('pd-detail-name').textContent = data.name || displayName || '';
         document.getElementById('pd-detail-format').textContent = data.format ? `[${data.format}]` : '';
         document.getElementById('pd-detail-desc').textContent = data.desc || '';
         _pdSetDetailOwner(omnidexId, data.username);
+
+        // Upgrade the address bar to the canonical pub_id URL — handles an
+        // inbound link that still used the deck's (possibly stale) name.
+        if (data.pub_id && data.pub_id !== ident) {
+            pdActiveDeck = {omnidexId, ident: data.pub_id, name: data.name};
+            window.history.replaceState({}, '', `/decks?omni=${encodeURIComponent(omnidexId)}&deck=${encodeURIComponent(data.pub_id)}`);
+        }
 
         pdActiveDeckData = data;
         _pdSyncViewToggle(!!data.edition_locked);
@@ -176,7 +188,7 @@ async function openPublicDeckDetail(omnidexId, deckName, pushUrl = true, display
         if (data.edition_locked) {
             loadDeckValue(
                 valEl2,
-                `/api/decks/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(deckName)}/value`,
+                `/api/decks/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(data.pub_id || ident)}/value`,
             );
         }
     } catch {
@@ -377,8 +389,10 @@ window.initDecks = async function () {
 
     const urlParams = new URLSearchParams(window.location.search);
     const omnidexId = urlParams.get('omni');
-    const deckName = urlParams.get('deck');
-    if (omnidexId && deckName) {
-        await openPublicDeckDetail(omnidexId, deckName, false);
+    // ?deck= carries the deck's pub_id (a raw name still resolves server-side
+    // for older links); openPublicDeckDetail fills the header from the fetch.
+    const ident = urlParams.get('deck');
+    if (omnidexId && ident) {
+        await openPublicDeckDetail(omnidexId, ident, false);
     }
 };

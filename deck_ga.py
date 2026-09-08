@@ -3,6 +3,7 @@ from util_file import new_dir, new_json
 
 import json
 import random
+import uuid
 
 DIR_DECK = "DATA_GA/DECK_GA"
 DIR_DECKS = "DATA_GA/DECKS_GA"
@@ -65,10 +66,21 @@ def _make_deck(desc: str = "", fmt: str = "") -> dict:
     }
 
 
-def _make_index_entry() -> dict:
+def _new_pub_id(existing: set[str]) -> str:
+    """A fresh 8-hex-char deck handle not already in `existing` — the stable,
+    rename-proof second segment of a public deck URL (see app.py Deck.pub_id)."""
+    while True:
+        pid = uuid.uuid4().hex[:8]
+        if pid not in existing:
+            return pid
+
+
+def _make_index_entry(existing_pub_ids: set[str] | None = None) -> dict:
     from datetime import date
     today = date.today().isoformat()
-    return {"banner": None, "symbol": None, "tags": None, "created": today, "modified": today}
+    return {"banner": None, "symbol": None, "tags": None,
+            "pub_id": _new_pub_id(existing_pub_ids or set()),
+            "created": today, "modified": today}
 
 
 def _card_count(sections: dict) -> int:
@@ -153,7 +165,9 @@ def deck_create(username: str, debug: bool = False) -> None:
     desc = input("Description (optional): ").strip()
     fmt = input("Format (Standard/Draft/Pantheon or blank): ").strip()
 
-    index_data[name] = _make_index_entry()
+    index_data[name] = _make_index_entry(
+        {e.get("pub_id") for e in index_data.values() if e.get("pub_id")}
+    )
     _save_index(username, index_data)
     _save_deck(username, name, _make_deck(desc, fmt))
 
