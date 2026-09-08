@@ -86,6 +86,125 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Data Import / Export — per-store portable JSON snapshots,
+                         for moving hand-curated bookkeeping between instances
+                         (see the /api/admin/system/export|import/* endpoints in
+                         app.py). Always visible; import is merge-skip-existing
+                         server-side. The hidden <input type="file"> is shared by
+                         every row's Import button (importAdminSystemData sets
+                         which store the pick is for). -->
+                    <div class="admin-system-options" id="admin-system-io-card">
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Decks
+                                <button type="button" class="admin-system-info" aria-label="About Decks"
+                                        data-tip="Export or import every user's decks (decks / deck_sections / deck_cards, or the DECKS_GA JSON files). Import only creates a deck whose name that user doesn't already have; decks under a username with no account here are skipped; a deck card for a card or printing not in this catalog is dropped or left unpinned.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-decks-export"
+                                        onclick="exportAdminSystemData('decks')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-decks-import"
+                                        onclick="importAdminSystemData('decks')">Import</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Edition Product IDs
+                                <button type="button" class="admin-system-info" aria-label="About Edition Product IDs"
+                                        data-tip="Export or import the per-edition TCGPlayer product IDs (editions.tcg_product_id, the &quot;~&quot; no-listings marker, and Curio Foil overrides) — not the scrape-history clocks. Import only fills in a product ID for an edition/foil that has none yet, and skips edition IDs not in this catalog.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-edition-product-ids-export"
+                                        onclick="exportAdminSystemData('edition-product-ids')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-edition-product-ids-import"
+                                        onclick="importAdminSystemData('edition-product-ids')">Import</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Inventory Bins
+                                <button type="button" class="admin-system-info" aria-label="About Inventory Bins"
+                                        data-tip="Export or import every user's inventory bins (inventory_bins / inventory_sections / inventory_cards, or the INV_GA JSON files). Import only creates a bin whose name that user doesn't already have; bins under a username with no account here are skipped; a card entry for a card or printing not in this catalog is dropped. Imported bins are never the default bin.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-inventory-bins-export"
+                                        onclick="exportAdminSystemData('inventory-bins')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-inventory-bins-import"
+                                        onclick="importAdminSystemData('inventory-bins')">Import</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Listings Data
+                                <button type="button" class="admin-system-info" aria-label="About Listings Data"
+                                        data-tip="Export or import the listings history (price_listings / LISTINGS.json) — the per-foil list of dated listing snapshots. Import is additive: a record is added only if an exact match (date, marketplace, price, quantity, condition) isn't already on file, so re-importing an overlapping file adds nothing. Records for an edition/foil not in this catalog are skipped.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-listings-export"
+                                        onclick="exportAdminSystemData('listings')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-listings-import"
+                                        onclick="importAdminSystemData('listings')">Import</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Sales Data
+                                <button type="button" class="admin-system-info" aria-label="About Sales Data"
+                                        data-tip="Export or import the sales history (price_sales / SALES.json) — the per-foil list of dated sale records. Import is additive: a record is added only if an exact match (date, marketplace, price, quantity, condition) isn't already on file, so re-importing an overlapping file adds nothing. Records for an edition/foil not in this catalog are skipped.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-sales-export"
+                                        onclick="exportAdminSystemData('sales')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-sales-import"
+                                        onclick="importAdminSystemData('sales')">Import</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Set Group IDs
+                                <button type="button" class="admin-system-info" aria-label="About Set Group IDs"
+                                        data-tip="Export or import the per-set tcgcsv Group IDs (the sets table's tcgplayer_group_id). Import only fills in a Group ID for a set that has none yet — it never overwrites one that's already set.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-set-group-ids-export"
+                                        onclick="exportAdminSystemData('set-group-ids')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-set-group-ids-import"
+                                        onclick="importAdminSystemData('set-group-ids')">Import</button>
+                            </div>
+                        </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                User Accounts
+                                <button type="button" class="admin-system-info" aria-label="About User Accounts"
+                                        data-tip="Export or import user accounts — username, password hash, role, bio, Omnidex ID, admin note. Import only creates accounts whose username doesn't already exist here (existing accounts, including their role and password, are never touched); a username whose Omnidex ID is already taken is skipped. Roles come straight from the file.">i</button>
+                            </span>
+                            <div class="admin-system-io-actions">
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-users-export"
+                                        onclick="exportAdminSystemData('users')">Export</button>
+                                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                        id="admin-system-io-users-import"
+                                        onclick="importAdminSystemData('users')">Import</button>
+                            </div>
+                        </div>
+                        <pre class="admin-system-sync-log scroll-thin hidden" id="admin-system-io-log"></pre>
+                        <input type="file" id="admin-system-io-file" accept="application/json,.json"
+                               onchange="handleAdminSystemIoFile(this)" hidden>
+                    </div>
+
                     <!-- Its own card, hidden while Use JSON is on (JSON mode always runs
                          locally, so local_db just stays at its "On" default); revealed
                          once Use JSON is off by renderLocalDbCardVisibility in admin.js. -->

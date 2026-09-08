@@ -511,6 +511,149 @@ def import_gal_pricing(edition_id: str, doc: dict) -> dict:
     }
 
 
+def _all_valid_foil_keys() -> set[tuple[str, str]]:
+    """Every (edition_id, foil_id) the catalog knows — top-level foils and
+    variants alike. The membership test behind the bulk price import's
+    unknown-foil skip."""
+    if is_db_mode():
+        with get_session() as session:
+            return set(session.execute(select(Foil.edition_id, Foil.foil_id)).all())
+
+    from api_ga import load_info_data
+
+    keys: set[tuple[str, str]] = set()
+    for card in load_info_data().values():
+        for edition_id, edition in (card.get("editions") or {}).items():
+            for foil_id, foil in (edition.get("foils") or {}).items():
+                keys.add((edition_id, foil_id))
+                for variant_id in (foil.get("variants") or {}):
+                    keys.add((edition_id, variant_id))
+    return keys
+
+
+def _persist_bulk_price(json_path: str, tree: dict) -> None:
+    """Append already-vetted, already-deduped entries. `tree` is
+    {card_id: {edition_id: {foil_id: [entry, ...]}}}. JSON mode rewrites the
+    SALES.json / LISTINGS.json file once; DB mode inserts into price_sales /
+    price_listings in one transaction (price_sales' unique constraint still
+    no-ops any exact row that slipped through; price_listings has none)."""
+    if not any(editions for editions in tree.values()):
+        return
+
+    if is_db_mode():
+        model = _price_model(json_path)
+        with get_session() as session:
+            for editions in tree.values():
+                for edition_id, foils in editions.items():
+                    for foil_id, entries in foils.items():
+                        for e in entries:
+                            _add_price_row(
+                                session, model, edition_id=edition_id, foil_id=foil_id,
+                                date=date.fromisoformat(e["date"]), marketplace=e["marketplace"],
+                                price=e["price"], quantity=e["quantity"], condition=e["condition"],
+                            )
+        db_cache.bust()
+        return
+
+    target_file = new_json(json_path)
+    with target_file.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    for card_id, editions in tree.items():
+        for edition_id, foils in editions.items():
+            for foil_id, entries in foils.items():
+                data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).extend(entries)
+
+    with target_file.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def _import_price_data_bulk(json_path: str, current: dict, incoming: dict) -> dict:
+    """Shared core of import_sales_bulk / import_listings_bulk. `current` is the
+    existing store tree, `incoming` the tree to merge in. Purely additive: an
+    entry is added only when no exact (date, marketplace, price, quantity,
+    condition) match already exists for that foil, so re-importing an
+    overlapping file adds nothing. Entries for an (edition_id, foil_id) the
+    local catalog doesn't have are skipped and counted; malformed rows count
+    as invalid.
+
+    Returns {added, skipped_duplicate, skipped_unknown_foil, invalid}."""
+    valid_keys = _all_valid_foil_keys()
+
+    added = skipped_duplicate = skipped_unknown_foil = invalid = 0
+    tree: dict[str, dict[str, dict[str, list[dict]]]] = {}
+
+    for card_id, editions in incoming.items():
+        if not isinstance(editions, dict):
+            invalid += 1
+            continue
+        for edition_id, foils in editions.items():
+            if not isinstance(foils, dict):
+                invalid += 1
+                continue
+            for foil_id, entries in foils.items():
+                if not isinstance(entries, list):
+                    invalid += 1
+                    continue
+                if (edition_id, foil_id) not in valid_keys:
+                    skipped_unknown_foil += len(entries)
+                    continue
+
+                seen = {
+                    _gal_entry_key(e)
+                    for e in current.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
+                    if isinstance(e, dict)
+                }
+
+                for raw in entries:
+                    if not isinstance(raw, dict):
+                        invalid += 1
+                        continue
+                    try:
+                        date.fromisoformat(raw.get("date"))
+                    except (TypeError, ValueError):
+                        invalid += 1
+                        continue
+
+                    entry = {
+                        "date": raw["date"],
+                        "marketplace": raw.get("marketplace"),
+                        "price": raw.get("price"),
+                        "quantity": raw.get("quantity"),
+                        "condition": raw.get("condition"),
+                    }
+                    key = _gal_entry_key(entry)
+                    if key in seen:
+                        skipped_duplicate += 1
+                        continue
+
+                    seen.add(key)
+                    tree.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).append(entry)
+                    added += 1
+
+    _persist_bulk_price(json_path, tree)
+
+    return {
+        "added": added,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_unknown_foil": skipped_unknown_foil,
+        "invalid": invalid,
+    }
+
+
+def import_sales_bulk(sales: dict) -> dict:
+    """Merge a whole {card_id: {edition_id: {foil_id: [entry, ...]}}} sales
+    tree (the shape load_sales_data / SALES.json use) into the store — see
+    _import_price_data_bulk for the merge rules."""
+    return _import_price_data_bulk(JSON_SALES, load_sales_data(), sales)
+
+
+def import_listings_bulk(listings: dict) -> dict:
+    """Listings counterpart to import_sales_bulk — same additive, dedup-by-
+    exact-match merge into LISTINGS.json / price_listings."""
+    return _import_price_data_bulk(JSON_LISTINGS, load_listings_data(), listings)
+
+
 def delete_entry(edition_id: str, foil_id: str, entry_type: str, index: int) -> dict:
     """Removes a single sale/listing record by its position within its own
     foil's list — the position an admin sees it at in the flattened, sorted

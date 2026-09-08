@@ -284,6 +284,24 @@
     border-color: var(--error);
 }
 
+/* Data Import / Export card — one row per store, Export + Import buttons
+   right-aligned like the Sync / Wipe rows. Its result log keeps the bordered
+   inset box (unlike the Local DB card's borderless variant) but is inset from
+   the card edges so the box reads as sitting inside the row group. */
+.admin-system-io-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#admin-system-io-card .admin-system-option-row:last-of-type {
+    border-bottom: none;
+}
+
+#admin-system-io-card .admin-system-sync-log {
+    margin: 0 16px 14px;
+}
+
 /* Database Connection lives at the top of .admin-system-sync-panel (above
    Sync / Wipe), so it wipes in with that panel's phase-2 vertical reveal
    for free — see animateHeightWipe (animation.js) /

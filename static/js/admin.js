@@ -1194,6 +1194,251 @@ async function runAdminSystemWipe() {
     }
 }
 
+// ── System → Data Import / Export ──
+// Per-store portable JSON snapshots (see /api/admin/system/export|import/* in
+// app.py). Export streams a file download; Import reads a file the admin picks,
+// POSTs its parsed contents, and prints a merge summary into the shared io log.
+// Import is merge-skip-existing server-side, so re-importing an old file only
+// backfills sets that have no value yet — it never overwrites one.
+const ADMIN_SYSTEM_IO_LABELS = {
+    'decks': 'Decks',
+    'edition-product-ids': 'Edition Product IDs',
+    'inventory-bins': 'Inventory Bins',
+    'listings': 'Listings Data',
+    'sales': 'Sales Data',
+    'set-group-ids': 'Set Group IDs',
+    'users': 'User Accounts',
+};
+
+// How many records an export doc holds, for the "Exported N …" line — null
+// when the store's shape isn't recognised (just prints "Exported …").
+function _adminSystemIoExportCount(store, doc) {
+    if (store === 'set-group-ids') {
+        return Object.keys(doc.group_ids || {}).length;
+    }
+    if (store === 'decks') {
+        return Object.values(doc.decks || {}).reduce((n, d) => n + Object.keys(d || {}).length, 0);
+    }
+    if (store === 'inventory-bins') {
+        return Object.values(doc.inventory || {}).reduce((n, b) => n + Object.keys(b || {}).length, 0);
+    }
+    if (store === 'edition-product-ids') {
+        const main = Object.keys(doc.product_ids || {}).length;
+        const foil = Object.values(doc.foil_product_ids || {})
+            .reduce((n, o) => n + Object.keys(o || {}).length, 0);
+        return main + foil;
+    }
+    if (store === 'users') {
+        return Object.keys(doc.users || {}).length;
+    }
+    if (store === 'sales' || store === 'listings') {
+        let n = 0;
+        for (const editions of Object.values(doc[store] || {})) {
+            for (const foils of Object.values(editions || {})) {
+                for (const rows of Object.values(foils || {})) n += (rows || []).length;
+            }
+        }
+        return n;
+    }
+    return null;
+}
+
+// Per-store rendering of the import endpoint's merge summary (their response
+// shapes differ — set-group-ids echoes the written pairs, edition-product-ids
+// only counts, since there can be thousands).
+function _adminSystemIoImportSummary(store, data) {
+    const label = ADMIN_SYSTEM_IO_LABELS[store] || store;
+
+    if (store === 'edition-product-ids') {
+        const lines = [
+            `Imported ${data.imported_count} new ${label} ` +
+            `(${data.imported_main} edition, ${data.imported_foil} Curio Foil).`,
+        ];
+        if (data.skipped_existing) lines.push(`Skipped ${data.skipped_existing} already set.`);
+        if (data.skipped_unknown_edition) {
+            lines.push(`Skipped ${data.skipped_unknown_edition} for editions not in this catalog.`);
+        }
+        if (data.invalid_count) {
+            const shown = (data.invalid || []).join(', ');
+            const more = data.invalid_count > (data.invalid || []).length ? ', …' : '';
+            lines.push(`Ignored ${data.invalid_count} invalid: ${shown}${more}`);
+        }
+        return lines.join('\n');
+    }
+
+    if (store === 'decks' || store === 'inventory-bins') {
+        const noun = store === 'decks' ? 'deck' : 'bin';
+        const lines = [`Imported ${data.imported_count} new ${noun}${data.imported_count === 1 ? '' : 's'}.`];
+        if (data.skipped_existing) lines.push(`Skipped ${data.skipped_existing} the owner already has.`);
+        if (data.skipped_unknown_user) {
+            lines.push(`Skipped ${data.skipped_unknown_user} for usernames with no account here.`);
+        }
+        if (data.cards_dropped) lines.push(`Dropped ${data.cards_dropped} card row(s) not in this catalog.`);
+        if (data.cards_unpinned) lines.push(`Unpinned ${data.cards_unpinned} card row(s) with an unknown printing.`);
+        if (data.invalid) lines.push(`Ignored ${data.invalid} malformed entr${data.invalid === 1 ? 'y' : 'ies'}.`);
+        if (data.imported_count) lines.push('', ...(data.imported || []).map(d => `  ${d}`));
+        return lines.join('\n');
+    }
+
+    if (store === 'sales' || store === 'listings') {
+        const noun = store === 'sales' ? 'sale' : 'listing';
+        const lines = [`Added ${data.imported_count} new ${noun} record${data.imported_count === 1 ? '' : 's'}.`];
+        if (data.skipped_duplicate) lines.push(`Skipped ${data.skipped_duplicate} already on file.`);
+        if (data.skipped_unknown_foil) {
+            lines.push(`Skipped ${data.skipped_unknown_foil} for editions/foils not in this catalog.`);
+        }
+        if (data.invalid) lines.push(`Ignored ${data.invalid} malformed record${data.invalid === 1 ? '' : 's'}.`);
+        return lines.join('\n');
+    }
+
+    if (store === 'users') {
+        const lines = [`Imported ${data.imported_count} new ${label.toLowerCase()}.`];
+        if (data.skipped_existing_count) {
+            lines.push(`Skipped ${data.skipped_existing_count} already here: ${data.skipped_existing.join(', ')}`);
+        }
+        if (data.skipped_omnidex_clash && data.skipped_omnidex_clash.length) {
+            lines.push(`Skipped ${data.skipped_omnidex_clash.length} (Omnidex ID already taken): ` +
+                data.skipped_omnidex_clash.join(', '));
+        }
+        if (data.invalid && data.invalid.length) {
+            lines.push(`Ignored ${data.invalid.length} invalid: ${data.invalid.join(', ')}`);
+        }
+        if (data.imported_count) lines.push('', ...data.imported.map(u => `  ${u}`));
+        return lines.join('\n');
+    }
+
+    // set-group-ids
+    const lines = [`Imported ${data.imported_count} new ${label}.`];
+    if (data.skipped_count) {
+        lines.push(`Skipped ${data.skipped_count} already set: ${data.skipped_existing.join(', ')}`);
+    }
+    if (data.invalid && data.invalid.length) {
+        lines.push(`Ignored ${data.invalid.length} invalid: ${data.invalid.join(', ')}`);
+    }
+    if (data.imported_count) {
+        lines.push('', ...Object.entries(data.imported).map(([s, id]) => `  ${s} → ${id}`));
+    }
+    return lines.join('\n');
+}
+
+// Reveal / update #admin-system-io-log while animating the Import/Export card's
+// own height, so the status window grows (or shrinks) into place instead of
+// snapping in — same animateBoxResize technique as _animateAdminSyncLog for the
+// Sync / Wipe log. Returns the resize promise; a caller firing a second update
+// right after should await it (a second animateBoxResize cancels the first).
+function _adminSystemIoLog(text, isError) {
+    const log = document.getElementById('admin-system-io-log');
+    if (!log) return Promise.resolve();
+
+    const card = document.getElementById('admin-system-io-card');
+    const mutate = () => {
+        log.classList.remove('hidden');
+        log.classList.toggle('admin-system-sync-log-error', !!isError);
+        log.textContent = text;
+    };
+
+    if (!card) { mutate(); return Promise.resolve(); }
+    return animateBoxResize(card, mutate);
+}
+
+async function exportAdminSystemData(store) {
+    const btn = document.getElementById(`admin-system-io-${store}-export`);
+    const label = ADMIN_SYSTEM_IO_LABELS[store] || store;
+    const originalLabel = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Exporting…'; }
+
+    try {
+        const res = await fetch(`/api/admin/system/export/${store}`);
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.detail || 'Export failed.');
+        }
+        const text = await res.text();
+
+        const blob = new Blob([text], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${store}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+        let count = null;
+        try { count = _adminSystemIoExportCount(store, JSON.parse(text)); } catch (e) {}
+        _adminSystemIoLog(
+            count === null ? `Exported ${label}.` : `Exported ${count} ${label}.`, false);
+    } catch (err) {
+        _adminSystemIoLog(err.message || 'Export failed.', true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+    }
+}
+
+// The hidden #admin-system-io-file input is shared by every store's Import
+// button — this records which store the next file pick is for, then triggers
+// the picker. handleAdminSystemIoFile (the input's onchange) reads it back.
+let adminSystemIoImportStore = null;
+
+function importAdminSystemData(store) {
+    const input = document.getElementById('admin-system-io-file');
+    if (!input) return;
+    adminSystemIoImportStore = store;
+    input.value = '';   // so re-picking the same file still fires onchange
+    input.click();
+}
+
+async function handleAdminSystemIoFile(input) {
+    const store = adminSystemIoImportStore;
+    const file = input.files && input.files[0];
+    if (!store || !file) return;
+
+    const label = ADMIN_SYSTEM_IO_LABELS[store] || store;
+    const btn = document.getElementById(`admin-system-io-${store}-import`);
+    const originalLabel = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+
+    try {
+        let payload;
+        try {
+            payload = JSON.parse(await file.text());
+        } catch (e) {
+            throw new Error('That file is not valid JSON.');
+        }
+
+        const res = await fetch(`/api/admin/system/import/${store}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Import failed.');
+
+        _adminSystemIoLog(_adminSystemIoImportSummary(store, data), false);
+
+        // Reflect the newly-written values in the Cards section if it's already
+        // been loaded this session: set Group IDs feed the Info ▸ Sets panel
+        // (and unlock its tcgcsv import); edition product IDs feed the Pricing
+        // list.
+        if (adminPidLoaded) {
+            if (store === 'set-group-ids') loadAdminSetSearches();
+            if (store === 'edition-product-ids') refreshAdminPidData();
+            // Sales / listings history is per-card and fetched on selection —
+            // just refresh whatever card is open in the Pricing detail now.
+            if ((store === 'sales' || store === 'listings') && adminPidDetailSelected) {
+                loadAdminPricingDetailHistory();
+            }
+        }
+        if (store === 'users' && adminUsersLoaded) loadAdminUsers();
+    } catch (err) {
+        _adminSystemIoLog(err.message || 'Import failed.', true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+        adminSystemIoImportStore = null;
+    }
+}
+
 async function loadAdminUsers() {
     const summary = document.getElementById('admin-user-summary');
     const table = document.getElementById('admin-user-table');

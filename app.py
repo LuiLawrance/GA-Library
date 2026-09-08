@@ -4,7 +4,7 @@ from api_ga import _api_search, _build_collector_map, _download_card_image, _dow
     load_featured_sets_data, load_info_data, load_set_collector_data, load_set_names, load_set_searches_data, \
     load_slugs_data, load_thema_for_editions, load_update_data, mark_set_searched, set_group_id, set_search, \
     sync_featured_sets, UPDATE_THRESHOLD
-from api_tcgplayer import clear_foil_last_scraped, clear_last_scraped, MARKETPLACES, \
+from api_tcgplayer import clear_foil_last_scraped, clear_last_scraped, JSON_IDS, MARKETPLACES, \
     NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_scraped_map, get_foil_overrides, get_last_scraped_map, \
     set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
@@ -20,8 +20,9 @@ from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     clear_product_ids_for_set, delete_entry, import_gal_pricing, \
-    import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, load_listings_data, \
-    load_price_data_for_card, load_sales_data, scrape_batch_tcg_by_editions, scrape_listings_tcg_by_edition, \
+    import_listings_bulk, import_pasted_sales_tcg_by_edition, import_product_ids_from_tcgcsv, import_sales_bulk, \
+    load_listings_data, load_price_data_for_card, load_sales_data, scrape_batch_tcg_by_editions, \
+    scrape_listings_tcg_by_edition, \
     scrape_sales_and_listings_tcg_by_edition, scrape_sales_tcg_by_edition
 from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
@@ -33,7 +34,9 @@ from user import (
     user_admin_reset_password,
     user_create,
     user_delete,
+    user_export_all,
     user_find_by_omnidex,
+    user_import_bulk,
     user_get_auth_type,
     user_get_id,
     user_get_profile,
@@ -1223,6 +1226,512 @@ async def api_admin_wipe_database(request: Request):
         return JSONResponse(result)
 
     raise HTTPException(status_code=500, detail=result["error"] or "Wipe failed.")
+
+
+# ── System → Data Import / Export ───────────────────────────────────────
+# Portable JSON snapshots of individual data stores, for moving hand-curated
+# bookkeeping between instances (a local machine and a Railway deploy, say)
+# without running a full JSON→Postgres sync. Each export is a self-describing
+# document — {format, version, exported_at, <payload>} — and import merges
+# skip-existing: it only fills a value that's currently unset and never
+# overwrites one already there, so re-importing a stale snapshot can't clobber
+# newer local edits.
+#
+# First store wired up: the sets table's admin-entered tcgcsv Group ID
+# (tcgplayer_group_id — see api_admin_set_group_id). Reads/writes branch on
+# is_db_mode() the same way that endpoint does.
+
+SET_GROUP_IDS_FORMAT = "grand-archive-library/set-group-ids"
+
+
+def _all_set_group_ids() -> dict[str, str]:
+    """slug → tcgplayer_group_id for every set that has one."""
+    src = load_set_searches_data() if is_db_mode() else _set_search_cache
+    return {
+        slug: entry["tcgplayer_group_id"]
+        for slug, entry in src.items()
+        if entry.get("tcgplayer_group_id")
+    }
+
+
+def _persist_set_group_ids(new_ids: dict[str, str]) -> None:
+    """Write a batch of slug → Group ID pairs — JSON mode rewrites
+    SET_SEARCHES.json once, DB mode upserts one sets row per slug via
+    set_group_id. Caller has already validated the values and dropped any
+    slug that shouldn't be written (skip-existing, non-numeric, …)."""
+    if not new_ids:
+        return
+
+    if is_db_mode():
+        for slug, group_id in new_ids.items():
+            set_group_id(slug, group_id)
+        return
+
+    for slug, group_id in new_ids.items():
+        _set_search_cache.setdefault(slug, {})["tcgplayer_group_id"] = group_id
+    with new_json(JSON_SET_SEARCHES).open("w", encoding="utf-8") as f:
+        json.dump(_set_search_cache, f, indent=4)
+
+
+@app.get("/api/admin/system/export/set-group-ids")
+async def api_admin_export_set_group_ids(request: Request):
+    require_system_admin(request)
+
+    doc = {
+        "format": SET_GROUP_IDS_FORMAT,
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "group_ids": dict(sorted(_all_set_group_ids().items())),
+    }
+
+    return Response(
+        json.dumps(doc, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="set-group-ids.json"'},
+    )
+
+
+@app.post("/api/admin/system/import/set-group-ids")
+async def api_admin_import_set_group_ids(request: Request):
+    require_system_admin(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="That file is not valid JSON.")
+
+    if not isinstance(body, dict) or body.get("format") != SET_GROUP_IDS_FORMAT:
+        raise HTTPException(status_code=400, detail=f'Not a "{SET_GROUP_IDS_FORMAT}" export file.')
+
+    group_ids = body.get("group_ids")
+    if not isinstance(group_ids, dict):
+        raise HTTPException(status_code=400, detail='"group_ids" must be an object of set slug → Group ID.')
+
+    existing = _all_set_group_ids()
+
+    imported: dict[str, str] = {}
+    skipped_existing: list[str] = []
+    invalid: list[str] = []
+
+    for raw_slug, raw_id in group_ids.items():
+        slug = str(raw_slug).strip().lower().replace(" ", "_")
+        group_id = str(raw_id).strip()
+
+        if not slug or not group_id.isdigit():
+            invalid.append(str(raw_slug))
+            continue
+
+        if slug in existing:
+            skipped_existing.append(slug)
+            continue
+
+        imported[slug] = group_id
+
+    _persist_set_group_ids(imported)
+
+    return JSONResponse({
+        "imported": dict(sorted(imported.items())),
+        "imported_count": len(imported),
+        "skipped_existing": sorted(skipped_existing),
+        "skipped_count": len(skipped_existing),
+        "invalid": invalid,
+    })
+
+
+# Second store: the edition-level TCGPlayer product IDs (editions.tcg_product_id
+# / the "~" no-listings sentinel) plus the per-Curio-Foil overrides
+# (foil_tcg_overrides.product_id). This is the hand-curated + tcgcsv-imported
+# "which TCGPlayer product is this?" mapping — deliberately NOT the scrape
+# clocks (last_sales / last_listings), which regenerate on the next scrape and
+# aren't product identity. Same skip-existing merge and is_db_mode() branching
+# as the set-Group-ID pair above; "~" already on file counts as set (a
+# deliberate no-listings marker) and is never overwritten.
+
+EDITION_PRODUCT_IDS_FORMAT = "grand-archive-library/edition-product-ids"
+
+
+def _valid_product_id(value: str) -> bool:
+    return value == NO_LISTINGS_SENTINEL or value.isdigit()
+
+
+def _persist_edition_product_ids(
+    main_ids: dict[str, str], foil_ids: dict[str, dict[str, str]]
+) -> None:
+    """Write a validated batch of edition + Curio-Foil product IDs. JSON mode
+    rewrites ID_TCGPLAYER.json once; DB mode goes through the per-edition
+    api_tcgplayer setters (which upsert editions.tcg_* / foil_tcg_overrides,
+    bust db_cache, and no-op on an edition/foil the catalog doesn't have)."""
+    if not main_ids and not foil_ids:
+        return
+
+    if is_db_mode():
+        for edition_id, value in main_ids.items():
+            set_product_id(edition_id, value)
+        for edition_id, foils in foil_ids.items():
+            for foil_id, value in foils.items():
+                set_foil_product_id(edition_id, foil_id, value)
+        return
+
+    ids_file = new_json(JSON_IDS)
+    with ids_file.open("r", encoding="utf-8") as f:
+        ids_data = json.load(f)
+
+    for edition_id, value in main_ids.items():
+        ids_data.setdefault(edition_id, {})["product_id"] = value
+    for edition_id, foils in foil_ids.items():
+        for foil_id, value in foils.items():
+            ids_data.setdefault(edition_id, {}).setdefault("foils", {}).setdefault(foil_id, {})["product_id"] = value
+
+    with ids_file.open("w", encoding="utf-8") as f:
+        json.dump(ids_data, f, indent=4)
+
+
+@app.get("/api/admin/system/export/edition-product-ids")
+async def api_admin_export_edition_product_ids(request: Request):
+    require_system_admin(request)
+
+    product_ids: dict[str, str] = {}
+    foil_product_ids: dict[str, dict[str, str]] = {}
+
+    for edition_id, entry in get_all_ids().items():
+        if entry.get("product_id"):
+            product_ids[edition_id] = entry["product_id"]
+        for foil_id, foil_entry in (entry.get("foils") or {}).items():
+            if foil_entry.get("product_id"):
+                foil_product_ids.setdefault(edition_id, {})[foil_id] = foil_entry["product_id"]
+
+    doc = {
+        "format": EDITION_PRODUCT_IDS_FORMAT,
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "product_ids": dict(sorted(product_ids.items())),
+        "foil_product_ids": {eid: foil_product_ids[eid] for eid in sorted(foil_product_ids)},
+    }
+
+    return Response(
+        json.dumps(doc, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="edition-product-ids.json"'},
+    )
+
+
+@app.post("/api/admin/system/import/edition-product-ids")
+async def api_admin_import_edition_product_ids(request: Request):
+    require_system_admin(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="That file is not valid JSON.")
+
+    if not isinstance(body, dict) or body.get("format") != EDITION_PRODUCT_IDS_FORMAT:
+        raise HTTPException(status_code=400, detail=f'Not a "{EDITION_PRODUCT_IDS_FORMAT}" export file.')
+
+    product_ids = body.get("product_ids") or {}
+    foil_product_ids = body.get("foil_product_ids") or {}
+    if not isinstance(product_ids, dict) or not isinstance(foil_product_ids, dict):
+        raise HTTPException(
+            status_code=400,
+            detail='"product_ids" and "foil_product_ids" must be objects keyed by edition_id.',
+        )
+
+    existing = get_all_ids()
+    known_editions = set(load_editions_data())
+
+    imported_main: dict[str, str] = {}
+    imported_foil: dict[str, dict[str, str]] = {}
+    skipped_existing = 0
+    skipped_unknown_edition = 0
+    invalid: list[str] = []
+
+    for edition_id, raw in product_ids.items():
+        value = str(raw).strip()
+        if not _valid_product_id(value):
+            invalid.append(edition_id)
+        elif edition_id not in known_editions:
+            skipped_unknown_edition += 1
+        elif existing.get(edition_id, {}).get("product_id"):
+            skipped_existing += 1
+        else:
+            imported_main[edition_id] = value
+
+    for edition_id, foils in foil_product_ids.items():
+        if not isinstance(foils, dict):
+            invalid.append(edition_id)
+            continue
+        for foil_id, raw in foils.items():
+            value = str(raw).strip()
+            if not _valid_product_id(value):
+                invalid.append(f"{edition_id}/{foil_id}")
+            elif edition_id not in known_editions:
+                skipped_unknown_edition += 1
+            elif existing.get(edition_id, {}).get("foils", {}).get(foil_id, {}).get("product_id"):
+                skipped_existing += 1
+            else:
+                imported_foil.setdefault(edition_id, {})[foil_id] = value
+
+    _persist_edition_product_ids(imported_main, imported_foil)
+
+    imported_foil_count = sum(len(v) for v in imported_foil.values())
+    return JSONResponse({
+        "imported_main": len(imported_main),
+        "imported_foil": imported_foil_count,
+        "imported_count": len(imported_main) + imported_foil_count,
+        "skipped_existing": skipped_existing,
+        "skipped_unknown_edition": skipped_unknown_edition,
+        "invalid": invalid[:50],
+        "invalid_count": len(invalid),
+    })
+
+
+# Third store: user accounts (the users table / USERS.json) — username, bcrypt
+# password hash, role, bio, Omnidex ID, admin note, created_at: everything an
+# account needs to exist on another instance without the person re-registering.
+# Merge skip-existing — an existing username is left entirely alone (role and
+# password included), and a username whose Omnidex ID is already taken here is
+# skipped. super_admin-only like the rest of the System tab, and the same rank
+# that can already promote anyone from the Users tab, so importing accounts
+# grants nothing that tab doesn't.
+
+USERS_FORMAT = "grand-archive-library/users"
+
+
+@app.get("/api/admin/system/export/users")
+async def api_admin_export_users(request: Request):
+    require_system_admin(request)
+
+    doc = {
+        "format": USERS_FORMAT,
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "users": dict(sorted(user_export_all().items())),
+    }
+
+    return Response(
+        json.dumps(doc, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="users.json"'},
+    )
+
+
+@app.post("/api/admin/system/import/users")
+async def api_admin_import_users(request: Request):
+    require_system_admin(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="That file is not valid JSON.")
+
+    if not isinstance(body, dict) or body.get("format") != USERS_FORMAT:
+        raise HTTPException(status_code=400, detail=f'Not a "{USERS_FORMAT}" export file.')
+
+    users = body.get("users")
+    if not isinstance(users, dict):
+        raise HTTPException(status_code=400, detail='"users" must be an object keyed by username.')
+
+    result = user_import_bulk(users)
+
+    return JSONResponse({
+        "imported": result["imported"],
+        "imported_count": len(result["imported"]),
+        "skipped_existing": result["skipped_existing"],
+        "skipped_existing_count": len(result["skipped_existing"]),
+        "skipped_omnidex_clash": result["skipped_omnidex_clash"],
+        "invalid": result["invalid"],
+    })
+
+
+# Fourth + fifth stores: sales history (price_sales / SALES.json) and listings
+# history (price_listings / LISTINGS.json) — each a per-foil list of
+# {date, marketplace, price, quantity, condition} records, keyed
+# card_id → edition_id → foil_id. Import is purely ADDITIVE: a record is
+# inserted only when no exact (date, marketplace, price, quantity, condition)
+# match already exists for that foil (same dedup key as the per-card GAL import
+# and the scraper), so re-importing an overlapping file adds nothing. Records
+# for an edition/foil not in the local catalog are skipped and counted.
+
+_PRICE_HISTORY_STORES = {
+    "sales": ("grand-archive-library/sales", load_sales_data, import_sales_bulk),
+    "listings": ("grand-archive-library/listings", load_listings_data, import_listings_bulk),
+}
+
+
+def _price_history_export(kind: str) -> Response:
+    fmt, loader, _ = _PRICE_HISTORY_STORES[kind]
+    doc = {
+        "format": fmt,
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        kind: loader(),
+    }
+    return Response(
+        json.dumps(doc, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{kind}.json"'},
+    )
+
+
+async def _price_history_import(kind: str, request: Request) -> JSONResponse:
+    fmt, _, importer = _PRICE_HISTORY_STORES[kind]
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="That file is not valid JSON.")
+
+    if not isinstance(body, dict) or body.get("format") != fmt:
+        raise HTTPException(status_code=400, detail=f'Not a "{fmt}" export file.')
+
+    payload = body.get(kind)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail=f'"{kind}" must be an object keyed by card_id.')
+
+    result = importer(payload)
+
+    return JSONResponse({
+        "imported_count": result["added"],
+        "skipped_duplicate": result["skipped_duplicate"],
+        "skipped_unknown_foil": result["skipped_unknown_foil"],
+        "invalid": result["invalid"],
+    })
+
+
+@app.get("/api/admin/system/export/sales")
+async def api_admin_export_sales(request: Request):
+    require_system_admin(request)
+    return _price_history_export("sales")
+
+
+@app.post("/api/admin/system/import/sales")
+async def api_admin_import_sales(request: Request):
+    require_system_admin(request)
+    return await _price_history_import("sales", request)
+
+
+@app.get("/api/admin/system/export/listings")
+async def api_admin_export_listings(request: Request):
+    require_system_admin(request)
+    return _price_history_export("listings")
+
+
+@app.post("/api/admin/system/import/listings")
+async def api_admin_import_listings(request: Request):
+    require_system_admin(request)
+    return await _price_history_import("listings", request)
+
+
+# Sixth store: decks — every deck of every user, as
+# {username: {deck_name: {index, content}}} (see _all_decks_export / the
+# Decks GA section). Import is skip-existing per (user, deck): a deck the user
+# already has by that name is left untouched; decks under a username with no
+# account here are skipped; a deck card for a card/printing not in this
+# catalog is dropped or unpinned (see _sanitize_deck_sections).
+
+DECKS_FORMAT = "grand-archive-library/decks"
+
+
+@app.get("/api/admin/system/export/decks")
+async def api_admin_export_decks(request: Request):
+    require_system_admin(request)
+
+    doc = {
+        "format": DECKS_FORMAT,
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "decks": _all_decks_export(),
+    }
+
+    return Response(
+        json.dumps(doc, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="decks.json"'},
+    )
+
+
+@app.post("/api/admin/system/import/decks")
+async def api_admin_import_decks(request: Request):
+    require_system_admin(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="That file is not valid JSON.")
+
+    if not isinstance(body, dict) or body.get("format") != DECKS_FORMAT:
+        raise HTTPException(status_code=400, detail=f'Not a "{DECKS_FORMAT}" export file.')
+
+    decks = body.get("decks")
+    if not isinstance(decks, dict):
+        raise HTTPException(status_code=400, detail='"decks" must be an object keyed by username.')
+
+    result = _import_decks_bulk(decks)
+
+    return JSONResponse({
+        "imported": result["imported"][:50],
+        "imported_count": len(result["imported"]),
+        "skipped_existing": result["skipped_existing"],
+        "skipped_unknown_user": result["skipped_unknown_user"],
+        "cards_dropped": result["cards_dropped"],
+        "cards_unpinned": result["cards_unpinned"],
+        "invalid": result["invalid"],
+    })
+
+
+# Seventh store: inventory bins — every bin of every user, as
+# {username: {bin_name: {bin dict}}} (see _all_inventory_export). Import is
+# skip-existing per (user, bin): a bin the user already has by name is left
+# untouched; bins under a username with no account here are skipped; card
+# entries for a card/printing not in this catalog are dropped; an imported
+# bin is never the default one.
+
+INVENTORY_BINS_FORMAT = "grand-archive-library/inventory-bins"
+
+
+@app.get("/api/admin/system/export/inventory-bins")
+async def api_admin_export_inventory_bins(request: Request):
+    require_system_admin(request)
+
+    doc = {
+        "format": INVENTORY_BINS_FORMAT,
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "inventory": _all_inventory_export(),
+    }
+
+    return Response(
+        json.dumps(doc, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="inventory-bins.json"'},
+    )
+
+
+@app.post("/api/admin/system/import/inventory-bins")
+async def api_admin_import_inventory_bins(request: Request):
+    require_system_admin(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="That file is not valid JSON.")
+
+    if not isinstance(body, dict) or body.get("format") != INVENTORY_BINS_FORMAT:
+        raise HTTPException(status_code=400, detail=f'Not a "{INVENTORY_BINS_FORMAT}" export file.')
+
+    inventory = body.get("inventory")
+    if not isinstance(inventory, dict):
+        raise HTTPException(status_code=400, detail='"inventory" must be an object keyed by username.')
+
+    result = _import_inventory_bins_bulk(inventory)
+
+    return JSONResponse({
+        "imported": result["imported"][:50],
+        "imported_count": len(result["imported"]),
+        "skipped_existing": result["skipped_existing"],
+        "skipped_unknown_user": result["skipped_unknown_user"],
+        "cards_dropped": result["cards_dropped"],
+        "invalid": result["invalid"],
+    })
 
 
 # ── Database Connection panel ────────────────────────────────────────────
@@ -2982,6 +3491,122 @@ def _inv_save_db(username: str, data: dict) -> None:
                         session.delete(existing_card)
 
 
+# ── Portable whole-inventory export / import (Admin ▸ System) ────────────
+# Every inventory bin of every user as {username: {bin_name: {bin dict}}},
+# where the bin dict is the _inv_load entry shape (banner/default/public/desc/
+# symbol/tags/sections) and `sections` is {section: {card_id: {edition_id:
+# {foil_id: quantity}}}}. _inv_load / _inv_save are is_db_mode()-aware.
+
+def _all_inventory_export() -> dict:
+    result: dict[str, dict] = {}
+    for entry in user_list():
+        username = entry["username"]
+        bins = _inv_load(username)
+        if bins:
+            result[username] = bins
+    return result
+
+
+def _sanitize_bin_sections(sections, known_cards: set, valid_foil_keys: set) -> tuple[dict, int]:
+    """Drop any (card_id, edition_id, foil_id) the catalog doesn't have —
+    inventory_cards requires all three (unlike deck cards, which can be
+    unpinned). Returns (clean_sections, dropped_cards)."""
+    clean: dict[str, dict] = {}
+    dropped = 0
+
+    for section_name, cards in (sections or {}).items():
+        section_out: dict[str, dict] = {}
+        for card_id, editions in (cards or {}).items():
+            if not isinstance(editions, dict):
+                continue
+            if card_id not in known_cards:
+                dropped += sum(len(foils) for foils in editions.values() if isinstance(foils, dict))
+                continue
+            for edition_id, foils in editions.items():
+                for foil_id, quantity in (foils or {}).items():
+                    try:
+                        quantity = int(quantity)
+                    except (TypeError, ValueError):
+                        quantity = 0
+                    if quantity <= 0:
+                        continue
+                    if (edition_id, foil_id) not in valid_foil_keys:
+                        dropped += 1
+                        continue
+                    section_out.setdefault(card_id, {}).setdefault(edition_id, {})[foil_id] = quantity
+        clean[section_name] = section_out
+
+    return clean, dropped
+
+
+def _import_inventory_bins_bulk(inventory: dict) -> dict:
+    """Merge a {username: {bin_name: {bin dict}}} tree. Skip-existing per
+    (user, bin): a bin the user already has by that name is left untouched.
+    Bins under a username with no account here are skipped and counted. Card
+    entries for a card / printing not in this catalog are dropped. An imported
+    bin is never marked default — the user already has their own default bin."""
+    from pricing_ga import _all_valid_foil_keys
+
+    known_cards = {row["card_id"] for row in load_slugs_data().values()}
+    valid_foil_keys = _all_valid_foil_keys()
+
+    imported: list[str] = []
+    skipped_existing = 0
+    skipped_unknown_user = 0
+    cards_dropped = 0
+    invalid = 0
+
+    for username, user_bins in inventory.items():
+        if not isinstance(user_bins, dict):
+            invalid += 1
+            continue
+        if get_user_auth_type(username) is None:
+            skipped_unknown_user += len(user_bins)
+            continue
+
+        current = _inv_load(username)
+        merged = dict(current)
+        staged = []
+
+        for bin_name, bin_data in user_bins.items():
+            if not isinstance(bin_data, dict) or not str(bin_name).strip():
+                invalid += 1
+                continue
+            if bin_name in current:
+                skipped_existing += 1
+                continue
+
+            clean_sections, dropped = _sanitize_bin_sections(
+                bin_data.get("sections"), known_cards, valid_foil_keys
+            )
+            cards_dropped += dropped
+
+            merged[bin_name] = {
+                "banner": bin_data.get("banner"),
+                "default": False,
+                "public": bool(bin_data.get("public", False)),
+                "desc": bin_data.get("desc", "") or "",
+                "symbol": bin_data.get("symbol"),
+                "tags": bin_data.get("tags"),
+                "sections": clean_sections,
+            }
+            staged.append(bin_name)
+
+        if not staged:
+            continue
+
+        _inv_save(username, merged)
+        imported.extend(f"{username} / {name}" for name in staged)
+
+    return {
+        "imported": imported,
+        "skipped_existing": skipped_existing,
+        "skipped_unknown_user": skipped_unknown_user,
+        "cards_dropped": cards_dropped,
+        "invalid": invalid,
+    }
+
+
 @app.get("/api/inventory")
 async def api_inventory_get(request: Request):
     user = get_current_user(request)
@@ -4237,6 +4862,157 @@ def _make_deck_data(desc: str, fmt: str) -> dict:
         "desc": desc,
         "format": fmt,
         "sections": {s: [] for s in DEFAULT_SECTIONS}
+    }
+
+
+# ── Portable whole-decks export / import (Admin ▸ System ▸ Data Import/Export) ──
+# Every deck of every user as {username: {deck_name: {index, content}}}, where
+# `index` is the _deck_index_load entry shape (banner/symbol/tags/public/
+# edition_locked/pub_id/created/modified) and `content` the _deck_load shape
+# (desc/format/sections). Both loaders are is_db_mode()-aware, so this works in
+# either mode without touching the DB / JSON split here.
+
+def _all_decks_export() -> dict:
+    result: dict[str, dict] = {}
+    for entry in user_list():
+        username = entry["username"]
+        index = _deck_index_load(username)
+        if not index:
+            continue
+        result[username] = {
+            name: {
+                "index": index[name],
+                "content": _deck_load(username, name) or _make_deck_data("", ""),
+            }
+            for name in index
+        }
+    return result
+
+
+def _sanitize_deck_sections(sections, known_cards: set, valid_foil_keys: set) -> tuple[dict, int, int]:
+    """Drop rows for a card_id the catalog doesn't have; null out an
+    (edition_id, foil_id) pin it doesn't have (keeping the card, unpinned).
+    Returns (clean_sections, dropped_cards, unpinned_cards)."""
+    clean: dict[str, list] = {}
+    dropped = unpinned = 0
+
+    for name, rows in (sections or {}).items():
+        out = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict) or row.get("card_id") not in known_cards:
+                dropped += 1
+                continue
+            edition_id = row.get("edition_id")
+            foil_id = row.get("foil_id")
+            if edition_id is not None and foil_id is not None and (edition_id, foil_id) not in valid_foil_keys:
+                edition_id = foil_id = None
+                unpinned += 1
+            try:
+                quantity = int(row.get("quantity") or 0)
+            except (TypeError, ValueError):
+                quantity = 0
+            if quantity > 0:
+                out.append({
+                    "card_id": row["card_id"], "edition_id": edition_id,
+                    "foil_id": foil_id, "quantity": quantity,
+                })
+        clean[name] = out
+
+    return clean, dropped, unpinned
+
+
+def _import_decks_bulk(decks: dict) -> dict:
+    """Merge a {username: {deck_name: {index, content}}} tree. Skip-existing per
+    (user, deck): a deck whose name the user already has is left untouched.
+    Decks under a username with no account here are skipped and counted. Deck
+    cards for an unknown card are dropped; unknown printings are unpinned (see
+    _sanitize_deck_sections). A pub_id that collides with one the user already
+    has is reminted."""
+    from pricing_ga import _all_valid_foil_keys
+
+    known_cards = {row["card_id"] for row in load_slugs_data().values()}
+    valid_foil_keys = _all_valid_foil_keys()
+
+    imported: list[str] = []
+    skipped_existing = 0
+    skipped_unknown_user = 0
+    cards_dropped = 0
+    cards_unpinned = 0
+    invalid = 0
+
+    for username, user_decks in decks.items():
+        if not isinstance(user_decks, dict):
+            invalid += 1
+            continue
+        if get_user_auth_type(username) is None:
+            skipped_unknown_user += len(user_decks)
+            continue
+
+        current = _deck_index_load(username)
+        used_pubids = {e.get("pub_id") for e in current.values() if e.get("pub_id")}
+        new_index = dict(current)
+        staged: list[tuple[str, dict]] = []
+
+        for deck_name, payload in user_decks.items():
+            if not isinstance(payload, dict) or not str(deck_name).strip():
+                invalid += 1
+                continue
+            if deck_name in current:
+                skipped_existing += 1
+                continue
+
+            src_index = payload.get("index") or {}
+            src_content = payload.get("content") or {}
+            today = date.today().isoformat()
+
+            pub_id = src_index.get("pub_id")
+            if not pub_id or pub_id in used_pubids:
+                pub_id = _deck_pubid_new(used_pubids)
+            used_pubids.add(pub_id)
+
+            new_index[deck_name] = {
+                "banner": src_index.get("banner"),
+                "symbol": src_index.get("symbol"),
+                "tags": src_index.get("tags"),
+                "public": bool(src_index.get("public", False)),
+                "edition_locked": bool(src_index.get("edition_locked", False)),
+                "pub_id": pub_id,
+                "created": src_index.get("created") or today,
+                "modified": src_index.get("modified") or today,
+            }
+
+            clean_sections, dropped, unpinned = _sanitize_deck_sections(
+                src_content.get("sections"), known_cards, valid_foil_keys
+            )
+            cards_dropped += dropped
+            cards_unpinned += unpinned
+
+            staged.append((deck_name, {
+                "desc": src_content.get("desc", ""),
+                "format": src_content.get("format", ""),
+                "sections": clean_sections or {s: [] for s in DEFAULT_SECTIONS},
+            }))
+
+        if not staged:
+            continue
+
+        # Index first (creates the decks row in DB mode / the file entry in
+        # JSON mode), then each deck's content — _deck_save needs the entry to
+        # already be there. new_index carries the user's EXISTING decks too, so
+        # the DB-mode index save's "delete decks not in this dict" pass can't
+        # drop them.
+        _deck_index_save(username, new_index)
+        for deck_name, content in staged:
+            _deck_save(username, deck_name, content)
+            imported.append(f"{username} / {deck_name}")
+
+    return {
+        "imported": imported,
+        "skipped_existing": skipped_existing,
+        "skipped_unknown_user": skipped_unknown_user,
+        "cards_dropped": cards_dropped,
+        "cards_unpinned": cards_unpinned,
+        "invalid": invalid,
     }
 
 

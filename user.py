@@ -468,3 +468,140 @@ def user_admin_reset_password(username: str) -> None:
     if username in users_data:
         users_data[username]["password"] = ""
         _save_users_data(users_data)
+
+
+# ── Portable account export / import (Admin ▸ System ▸ Data Import / Export) ──
+# A user_export_all() dict is the USERS.json entry shape — DB mode reassembles
+# it from the users table. `password` is the bcrypt hash (or "" for an
+# admin-cleared password): everything an import needs to recreate the account
+# without the person re-registering. user_import_bulk merges skip-existing.
+
+def user_export_all() -> dict:
+    """{username: {auth_type, password, notes, bio, omnidex_id, admin_note,
+    created_at}} for every account."""
+    if is_db_mode():
+        with get_session() as session:
+            users = session.execute(select(UserModel)).scalars().all()
+            return {
+                user.username: {
+                    "auth_type": user.auth_type,
+                    "password": user.password_hash,
+                    "notes": user.notes or [],
+                    "bio": user.bio or "",
+                    "omnidex_id": user.omnidex_id,
+                    "admin_note": user.admin_note or "",
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                }
+                for user in users
+            }
+
+    return {
+        username: {
+            "auth_type": info.get("auth_type", "user"),
+            "password": info.get("password", ""),
+            "notes": info.get("notes", []),
+            "bio": info.get("bio", ""),
+            "omnidex_id": info.get("omnidex_id"),
+            "admin_note": info.get("admin_note", ""),
+            "created_at": info.get("created_at"),
+        }
+        for username, info in _load_users_data().items()
+    }
+
+
+def _persist_imported_users(new_rows: dict, debug: bool = False) -> None:
+    """Insert already-validated new accounts. JSON mode also seeds each one's
+    inventory/deck/wishlist files the way user_create does; DB mode doesn't
+    (those tables aren't wired to account creation there yet — see user_create)."""
+    if not new_rows:
+        return
+
+    if is_db_mode():
+        with get_session() as session:
+            for username, info in new_rows.items():
+                kwargs = dict(
+                    username=username,
+                    password_hash=info["password"],
+                    auth_type=info["auth_type"],
+                    notes=info["notes"],
+                    bio=info["bio"],
+                    omnidex_id=info["omnidex_id"],
+                    admin_note=info["admin_note"],
+                )
+                if info.get("created_at"):
+                    try:
+                        kwargs["created_at"] = datetime.fromisoformat(info["created_at"])
+                    except ValueError:
+                        pass
+                session.add(UserModel(**kwargs))
+        return
+
+    users_data = _load_users_data()
+    for username, info in new_rows.items():
+        users_data[username] = {
+            "auth_type": info["auth_type"],
+            "password": info["password"],
+            "notes": info["notes"],
+            "bio": info["bio"],
+            "omnidex_id": info["omnidex_id"],
+            "admin_note": info["admin_note"],
+            "created_at": info["created_at"],
+        }
+    _save_users_data(users_data)
+
+    for username in new_rows:
+        inv_init(username, debug)
+        deck_init(username, debug)
+        new_json(f"{DIR_WISH}/{username}.json", debug)
+
+
+def user_import_bulk(users: dict, debug: bool = False) -> dict:
+    """Create accounts from a user_export_all()-shaped dict. Merge
+    skip-existing: an existing username is left completely untouched (role and
+    password included); a username whose Omnidex ID is already taken by a
+    different account is skipped too (the ID is unique and immutable). Returns
+    {imported, skipped_existing, skipped_omnidex_clash, invalid} — each a
+    sorted username list."""
+    existing = user_export_all()
+    taken_omnidex = {info["omnidex_id"] for info in existing.values() if info.get("omnidex_id")}
+
+    imported, skipped_existing, skipped_omnidex, invalid = [], [], [], []
+    new_rows: dict = {}
+
+    for raw_username, info in users.items():
+        username = (raw_username or "").strip() if isinstance(raw_username, str) else ""
+
+        if not username or not isinstance(info, dict) or not isinstance(info.get("password"), str):
+            invalid.append(str(raw_username))
+            continue
+
+        if username in existing or username in new_rows:
+            skipped_existing.append(username)
+            continue
+
+        omnidex_id = info.get("omnidex_id") or None
+        if omnidex_id and omnidex_id in taken_omnidex:
+            skipped_omnidex.append(username)
+            continue
+
+        new_rows[username] = {
+            "auth_type": info.get("auth_type") or "user",
+            "password": info.get("password", ""),
+            "notes": info.get("notes") or [],
+            "bio": info.get("bio") or "",
+            "omnidex_id": omnidex_id,
+            "admin_note": info.get("admin_note") or "",
+            "created_at": info.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        }
+        if omnidex_id:
+            taken_omnidex.add(omnidex_id)
+        imported.append(username)
+
+    _persist_imported_users(new_rows, debug)
+
+    return {
+        "imported": sorted(imported),
+        "skipped_existing": sorted(skipped_existing),
+        "skipped_omnidex_clash": sorted(skipped_omnidex),
+        "invalid": invalid,
+    }
