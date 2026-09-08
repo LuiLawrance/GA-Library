@@ -123,3 +123,39 @@ label {
 .btn-switch:hover {
     opacity: 0.75;
 }
+
+/* ── Sign in with Google ── */
+
+/* "or" divider between the password form and the Google button. */
+.login-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.login-divider::before,
+.login-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+/* Google renders its own <iframe> button inside here; just center it. */
+.google-signin-btn {
+    display: flex;
+    justify-content: center;
+    min-height: 40px;
+}
+
+/* The "Signed in as <email>…" line on the finish-signing-up step. */
+.login-google-note {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+}

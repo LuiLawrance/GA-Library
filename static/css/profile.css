@@ -56,6 +56,7 @@
    (if there's a bio) About on top, then the Decks and Inventory Bins menus
    filling the rest, full-width, as many tiles per row as fit. */
 .profile-view-public .profile-area-password,
+.profile-view-public .profile-area-connections,
 .profile-view-public .profile-area-danger {
     display: none;
 }
@@ -228,6 +229,37 @@
 
 .profile-hint-success {
     color: var(--success);
+}
+
+/* ── Connected Accounts ── */
+.profile-connection-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.profile-connection-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-right: auto;
+}
+
+.profile-connection-name {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.profile-connection-status {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.profile-google-connect {
+    display: flex;
+    min-height: 40px;
 }
 
 .profile-danger {

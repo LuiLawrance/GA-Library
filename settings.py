@@ -28,6 +28,12 @@ SETTINGS_DEFAULTS = {
     # see updateAdminPidRefreshButton in admin.js) in every storage mode. Turn
     # it off on a hosted deployment so it never shows controls it can't run.
     "local_db": True,
+    # Master switch for "Sign in with Google" (Admin -> System). Off ⇒ the
+    # login page hides the button and the /api/auth/google* routes 503. The
+    # OAuth client ID itself lives under the separate `google_client_id` key
+    # (not here — it's a string, not a toggle) and has its own endpoint; see
+    # google_config.py.
+    "google_signin_enabled": False,
 }
 
 

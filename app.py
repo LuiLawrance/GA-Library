@@ -17,6 +17,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
+from google_config import (
+    env_google_client_id,
+    google_signin_enabled,
+    resolved_google_client_id,
+    save_google_client_id,
+    saved_google_client_id,
+)
 from jose import JWTError, jwt
 from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     clear_product_ids_for_set, delete_entry, import_gal_pricing, \
@@ -33,10 +42,14 @@ from user import (
     user_admin_reset_password,
     user_create,
     user_delete,
+    user_find_by_google_sub,
     user_find_by_omnidex,
     user_get_auth_type,
+    user_get_google_email,
     user_get_id,
     user_get_profile,
+    user_has_password,
+    user_link_google,
     user_list,
     user_login,
     user_needs_setup,
@@ -45,6 +58,7 @@ from user import (
     user_set_bio,
     user_set_omnidex_id,
     user_set_role,
+    user_unlink_google,
 )
 from util_file import new_json
 from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
@@ -67,6 +81,14 @@ load_dotenv(".env" if os.path.exists(".env") else "env")
 SECRET_KEY = os.getenv("SECRET_KEY")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", 480))
+
+# "Sign in with Google" (Google Identity Services). Both the on/off toggle and
+# the OAuth client ID are managed at runtime from Admin -> System and resolved
+# per-request via google_config.resolved_google_client_id() — None ⇒ the
+# feature is off (login page hides the button, /api/auth/google* routes 503).
+# Short-lived token bridging the two halves of first-time Google sign-up
+# (/api/auth/google → the "finish signing up" form → /api/auth/google/register).
+GOOGLE_REG_TOKEN_MINUTES = 15
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -149,6 +171,82 @@ def get_user_auth_type(username: str) -> str | None:
     return user_get_auth_type(username)
 
 
+def _issue_session_response(username: str, extra: dict | None = None) -> JSONResponse:
+    """Build the standard post-authentication response — the JSON body the
+    login form / SPA expect, plus the httponly `token` session cookie. Shared
+    by /api/login, /api/register and the Google sign-in routes."""
+    resp = JSONResponse({
+        "username": username,
+        "auth_type": get_user_auth_type(username),
+        **user_needs_setup(username),
+        **(extra or {}),
+    })
+    resp.set_cookie(
+        key="token",
+        value=create_token(username),
+        httponly=True,
+        samesite="lax",
+        max_age=JWT_EXPIRE_MINUTES * 60,
+    )
+    return resp
+
+
+def _verify_google_credential(credential: str) -> dict:
+    """Verify a Google Identity Services ID token and return its claims.
+
+    Checks the signature against Google's public keys, the audience against
+    the configured client ID, the issuer, and expiry (all done by
+    verify_oauth2_token). Raises 503 if Google sign-in is disabled or
+    unconfigured, 401 on any verification failure or an unverified email."""
+    client_id = resolved_google_client_id()
+    if not client_id:
+        detail = ("Google sign-in is disabled." if not google_signin_enabled()
+                  else "Google sign-in is not configured.")
+        raise HTTPException(status_code=503, detail=detail)
+
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            credential, google_requests.Request(), client_id
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Could not verify Google sign-in.")
+
+    if not claims.get("sub"):
+        raise HTTPException(status_code=401, detail="Could not verify Google sign-in.")
+
+    # email_verified comes back as a bool or the string "true" depending on
+    # the token; treat anything falsey/"false" as unverified.
+    if str(claims.get("email_verified")).lower() != "true":
+        raise HTTPException(status_code=401, detail="Your Google email is not verified.")
+
+    return claims
+
+
+def _make_google_reg_token(sub: str, email: str | None) -> str:
+    """A short-lived signed token carrying a verified Google identity across
+    the first-time sign-up form (see /api/auth/google → /api/auth/google/register)."""
+    payload = {
+        "typ": "google_reg",
+        "sub": sub,
+        "email": email or "",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=GOOGLE_REG_TOKEN_MINUTES),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def _read_google_reg_token(token: str) -> dict:
+    """Decode a token from _make_google_reg_token, or raise 400."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=400, detail="Your Google sign-up session expired. Please try again.")
+
+    if payload.get("typ") != "google_reg" or not payload.get("sub"):
+        raise HTTPException(status_code=400, detail="Your Google sign-up session expired. Please try again.")
+
+    return payload
+
+
 # Admin-console rank tiers. Each is a superset of the one below it (mirrors the
 # RANK_ORDER ladder in user.py), so a check against a lower tier also admits
 # every higher rank:
@@ -195,6 +293,7 @@ _SETUP_ALLOWED_API = (
     "/api/logout",
     "/api/login",
     "/api/register",
+    "/api/auth/google",
     "/api/profile/omnidex",
     "/api/profile/set-password",
 )
@@ -238,6 +337,10 @@ def _bust_static_cache(html: str) -> str:
 def serve_index():
     with open("templates/index.html", encoding="utf-8") as f:
         html = f.read()
+    # The frontend reads this from <meta name="google-client-id"> to init the
+    # Google Identity Services button; empty ⇒ the button stays hidden (the
+    # Admin -> System toggle is off, or no client ID is configured).
+    html = html.replace("__GOOGLE_CLIENT_ID__", resolved_google_client_id() or "")
     return HTMLResponse(_bust_static_cache(html))
 
 
@@ -742,6 +845,12 @@ async def api_profile(request: Request):
     if profile is None:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Self-view only — the linked Google email and whether a password exists
+    # (for the "set a password before unlinking" guard). Deliberately not in
+    # _profile_payload, which is also served publicly.
+    profile["google_email"] = user_get_google_email(user)
+    profile["has_password"] = user_has_password(user)
+
     return JSONResponse(profile)
 
 
@@ -859,6 +968,44 @@ async def api_profile_delete(request: Request):
     resp = JSONResponse({"deleted": user})
     resp.delete_cookie("token")
     return resp
+
+
+@app.post("/api/profile/google/link")
+async def api_profile_google_link(request: Request):
+    """Attach a Google account to the signed-in user. Body: {credential}."""
+    user = _require_login(request)
+
+    body = await request.json()
+    credential = (body.get("credential") or "").strip()
+
+    if not credential:
+        raise HTTPException(status_code=400, detail="Missing Google credential.")
+
+    claims = _verify_google_credential(credential)
+
+    try:
+        user_link_google(user, claims["sub"], claims.get("email"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return JSONResponse({"google_email": user_get_google_email(user)})
+
+
+@app.post("/api/profile/google/unlink")
+async def api_profile_google_unlink(request: Request):
+    """Detach the linked Google account. Refused unless the account also has a
+    password, so the user can't lock themselves out."""
+    user = _require_login(request)
+
+    if not user_has_password(user):
+        raise HTTPException(
+            status_code=400,
+            detail="Set a password first so you don't lose access to your account.",
+        )
+
+    user_unlink_google(user)
+
+    return JSONResponse({"google_email": None})
 
 
 @app.get("/api/sets")
@@ -1526,9 +1673,11 @@ def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
 @app.get("/api/admin/settings")
 async def api_admin_get_settings(request: Request):
     require_system_admin(request)
-    # The DB connection string (with its password) lives in SETTINGS.json too
-    # but has its own dedicated endpoint — don't ship it in this toggle blob.
-    return JSONResponse({k: v for k, v in load_settings().items() if k != "database_url"})
+    # The DB connection string (with its password) and the Google OAuth client
+    # ID both live in SETTINGS.json too but have their own dedicated endpoints
+    # — don't ship them in this toggle blob.
+    _own_endpoint = {"database_url", "google_client_id"}
+    return JSONResponse({k: v for k, v in load_settings().items() if k not in _own_endpoint})
 
 
 @app.post("/api/admin/settings")
@@ -1562,6 +1711,38 @@ async def api_admin_set_settings(request: Request):
     save_settings(settings_data)
 
     return JSONResponse(settings_data)
+
+
+def _google_config_payload() -> dict:
+    """Shared shape for the Google Sign-In config endpoint — the saved
+    override, the .env fallback (shown read-only), the on/off toggle, and the
+    client ID actually in effect (None ⇒ button hidden / routes 503)."""
+    return {
+        "client_id": saved_google_client_id() or "",
+        "env_client_id": env_google_client_id() or "",
+        "enabled": google_signin_enabled(),
+        "active_client_id": resolved_google_client_id() or "",
+    }
+
+
+@app.get("/api/admin/google-config")
+async def api_admin_get_google_config(request: Request):
+    require_system_admin(request)
+    return JSONResponse(_google_config_payload())
+
+
+@app.post("/api/admin/google-config")
+async def api_admin_set_google_config(request: Request):
+    """Save the "Sign in with Google" OAuth client ID to SETTINGS.json (the
+    .env value is left untouched — it's the fallback default). An empty string
+    clears the override. The enable/disable toggle goes through
+    /api/admin/settings like the other System switches."""
+    require_system_admin(request)
+
+    body = await request.json()
+    save_google_client_id(body.get("client_id") or "")
+
+    return JSONResponse(_google_config_payload())
 
 
 @app.get("/api/admin/users")
@@ -2416,21 +2597,7 @@ async def api_login(username: str = Form(...), password: str = Form("")):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
 
-    token = create_token(username)
-
-    resp = JSONResponse({
-        "username": username,
-        "auth_type": get_user_auth_type(username),
-        **user_needs_setup(username),
-    })
-    resp.set_cookie(
-        key="token",
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=JWT_EXPIRE_MINUTES * 60
-    )
-    return resp
+    return _issue_session_response(username)
 
 
 @app.post("/api/logout")
@@ -2456,7 +2623,78 @@ async def api_register(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    return await api_login(username=username, password=password)
+    return _issue_session_response(username)
+
+
+def _suggested_username_from_email(email: str | None) -> str:
+    """A starting-point username for the Google sign-up form — the email's
+    local part, stripped to the character set usernames allow. Purely a
+    convenience default; the user can replace it, and it's re-validated /
+    uniqueness-checked by user_create on submit."""
+    local = (email or "").split("@", 1)[0]
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "", local).strip("._-")
+    return cleaned[:32] or "player"
+
+
+@app.post("/api/auth/google")
+async def api_auth_google(request: Request):
+    """First leg of Sign in with Google. Body: {credential: <GIS ID token>}.
+
+    Returning user (Google `sub` already linked) → logs in, same response as
+    /api/login. New identity → returns {needs_registration: true, reg_token,
+    ...} and NO session cookie; the client collects a username + Omnidex ID
+    and calls /api/auth/google/register."""
+    body = await request.json()
+    credential = (body.get("credential") or "").strip()
+
+    if not credential:
+        raise HTTPException(status_code=400, detail="Missing Google credential.")
+
+    claims = _verify_google_credential(credential)
+    sub = claims["sub"]
+    email = claims.get("email") or None
+
+    existing = user_find_by_google_sub(sub)
+    if existing:
+        return _issue_session_response(existing)
+
+    return JSONResponse({
+        "needs_registration": True,
+        "reg_token": _make_google_reg_token(sub, email),
+        "email": email,
+        "suggested_username": _suggested_username_from_email(email),
+    })
+
+
+@app.post("/api/auth/google/register")
+async def api_auth_google_register(request: Request):
+    """Second leg of first-time Sign in with Google. Body: {reg_token,
+    username, omnidex_id}. Creates the passwordless, Google-linked account and
+    logs in."""
+    body = await request.json()
+    reg_token = (body.get("reg_token") or "").strip()
+    username = (body.get("username") or "").strip()
+    omnidex_id = (body.get("omnidex_id") or "").strip()
+
+    payload = _read_google_reg_token(reg_token)
+    sub = payload["sub"]
+    email = payload.get("email") or None
+
+    if not username:
+        raise HTTPException(status_code=400, detail="Please choose a username.")
+
+    if not _OMNIDEX_ID_RE.match(omnidex_id):
+        raise HTTPException(status_code=400, detail="Omnidex ID must be a number (up to 20 digits)")
+
+    if user_find_by_google_sub(sub):
+        raise HTTPException(status_code=400, detail="That Google account is already registered. Try signing in.")
+
+    try:
+        user_create(username, None, omnidex_id=omnidex_id, google_sub=sub, google_email=email)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return _issue_session_response(username)
 
 
 # _download_card_image/_download_set_image (api_ga.py) hit api.gatcg.com with

@@ -371,11 +371,13 @@ async function loadAdminSystemSettings() {
         // measures the active button to place .pill-indicator, and a display:none card
         // measures as 0, leaving the pill stuck at the origin until the next click.
         renderLocalDbCardVisibility(!!data.use_json);
+        renderGooglePanelVisibility(!!data.google_signin_enabled);
 
-        for (const key of ['store_images_locally', 'use_json', 'local_db']) {
+        for (const key of ['store_images_locally', 'use_json', 'local_db', 'google_signin_enabled']) {
             renderAdminSystemToggle(key, !!data[key]);
         }
         loadAdminSystemDatabaseSettings();
+        loadAdminGoogleConfig();
     } catch (err) {
         // Leave the toggles at their last-known state rather than blanking
         // the whole panel — same as the other admin sections' load failures.
@@ -418,6 +420,15 @@ function renderSyncPanelVisibility(useJson) {
 function renderLocalDbCardVisibility(useJson) {
     const card = document.getElementById('admin-system-local-db-card');
     if (card) card.classList.toggle('hidden', useJson);
+}
+
+// The Google Sign-In config panel sits in .admin-system-panels next to the
+// Database Connection panel; shown whenever the "Google Sign-In" toggle is
+// on. Instant/unanimated — page load only (a live toggle click animates via
+// animateGoogleConfigPanel). Takes the raw google_signin_enabled value.
+function renderGooglePanelVisibility(enabled) {
+    const panel = document.getElementById('admin-system-google-panel');
+    if (panel) panel.classList.toggle('hidden', !enabled);
 }
 
 // ── System settings ⓘ tooltips ─────────────────────────────────────────────
@@ -496,43 +507,144 @@ function _settingsCardEl() {
 // from under the latest one (rapid double-toggling the switch).
 let _adminSystemPanelsGen = 0;
 
-// Click-triggered reveal/hide of the Database Connection / Sync / Wipe panel
-// beside the settings card, which only applies once Use JSON is off. Two
-// distinct phases, not everything at once — the menus settle their HORIZONTAL
-// positions first, then the panel wipes in VERTICALLY:
+// Click-triggered reveal/hide of a side panel beside the settings card in
+// .admin-system-panels — the Database Connection / Sync / Wipe panel (Use
+// JSON off) or the Google Sign-In panel (that toggle on). Two distinct
+// phases, not everything at once — the panels settle their HORIZONTAL
+// positions first, then the target panel wipes in VERTICALLY:
 //
-//   Showing:  1) un-hide the sync panel but pin it to zero height, so it
-//             claims only its width; the settings card slides across to its
-//             paired position around that (flipSlide).
-//             2) THEN the sync panel wipes open downward (animateHeightWipe).
+//   Showing:  1) un-hide the panel but pin it to zero height, so it claims
+//             only its width; the settings card slides across to its paired
+//             position around that (flipSlide).
+//             2) THEN the panel wipes open downward (animateHeightWipe).
 //
 //   Hiding:   the exact reverse — 1) the panel collapses its height to zero,
 //             2) THEN it's dropped (releasing its width) and the settings
 //             card slides back to centered.
-async function animateSystemPanelsForUseJson(useJson) {
-    const syncPanel = document.getElementById('admin-system-sync-panel');
-    if (!syncPanel) return;
+//
+// `show` is the desired end state. All calls share _adminSystemPanelsGen so a
+// newer toggle supersedes a mid-flight one (rapid double-clicks).
+async function _animateSystemPanel(panel, show) {
+    if (!panel) return;
 
     const gen = ++_adminSystemPanelsGen;
 
-    if (!useJson) {
+    if (show) {
         await flipSlide(_settingsCardEl(), () => {
-            syncPanel.classList.remove('hidden');
-            syncPanel.style.height = '0px';
-            syncPanel.style.paddingTop = '0px';
-            syncPanel.style.paddingBottom = '0px';
-            syncPanel.style.overflow = 'hidden';
+            panel.classList.remove('hidden');
+            panel.style.height = '0px';
+            panel.style.paddingTop = '0px';
+            panel.style.paddingBottom = '0px';
+            panel.style.overflow = 'hidden';
         }, {axis: 'x', duration: 280});
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
-        await animateHeightWipe(syncPanel, true, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
+        await animateHeightWipe(panel, true, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
     } else {
-        await animateHeightWipe(syncPanel, false, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
+        await animateHeightWipe(panel, false, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
         await flipSlide(_settingsCardEl(), () => {
-            syncPanel.classList.add('hidden');
+            panel.classList.add('hidden');
         }, {axis: 'x', duration: 280});
         if (gen !== _adminSystemPanelsGen) return;
-        resetHeightWipe(syncPanel);
+        resetHeightWipe(panel);
+    }
+}
+
+// Use JSON off ⇒ the Database Connection / Sync panel is shown. Thin wrapper
+// over _animateSystemPanel taking the raw use_json value (show-when-false),
+// since every call site has that value rather than its inverse.
+function animateSystemPanelsForUseJson(useJson) {
+    return _animateSystemPanel(document.getElementById('admin-system-sync-panel'), !useJson);
+}
+
+// The Google Sign-In toggle on ⇒ the Google Sign-In config panel is shown.
+function animateGoogleConfigPanel(enabled) {
+    return _animateSystemPanel(document.getElementById('admin-system-google-panel'), enabled);
+}
+
+// ── Google Sign-In config panel ────────────────────────────────────────────
+// One field — the OAuth client ID — saved to SETTINGS.json via
+// /api/admin/google-config (the enable/disable toggle rides /api/admin/settings
+// like the other System switches). Explicit Save button, not autosave: a
+// client ID is pasted whole, not typed field-by-field like the DB connection.
+
+function _setAdminGoogleStatus(text, kind) {
+    const el = document.getElementById('admin-system-google-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('hidden', !text);
+    el.classList.toggle('admin-system-db-status-error', kind === 'error');
+    el.classList.toggle('admin-system-db-status-ok', kind === 'ok');
+}
+
+// data: the /api/admin/google-config payload. Explains why the button might
+// not be showing yet.
+function _renderAdminGoogleHint(data) {
+    const el = document.getElementById('admin-system-google-hint');
+    if (!el) return;
+
+    let text = '';
+    if (data) {
+        if (data.active_client_id && data.client_id) {
+            text = 'Active — the login page shows the Google button.';
+        } else if (data.active_client_id) {
+            text = `Active — using the .env default (…${data.env_client_id.slice(-16)}). Enter a value above to override it.`;
+        } else {
+            text = 'Enter a client ID to show the Google button on the login page.';
+        }
+    }
+    el.textContent = text;
+    el.classList.toggle('hidden', !text);
+}
+
+async function loadAdminGoogleConfig() {
+    const input = document.getElementById('admin-system-google-client-id');
+    if (!input) return;
+
+    _setAdminGoogleStatus('', null);
+
+    try {
+        const res = await fetch('/api/admin/google-config');
+        if (!res.ok) throw new Error('Failed to load Google config');
+        const data = await res.json();
+
+        // Don't clobber an edit in progress / the focused field.
+        if (document.activeElement !== input) input.value = data.client_id || '';
+        _renderAdminGoogleHint(data);
+    } catch (err) {
+        // Leave the field as-is, same as the other System load-failure paths.
+    }
+}
+
+async function saveAdminGoogleConfig() {
+    const btn = document.getElementById('admin-system-google-save-btn');
+    const input = document.getElementById('admin-system-google-client-id');
+    if (!input) return;
+
+    if (btn) btn.disabled = true;
+    _setAdminGoogleStatus('Saving…', null);
+
+    try {
+        const res = await fetch('/api/admin/google-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({client_id: input.value.trim()}),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+            _setAdminGoogleStatus(data.detail || 'Failed to save.', 'error');
+            return;
+        }
+
+        input.value = data.client_id || '';
+        _setAdminGoogleStatus('Saved.', 'ok');
+        _renderAdminGoogleHint(data);
+        setTimeout(() => _setAdminGoogleStatus('', null), 2000);
+    } catch (err) {
+        _setAdminGoogleStatus('Failed to save.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -552,6 +664,10 @@ async function updateAdminSystemSetting(key, value) {
         renderLocalDbCardVisibility(value);
     }
 
+    if (key === 'google_signin_enabled') {
+        animateGoogleConfigPanel(value);
+    }
+
     try {
         const res = await fetch('/api/admin/settings', {
             method: 'POST',
@@ -566,6 +682,9 @@ async function updateAdminSystemSetting(key, value) {
             if (key === 'use_json') {
                 animateSystemPanelsForUseJson(prevValue);
                 renderLocalDbCardVisibility(prevValue);
+            }
+            if (key === 'google_signin_enabled') {
+                animateGoogleConfigPanel(prevValue);
             }
             return;
         }
@@ -591,6 +710,9 @@ async function updateAdminSystemSetting(key, value) {
         if (key === 'use_json') {
             animateSystemPanelsForUseJson(prevValue);
             renderLocalDbCardVisibility(prevValue);
+        }
+        if (key === 'google_signin_enabled') {
+            animateGoogleConfigPanel(prevValue);
         }
     }
 }
@@ -4965,6 +5087,7 @@ function initAdmin() {
     adminPidImportMode = 'paste';
     adminPidExportOpenType = null;
     _resetAdminDbAutosaveState();
+    _setAdminGoogleStatus('', null);
 
     // Renders the deep-linked section/sub-view directly — no fade/resize
     // animation here, since this is the page settling into its starting

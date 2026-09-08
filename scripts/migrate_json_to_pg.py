@@ -115,7 +115,8 @@ def _guard_full_replace(session: Session, model, new_count: int, label: str, for
 # reassigning an existing user's id (and orphaning every inventory_bins/
 # decks/watchlist_entries/wishlist_entries row still pointing at the old
 # one) on every re-run. Listing update_cols explicitly avoids that.
-_USER_UPDATE_COLS = ["password_hash", "auth_type", "notes", "bio", "omnidex_id", "admin_note", "created_at"]
+_USER_UPDATE_COLS = ["password_hash", "auth_type", "notes", "bio", "omnidex_id", "admin_note",
+                     "google_sub", "google_email", "created_at"]
 
 
 def migrate_users() -> dict[str, int]:
@@ -129,12 +130,14 @@ def migrate_users() -> dict[str, int]:
     rows = [
         {
             "username": username,
-            "password_hash": info["password"],
+            "password_hash": info.get("password"),
             "auth_type": info.get("auth_type", "user"),
             "notes": info.get("notes", []),
             "bio": info.get("bio", ""),
             "omnidex_id": info.get("omnidex_id"),
             "admin_note": info.get("admin_note", ""),
+            "google_sub": info.get("google_sub"),
+            "google_email": info.get("google_email"),
         }
         for username, info in users_data.items()
     ]
@@ -182,12 +185,14 @@ def port_owner_to_database() -> dict:
     info = users_data[owner]
     row = {
         "username": owner,
-        "password_hash": info["password"],
+        "password_hash": info.get("password"),
         "auth_type": "owner",
         "notes": info.get("notes", []),
         "bio": info.get("bio", ""),
         "omnidex_id": info.get("omnidex_id"),
         "admin_note": info.get("admin_note", ""),
+        "google_sub": info.get("google_sub"),
+        "google_email": info.get("google_email"),
     }
 
     try:

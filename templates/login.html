@@ -7,22 +7,24 @@
 
         <div id="error-msg" class="error-msg"></div>
 
+        <p class="login-google-note hidden" id="login-google-note"></p>
+
         <div class="form-fields">
-            <div class="form-group">
+            <div class="form-group" id="username-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" placeholder="Enter username" autocomplete="username">
             </div>
-            <div class="form-group">
+            <div class="form-group" id="password-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" placeholder="Enter password"
                        autocomplete="current-password">
             </div>
             <div class="confirm-group" id="confirm-group">
-                <div class="form-group">
+                <div class="form-group" id="confirm-password-group">
                     <label for="confirm-password">Confirm Password</label>
                     <input type="password" id="confirm-password" name="confirm-password" placeholder="Confirm password">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="omnidex-group">
                     <label for="omnidex-id">Omnidex ID</label>
                     <input type="text" id="omnidex-id" name="omnidex-id" placeholder="Your Omnidex ID number"
                            inputmode="numeric" autocomplete="off">
@@ -32,7 +34,10 @@
 
         <button class="btn-submit btn btn--primary" id="submit-btn" onclick="handleSubmit()">Sign in</button>
 
-        <div class="form-switch">
+        <div class="login-divider hidden" id="login-divider"><span>or</span></div>
+        <div id="google-signin-btn" class="google-signin-btn hidden"></div>
+
+        <div class="form-switch" id="form-switch">
             <span id="switch-text">Don't have an account?</span>
             <button class="btn-switch" onclick="toggleMode()">Create account</button>
         </div>

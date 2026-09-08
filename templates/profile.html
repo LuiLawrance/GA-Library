@@ -72,6 +72,25 @@
                     </div>
                 </div>
 
+                <!-- Connected accounts (self view only) -->
+                <div class="profile-panel panel profile-area-connections hidden" id="profile-connections">
+                    <div class="profile-panel-header">
+                        <span class="profile-panel-title label label--muted">Connected Accounts</span>
+                    </div>
+                    <div class="profile-connection-row">
+                        <div class="profile-connection-info">
+                            <span class="profile-connection-name">Google</span>
+                            <span class="profile-connection-status" id="profile-google-status">Not connected</span>
+                        </div>
+                        <div class="profile-google-connect" id="profile-google-connect"></div>
+                        <button type="button" class="btn btn--ghost profile-btn hidden" id="profile-google-disconnect"
+                                onclick="disconnectGoogle()">Disconnect</button>
+                    </div>
+                    <div class="profile-form-actions">
+                        <span class="profile-hint" id="profile-google-hint"></span>
+                    </div>
+                </div>
+
                 <!-- Danger zone -->
                 <div class="profile-panel panel profile-danger profile-area-danger hidden" id="profile-danger">
                     <div class="profile-panel-header">

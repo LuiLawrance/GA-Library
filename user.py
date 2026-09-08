@@ -48,12 +48,23 @@ def _get_user(session, username: str) -> UserModel | None:
     return session.execute(select(UserModel).where(UserModel.username == username)).scalar_one_or_none()
 
 
-def user_create(username: str, password: str, omnidex_id: str | None = None, debug: bool = False) -> None:
+def user_create(username: str, password: str | None, omnidex_id: str | None = None,
+                google_sub: str | None = None, google_email: str | None = None,
+                debug: bool = False) -> None:
     """omnidex_id is supplied at registration (see api_register); it must be
     unique across all users, and is write-once — there's no way to change it
-    afterward. Format validation happens in the caller."""
-    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    afterward. Format validation happens in the caller.
+
+    password is None for a Google-only account (Sign in with Google) — no
+    password is hashed or stored, and the stored value stays NULL / null so
+    user_login refuses password login for it (distinct from the "" an admin
+    reset leaves, which allows a one-time blank login). google_sub, when
+    given, is Google's stable per-user id and must be unique across all users.
+    """
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()) if password is not None else None
     omnidex_id = omnidex_id or None
+    google_sub = google_sub or None
+    google_email = google_email or None
 
     if is_db_mode():
         with get_session() as session:
@@ -65,16 +76,23 @@ def user_create(username: str, password: str, omnidex_id: str | None = None, deb
             ).first():
                 raise ValueError("That Omnidex ID is already taken")
 
+            if google_sub and session.execute(
+                select(UserModel.username).where(UserModel.google_sub == google_sub)
+            ).first():
+                raise ValueError("That Google account is already linked to another user")
+
             is_first_user = session.execute(select(UserModel.username).limit(1)).first() is None
 
             session.add(UserModel(
                 username=username,
-                password_hash=hashed.decode("utf-8"),
+                password_hash=hashed.decode("utf-8") if hashed is not None else None,
                 auth_type="owner" if is_first_user else "user",
                 notes=[],
                 bio="",
                 omnidex_id=omnidex_id,
                 admin_note="",
+                google_sub=google_sub,
+                google_email=google_email,
             ))
 
         # Inventory/decks/wishlist aren't DB-wired yet (see the migration
@@ -93,13 +111,18 @@ def user_create(username: str, password: str, omnidex_id: str | None = None, deb
     if omnidex_id and any(info.get("omnidex_id") == omnidex_id for info in users_data.values()):
         raise ValueError("That Omnidex ID is already taken")
 
+    if google_sub and any(info.get("google_sub") == google_sub for info in users_data.values()):
+        raise ValueError("That Google account is already linked to another user")
+
     users_data[username] = {
         "auth_type": "owner" if not users_data else "user",
-        "password": hashed.decode("utf-8"),
+        "password": hashed.decode("utf-8") if hashed is not None else None,
         "notes": [],
         "bio": "",
         "omnidex_id": omnidex_id,
         "admin_note": "",
+        "google_sub": google_sub,
+        "google_email": google_email,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -177,15 +200,27 @@ def user_login(username: str, password: str, debug: bool = False) -> str | None:
     if is_db_mode():
         with get_session() as session:
             user = _get_user(session, username)
-            hashed = user.password_hash.encode("utf-8") if user else None
+            user_exists = user is not None
+            raw_hash = user.password_hash if user else None
     else:
         users_data = _load_users_data()
-        hashed = users_data.get(username, {}).get("password", "").encode("utf-8") if username in users_data else None
+        user_exists = username in users_data
+        raw_hash = users_data.get(username, {}).get("password") if user_exists else None
 
-    if hashed is None:
+    if not user_exists:
         if debug:
             print(f"User not found: {username}")
         return None
+
+    # A Google-only account (Sign in with Google) never set a password — the
+    # stored value is NULL / null, and password login is refused outright.
+    # This is distinct from the "" an admin reset leaves (handled below).
+    if raw_hash is None:
+        if debug:
+            print(f"No password login for user: {username}")
+        return None
+
+    hashed = raw_hash.encode("utf-8")
 
     # An admin-cleared password is stored as "" — it only accepts a blank
     # password, and the user is forced to set a new one right after login
@@ -377,7 +412,9 @@ def user_needs_setup(username: str) -> dict:
         return dict(_NO_SETUP)
     return {
         "must_set_omnidex": not info.get("omnidex_id"),
-        "must_set_password": not info.get("password"),
+        # "" means an admin cleared it (blank login, must reset). None/missing
+        # means a Google-only account that never had one — not a setup step.
+        "must_set_password": info.get("password") == "",
     }
 
 
@@ -468,3 +505,96 @@ def user_admin_reset_password(username: str) -> None:
     if username in users_data:
         users_data[username]["password"] = ""
         _save_users_data(users_data)
+
+
+# ── Google account link (Sign in with Google) ────────────────────────────────
+
+def user_find_by_google_sub(google_sub: str) -> str | None:
+    """Username linked to a given Google `sub` claim, or None. google_sub is
+    unique, so this backs the "returning Google user" fast path in
+    /api/auth/google."""
+    if not google_sub:
+        return None
+
+    if is_db_mode():
+        with get_session() as session:
+            row = session.execute(
+                select(UserModel.username).where(UserModel.google_sub == google_sub)
+            ).first()
+            return row.username if row else None
+
+    return next(
+        (username for username, info in _load_users_data().items()
+         if info.get("google_sub") == google_sub),
+        None,
+    )
+
+
+def user_link_google(username: str, google_sub: str, google_email: str | None) -> None:
+    """Attach a Google account to an existing user. Raises ValueError if that
+    Google `sub` is already linked to a different account."""
+    google_email = google_email or None
+
+    if is_db_mode():
+        with get_session() as session:
+            clash = session.execute(
+                select(UserModel.username).where(UserModel.google_sub == google_sub)
+            ).first()
+            if clash and clash.username != username:
+                raise ValueError("That Google account is already linked to another user")
+
+            user = _get_user(session, username)
+            if user:
+                user.google_sub = google_sub
+                user.google_email = google_email
+        return
+
+    users_data = _load_users_data()
+
+    for other, info in users_data.items():
+        if other != username and info.get("google_sub") == google_sub:
+            raise ValueError("That Google account is already linked to another user")
+
+    if username in users_data:
+        users_data[username]["google_sub"] = google_sub
+        users_data[username]["google_email"] = google_email
+        _save_users_data(users_data)
+
+
+def user_unlink_google(username: str) -> None:
+    """Detach any linked Google account from a user."""
+    if is_db_mode():
+        with get_session() as session:
+            user = _get_user(session, username)
+            if user:
+                user.google_sub = None
+                user.google_email = None
+        return
+
+    users_data = _load_users_data()
+    if username in users_data:
+        users_data[username]["google_sub"] = None
+        users_data[username]["google_email"] = None
+        _save_users_data(users_data)
+
+
+def user_get_google_email(username: str) -> str | None:
+    """The linked Google account's email for a user, or None if none linked."""
+    if is_db_mode():
+        with get_session() as session:
+            user = _get_user(session, username)
+            return user.google_email if user else None
+
+    return _load_users_data().get(username, {}).get("google_email")
+
+
+def user_has_password(username: str) -> bool:
+    """Whether a user can log in with a password — a real hash is stored (not
+    NULL for a Google-only account, and not the "" an admin reset leaves).
+    Backs the "set a password before you can unlink Google" guard."""
+    if is_db_mode():
+        with get_session() as session:
+            user = _get_user(session, username)
+            return bool(user and user.password_hash)
+
+    return bool(_load_users_data().get(username, {}).get("password"))

@@ -430,6 +430,22 @@
     color: var(--accent);
 }
 
+/* ── Google Sign-In config panel ────────────────────────────────────────
+   Reuses .admin-system-sync-panel's card + .admin-system-db-* field styling
+   (see templates/admin.html). Just a single full-width field, so no grid —
+   and a muted note under the Save button explaining why the login button may
+   not be showing yet (see _renderAdminGoogleHint in admin.js). */
+.admin-system-google-panel .admin-system-db-field {
+    width: 100%;
+}
+
+.admin-system-google-hint {
+    margin: 0;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
 /* ── Use JSON → database-mode staged confirmation ────────────────────────
    Shown above .admin-system-panels while the Off switch is pending (see
    beginUseJsonStaging in admin.js) — nothing is written until Confirm. Same

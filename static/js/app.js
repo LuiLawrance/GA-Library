@@ -113,6 +113,8 @@ async function navigate(path, pushState = true) {
     });
 
     loginMode = 'login';
+    // Drop any half-finished Google sign-up when leaving/re-entering /login.
+    googleRegToken = null;
 
     // Reset footer visibility when navigating — then hide it outright on the
     // profile pages (/profile and the public /#<omnidex_id>), which manage
@@ -214,6 +216,10 @@ async function navigate(path, pushState = true) {
         if (typeof window.initPrices === 'function') {
             await window.initPrices();
         }
+    }
+
+    if (pathname === '/login' && typeof initGoogleSignIn === 'function') {
+        initGoogleSignIn();
     }
 
     if (pathname === '/profile') {
@@ -693,29 +699,98 @@ document.addEventListener('click', e => {
     if (!e.target.closest('#topbar-user-menu')) closeUserMenu();
 });
 
-// ── Login / Register ──
-function toggleMode() {
-    loginMode = loginMode === 'login' ? 'register' : 'login';
+// ── Login / Register / Sign in with Google ──
+// The login card has three modes, tracked in `loginMode`: 'login', 'register'
+// and 'google' (the "finish signing up" step after a first-time Sign in with
+// Google — username + Omnidex ID, no password). navigate() resets loginMode
+// to 'login', clears googleRegToken and calls initGoogleSignIn() on /login.
+// (login.js is a thin shim — these globals are the live copy.)
 
-    const isRegister = loginMode === 'register';
+// The verified-Google-identity token from POST /api/auth/google, held across
+// the "finish signing up" form until it's posted to /api/auth/google/register.
+let googleRegToken = null;
 
-    document.getElementById('form-title').textContent = isRegister ? 'Create account' : 'Sign in';
-    document.getElementById('submit-btn').textContent = isRegister ? 'Create account' : 'Sign in';
+function loginError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = msg;
+    el.classList.add('visible');
+}
+
+function applyLoginMode(mode) {
+    loginMode = mode;
+    const isRegister = mode === 'register';
+    const isGoogle = mode === 'google';
+
+    document.getElementById('form-title').textContent =
+        isGoogle ? 'Finish signing up' : isRegister ? 'Create account' : 'Sign in';
+    document.getElementById('submit-btn').textContent =
+        isGoogle || isRegister ? 'Create account' : 'Sign in';
+
+    // No password on a Google sign-up. (.hidden — display:none !important — is
+    // this app's hide toggle; the bare `hidden` attribute loses to the
+    // `display` rules on .form-group / .login-divider / .google-signin-btn.)
+    document.getElementById('password-group').classList.toggle('hidden', isGoogle);
+    document.getElementById('confirm-password-group').classList.toggle('hidden', isGoogle);
+
+    // The wrapper holds confirm-password + Omnidex; expanded for register and
+    // google (confirm-password itself stays hidden in google mode).
     const confirmGroup = document.getElementById('confirm-group');
-    confirmGroup.classList.toggle('expanded', isRegister);
-    confirmGroup.style.maxHeight = isRegister ? confirmGroup.scrollHeight + 'px' : '0px';
-    document.getElementById('switch-text').textContent = isRegister ? 'Already have an account?' : "Don't have an account?";
-    document.querySelector('.btn-switch').textContent = isRegister ? 'Sign in' : 'Create account';
+    const expanded = isRegister || isGoogle;
+    confirmGroup.classList.toggle('expanded', expanded);
+    confirmGroup.style.maxHeight = expanded ? confirmGroup.scrollHeight + 'px' : '0px';
+
+    document.getElementById('login-google-note').classList.toggle('hidden', !isGoogle);
+
+    // Google button + "or" divider: hidden in google mode; on the plain
+    // login/register views initGoogleSignIn() owns the show/hide decision
+    // (shown only when a client ID is configured).
+    if (isGoogle) {
+        document.getElementById('login-divider').classList.add('hidden');
+        document.getElementById('google-signin-btn').classList.add('hidden');
+    } else {
+        initGoogleSignIn();
+    }
+
+    if (isGoogle) {
+        document.getElementById('switch-text').textContent = 'Changed your mind?';
+        document.querySelector('.btn-switch').textContent = 'Back to sign in';
+    } else {
+        document.getElementById('switch-text').textContent =
+            isRegister ? 'Already have an account?' : "Don't have an account?";
+        document.querySelector('.btn-switch').textContent =
+            isRegister ? 'Sign in' : 'Create account';
+    }
 
     document.getElementById('error-msg').classList.remove('visible');
+}
+
+function toggleMode() {
+    if (loginMode === 'google') {
+        googleRegToken = null;
+        applyLoginMode('login');
+        return;
+    }
+    applyLoginMode(loginMode === 'login' ? 'register' : 'login');
 }
 
 async function handleSubmit() {
     if (loginMode === 'login') {
         await handleLogin();
+    } else if (loginMode === 'google') {
+        await handleGoogleRegister();
     } else {
         await handleRegister();
     }
+}
+
+// Shared post-authentication handoff for every path that ends in a session
+// cookie (password login, Google login, Google registration).
+function onAuthSuccess(data) {
+    currentUser = data.username;
+    authType = data.auth_type;
+    isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
+    setLoggedIn(currentUser);
+    if (!maybeShowAccountSetup(data)) navigate('/');
 }
 
 async function handleLogin() {
@@ -723,13 +798,11 @@ async function handleLogin() {
     // No password check here — an account whose password an admin reset logs
     // in with a blank one, then hits the account-setup gate.
     const password = document.getElementById('password').value;
-    const errorMsg = document.getElementById('error-msg');
 
-    errorMsg.classList.remove('visible');
+    document.getElementById('error-msg').classList.remove('visible');
 
     if (!username) {
-        errorMsg.textContent = 'Please enter your username.';
-        errorMsg.classList.add('visible');
+        loginError('Please enter your username.');
         return;
     }
 
@@ -745,19 +818,12 @@ async function handleLogin() {
         });
 
         if (res.ok) {
-            const data = await res.json();
-            currentUser = data.username;
-            authType = data.auth_type;
-            isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
-            setLoggedIn(currentUser);
-            if (!maybeShowAccountSetup(data)) navigate('/');
+            onAuthSuccess(await res.json());
         } else {
-            errorMsg.textContent = 'Invalid username or password.';
-            errorMsg.classList.add('visible');
+            loginError('Invalid username or password.');
         }
     } catch {
-        errorMsg.textContent = 'Invalid username or password.';
-        errorMsg.classList.add('visible');
+        loginError('Invalid username or password.');
     }
 }
 
@@ -766,25 +832,21 @@ async function handleRegister() {
     const password = document.getElementById('password').value;
     const confirm = document.getElementById('confirm-password').value;
     const omnidexId = document.getElementById('omnidex-id').value.trim();
-    const errorMsg = document.getElementById('error-msg');
 
-    errorMsg.classList.remove('visible');
+    document.getElementById('error-msg').classList.remove('visible');
 
     if (!username || !password || !omnidexId) {
-        errorMsg.textContent = 'Please fill in all fields.';
-        errorMsg.classList.add('visible');
+        loginError('Please fill in all fields.');
         return;
     }
 
     if (password !== confirm) {
-        errorMsg.textContent = 'Passwords do not match.';
-        errorMsg.classList.add('visible');
+        loginError('Passwords do not match.');
         return;
     }
 
     if (!/^\d{1,20}$/.test(omnidexId)) {
-        errorMsg.textContent = 'Omnidex ID must be a number.';
-        errorMsg.classList.add('visible');
+        loginError('Omnidex ID must be a number.');
         return;
     }
 
@@ -793,8 +855,7 @@ async function handleRegister() {
     try {
         const check = await fetch(`/api/omnidex-taken/${encodeURIComponent(omnidexId)}`);
         if (check.ok && (await check.json()).taken) {
-            errorMsg.textContent = 'That Omnidex ID is already registered.';
-            errorMsg.classList.add('visible');
+            loginError('That Omnidex ID is already registered.');
             return;
         }
     } catch { /* offline check failed — the server-side check still applies */ }
@@ -812,16 +873,132 @@ async function handleRegister() {
         });
 
         if (res.ok) {
-            await handleLogin();
+            onAuthSuccess(await res.json());
         } else {
             const data = await res.json();
-            errorMsg.textContent = data.detail || 'Registration failed.';
-            errorMsg.classList.add('visible');
+            loginError(data.detail || 'Registration failed.');
         }
     } catch {
-        errorMsg.textContent = 'Registration failed.';
-        errorMsg.classList.add('visible');
+        loginError('Registration failed.');
     }
+}
+
+// ── Sign in with Google (Google Identity Services) ──
+
+function googleClientId() {
+    return document.querySelector('meta[name="google-client-id"]')?.content?.trim() || '';
+}
+
+// Called by navigate() each time the /login fragment loads. The gsi/client
+// script is async, so retry briefly until window.google is ready.
+function initGoogleSignIn(attempt = 0) {
+    const container = document.getElementById('google-signin-btn');
+    const divider = document.getElementById('login-divider');
+    if (!container) return;
+
+    const clientId = googleClientId();
+    if (!clientId) {
+        container.classList.add('hidden');
+        if (divider) divider.classList.add('hidden');
+        return;
+    }
+
+    if (!window.google?.accounts?.id) {
+        if (attempt < 20) setTimeout(() => initGoogleSignIn(attempt + 1), 150);
+        return;
+    }
+
+    container.classList.remove('hidden');
+    if (divider) divider.classList.remove('hidden');
+
+    google.accounts.id.initialize({client_id: clientId, callback: handleGoogleCredential});
+    container.innerHTML = '';
+    google.accounts.id.renderButton(container, {
+        theme: 'outline', size: 'large', text: 'continue_with', shape: 'rectangular', width: 320,
+    });
+}
+
+async function handleGoogleCredential(response) {
+    document.getElementById('error-msg').classList.remove('visible');
+
+    let res;
+    try {
+        res = await fetch('/api/auth/google', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({credential: response.credential}),
+        });
+    } catch {
+        loginError('Could not reach the server. Please try again.');
+        return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+        loginError(data.detail || 'Google sign-in failed.');
+        return;
+    }
+
+    if (data.needs_registration) {
+        googleRegToken = data.reg_token;
+        applyLoginMode('google');
+        document.getElementById('login-google-note').textContent = data.email
+            ? `Signed in as ${data.email}. Choose a username and enter your Omnidex ID to finish.`
+            : 'Choose a username and enter your Omnidex ID to finish.';
+        const usernameInput = document.getElementById('username');
+        usernameInput.value = data.suggested_username || '';
+        usernameInput.focus();
+        usernameInput.select();
+        return;
+    }
+
+    onAuthSuccess(data);
+}
+
+async function handleGoogleRegister() {
+    const username = document.getElementById('username').value.trim();
+    const omnidexId = document.getElementById('omnidex-id').value.trim();
+
+    document.getElementById('error-msg').classList.remove('visible');
+
+    if (!googleRegToken) {
+        loginError('Your Google sign-up session expired. Please try again.');
+        applyLoginMode('login');
+        return;
+    }
+
+    if (!username || !omnidexId) {
+        loginError('Please choose a username and enter your Omnidex ID.');
+        return;
+    }
+
+    if (!/^\d{1,20}$/.test(omnidexId)) {
+        loginError('Omnidex ID must be a number.');
+        return;
+    }
+
+    let res;
+    try {
+        res = await fetch('/api/auth/google/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reg_token: googleRegToken, username, omnidex_id: omnidexId}),
+        });
+    } catch {
+        loginError('Could not reach the server. Please try again.');
+        return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+        loginError(data.detail || 'Could not finish signing up.');
+        return;
+    }
+
+    googleRegToken = null;
+    onAuthSuccess(data);
 }
 
 // ── Link interception ──

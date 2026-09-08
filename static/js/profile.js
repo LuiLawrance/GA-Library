@@ -92,6 +92,9 @@ function renderProfile() {
 
     renderProfileAbout(isPublic);
 
+    // Connected accounts (Google) — self view only.
+    renderProfileConnections(isPublic);
+
     // Danger zone is self-only; CSS also hides it in the public view, but keep
     // the class in sync. The owner account can't delete itself either.
     document.getElementById('profile-danger').classList.toggle(
@@ -187,6 +190,101 @@ function renderProfileBins(bins) {
                 </div>
             </div>`;
     }).join('');
+}
+
+// ── Connected Accounts (Sign in with Google) ──
+// googleClientId() / the gsi/client script are provided by app.js + index.html.
+
+function renderProfileConnections(isPublic) {
+    const panel = document.getElementById('profile-connections');
+    if (!panel) return;
+
+    // Nothing to show in the public view, or when Google sign-in isn't
+    // configured for this deployment.
+    if (isPublic || typeof googleClientId !== 'function' || !googleClientId()) {
+        panel.classList.add('hidden');
+        return;
+    }
+    panel.classList.remove('hidden');
+    setProfileHint('profile-google-hint', '');
+
+    const status = document.getElementById('profile-google-status');
+    const connectContainer = document.getElementById('profile-google-connect');
+    const disconnectBtn = document.getElementById('profile-google-disconnect');
+    const email = profileData.google_email;
+
+    if (email) {
+        status.textContent = `Connected as ${email}`;
+        connectContainer.innerHTML = '';
+        connectContainer.classList.add('hidden');
+        disconnectBtn.classList.remove('hidden');
+    } else {
+        status.textContent = 'Not connected';
+        connectContainer.classList.remove('hidden');
+        disconnectBtn.classList.add('hidden');
+        initProfileGoogleButton();
+    }
+}
+
+function initProfileGoogleButton(attempt = 0) {
+    const container = document.getElementById('profile-google-connect');
+    if (!container || profileData?.google_email) return;
+
+    if (!window.google?.accounts?.id) {
+        if (attempt < 20) setTimeout(() => initProfileGoogleButton(attempt + 1), 150);
+        return;
+    }
+
+    google.accounts.id.initialize({
+        client_id: googleClientId(),
+        callback: handleProfileGoogleCredential,
+    });
+    container.innerHTML = '';
+    google.accounts.id.renderButton(container, {
+        theme: 'outline', size: 'medium', text: 'continue_with', shape: 'rectangular',
+    });
+}
+
+async function handleProfileGoogleCredential(response) {
+    setProfileHint('profile-google-hint', '');
+
+    try {
+        const res = await fetch('/api/profile/google/link', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({credential: response.credential}),
+        });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) throw new Error(data.detail || 'Could not connect Google.');
+
+        if (profileData) profileData.google_email = data.google_email;
+        renderProfileConnections(false);
+        setProfileHint('profile-google-hint', 'Google account connected.', 'success');
+    } catch (err) {
+        setProfileHint('profile-google-hint', err.message || 'Could not connect Google.', 'error');
+    }
+}
+
+async function disconnectGoogle() {
+    const btn = document.getElementById('profile-google-disconnect');
+    btn.disabled = true;
+    setProfileHint('profile-google-hint', '');
+
+    try {
+        const res = await fetch('/api/profile/google/unlink', {method: 'POST'});
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) throw new Error(data.detail || 'Could not disconnect Google.');
+
+        if (profileData) profileData.google_email = null;
+        renderProfileConnections(false);
+        setProfileHint('profile-google-hint', 'Google account disconnected.', 'success');
+    } catch (err) {
+        setProfileHint('profile-google-hint', err.message || 'Could not disconnect Google.', 'error');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 function formatProfileDate(iso) {

@@ -54,7 +54,10 @@ class User(Base):
     # every FK that used to embed it.
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL for a Google-only account that has never set a password. "" still
+    # means "admin-cleared, blank-password login allowed" (see user_login);
+    # NULL means "no password login at all".
+    password_hash: Mapped[str | None] = mapped_column(Text)
     auth_type: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     bio: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -64,6 +67,12 @@ class User(Base):
     # User-supplied Omnidex ID. NULL until the user sets it; unique across all
     # users; immutable once set (enforced in app.py, not the schema).
     omnidex_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    # Google account link (Sign in with Google). google_sub is Google's stable
+    # per-user "sub" claim — unique, NULL until the user links a Google
+    # account. google_email is the address from that Google account, kept for
+    # display on the Profile page only (not an identifier, not unique).
+    google_sub: Mapped[str | None] = mapped_column(Text, unique=True)
+    google_email: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=dt.datetime.utcnow)
 
 

@@ -85,6 +85,20 @@
                                         onclick="updateAdminSystemSetting('use_json', true)">On</button>
                             </div>
                         </div>
+                        <div class="admin-system-option-row">
+                            <span class="admin-system-option-name">
+                                Google Sign-In
+                                <button type="button" class="admin-system-info" aria-label="About Google Sign-In"
+                                        data-tip="On — show a 'Sign in with Google' button on the login page. Set the OAuth client ID in the panel that appears alongside.">i</button>
+                            </span>
+                            <div class="admin-pid-source-toggle pill-toggle admin-system-option-toggle" data-setting="google_signin_enabled">
+                                <span class="pill-indicator"></span>
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn active" data-value="false"
+                                        onclick="updateAdminSystemSetting('google_signin_enabled', false)">Off</button>
+                                <button type="button" class="admin-pid-source-toggle-btn pill-toggle-btn" data-value="true"
+                                        onclick="updateAdminSystemSetting('google_signin_enabled', true)">On</button>
+                            </div>
+                        </div>
                     </div>
                     <!-- Its own card, hidden while Use JSON is on (JSON mode always runs
                          locally, so local_db just stays at its "On" default); revealed
@@ -130,6 +144,33 @@
                         <pre class="admin-system-sync-log scroll-thin hidden" id="admin-system-sync-log"></pre>
                     </div>
                 </div>
+
+                <!-- Google Sign-In config — revealed beside the settings card
+                     when the "Google Sign-In" toggle is on (same slide/wipe as
+                     the Database Connection panel, see _animateSystemPanel in
+                     admin.js). Reuses .admin-system-sync-panel's card look and
+                     the .admin-system-db-* field styling. -->
+                <div class="admin-system-sync-panel admin-system-google-panel hidden" id="admin-system-google-panel">
+                    <span class="admin-system-sync-title">Google Sign-In</span>
+                    <p class="admin-system-sync-desc">
+                        OAuth 2.0 <b>Web</b> client ID from the Google Cloud Console. Add every origin the app
+                        is served from (e.g. <code>http://localhost:8000</code>, your live URL) as an Authorized
+                        JavaScript origin there. Saved to <code>SETTINGS.json</code>; overrides the
+                        <code>.env</code> default.
+                    </p>
+                    <label class="admin-system-db-field">
+                        <span class="admin-system-db-label">Client ID</span>
+                        <input type="text" id="admin-system-google-client-id" class="admin-system-db-input"
+                               autocomplete="off" spellcheck="false" placeholder="…apps.googleusercontent.com">
+                    </label>
+                    <div class="admin-system-db-actions">
+                        <button type="button" class="admin-pid-refresh-btn admin-system-sync-btn"
+                                id="admin-system-google-save-btn" onclick="saveAdminGoogleConfig()">Save</button>
+                    </div>
+                    <p class="admin-system-db-status scroll-thin hidden" id="admin-system-google-status"></p>
+                    <p class="admin-system-google-hint" id="admin-system-google-hint"></p>
+                </div>
+
                 <div class="admin-system-sync-panel hidden" id="admin-system-sync-panel">
                     <span class="admin-system-sync-title">Database Connection</span>
                     <p class="admin-system-sync-desc">Which Postgres to use. Overrides the <code>.env</code> default (which is left untouched), saved to <code>SETTINGS.json</code> and applied automatically as you type.</p>
