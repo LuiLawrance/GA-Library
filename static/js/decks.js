@@ -68,7 +68,7 @@ function buildPublicDeckTile(deck, index, total) {
     const delay = total <= 1 ? 0 : Math.min(index * 50, Math.round((index / (total - 1)) * 400));
     tile.style.animationDelay = `${delay}ms`;
 
-    const fmt = deck.format ? `<span class="dga-tile-format">${deck.format}</span>` : '';
+    const fmt = deck.format ? `<span class="tag tag--accent">${deck.format}</span>` : '';
     const count = deck.card_count || 0;
 
     // Format badge sits in the icon row, to the right of the ⬡ glyph — same

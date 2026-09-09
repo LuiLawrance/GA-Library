@@ -13,6 +13,12 @@ let invActiveOwner = null;
 let invActiveRole = 'owner';
 const INV_ROLE_RANK = {viewer: 1, editor: 2, manager: 3, owner: 4};
 function invCan(minRole) { return INV_ROLE_RANK[invActiveRole] >= INV_ROLE_RANK[minRole]; }
+// Share-role badge for a shared bin/deck tile — the shared .tag primitive
+// (components.css) tinted by role. Reused by decks_ga.js (load-order dep).
+const ROLE_TAG_HUE = {viewer: 'tag--slate', editor: 'tag--mint', manager: 'tag--gold', owner: 'tag--accent'};
+function roleTagHTML(role) {
+    return `<span class="tag ${ROLE_TAG_HUE[role] || ''}">${role}</span>`;
+}
 function invOwnerQS(url) {
     return invActiveOwner ? `${url}${url.includes('?') ? '&' : '?'}owner=${encodeURIComponent(invActiveOwner)}` : url;
 }
@@ -152,7 +158,7 @@ function buildSharedBinTile(b, index) {
     const tile = document.createElement('div');
     tile.className = 'inv-bin-tile';
     tile.style.animationDelay = `${Math.min(index * 50, 400)}ms`;
-    const roleBadge = `<span class="inv-bin-role-badge inv-role-${b.role}">${b.role}</span>`;
+    const roleBadge = roleTagHTML(b.role);
     tile.innerHTML = `
         <div class="inv-bin-icon-row"><span class="inv-bin-icon">⬡</span>${roleBadge}</div>
         <div class="inv-bin-name">${b.name}</div>
@@ -186,11 +192,11 @@ function buildBinTile(name, bin, index, total = 1) {
     const maxDelay = 400;
     const delay = total <= 1 ? 0 : Math.min(index * 50, Math.round((index / (total - 1)) * maxDelay));
     tile.style.animationDelay = `${delay}ms`;
-    const pub = bin.public ? '<span class="dga-tile-public" title="Listed on the public Collection page">Public</span>' : '';
+    const pub = bin.public ? '<span class="tag tag--success" title="Listed on the public Collection page">Public</span>' : '';
     tile.innerHTML = `
         <div class="inv-bin-icon-row">
             <span class="inv-bin-icon">${bin.default ? '📦' : '⬡'}</span>
-            ${bin.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}${pub}
+            ${bin.default ? '<span class="tag tag--accent">Default</span>' : ''}${pub}
         </div>
         <div class="inv-bin-name">${name}</div>
         <div class="inv-bin-desc">${bin.desc || ''}</div>

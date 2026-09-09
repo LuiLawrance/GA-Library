@@ -137,30 +137,8 @@
     word-break: break-word;
 }
 
-.dga-tile-format {
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--accent);
-    background: rgba(200, 169, 110, 0.1);
-    border: 1px solid rgba(200, 169, 110, 0.2);
-    border-radius: 3px;
-    padding: 2px 6px;
-}
-
-/* Same shape/weight as .dga-tile-format, just in --success green. */
-.dga-tile-public {
-    font-family: var(--font-mono);
-    font-size: 0.62rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--success);
-    background: rgba(59, 165, 93, 0.1);
-    border: 1px solid rgba(59, 165, 93, 0.2);
-    border-radius: 3px;
-    padding: 2px 6px;
-}
+/* Format / "Public" tile badges use the shared .tag primitive (components.css):
+   `<span class="tag tag--accent">` and `<span class="tag tag--success">`. */
 
 .dga-public-field {
     margin-top: 4px;

@@ -611,8 +611,8 @@ function buildSharedDeckTile(d, index) {
     const tile = document.createElement('div');
     tile.className = 'dga-deck-tile';
     tile.style.animationDelay = `${Math.min(index * 50, 400)}ms`;
-    const fmt = d.format ? `<span class="dga-tile-format">${d.format}</span>` : '';
-    const roleBadge = `<span class="inv-bin-role-badge inv-role-${d.role}">${d.role}</span>`;
+    const fmt = d.format ? `<span class="tag tag--accent">${d.format}</span>` : '';
+    const roleBadge = roleTagHTML(d.role);
     const valueBadge = d.edition_locked
         ? '<span class="inv-bin-value-badge inv-bin-value-loading">…</span>' : '';
     tile.innerHTML = `
@@ -644,8 +644,8 @@ function buildDeckTile(name, entry, index, total) {
     const delay = total <= 1 ? 0 : Math.min(index * 50, Math.round((index / (total - 1)) * 400));
     tile.style.animationDelay = `${delay}ms`;
 
-    const fmt = entry.format ? `<span class="dga-tile-format">${entry.format}</span>` : '';
-    const pub = entry.public ? `<span class="dga-tile-public" title="Listed on the public Decks page">Public</span>` : '';
+    const fmt = entry.format ? `<span class="tag tag--accent">${entry.format}</span>` : '';
+    const pub = entry.public ? `<span class="tag tag--success" title="Listed on the public Decks page">Public</span>` : '';
     const count = entry.card_count || 0;
 
     // Format / Public badges sit in the icon row, to the right of the ⬡ glyph —

@@ -142,7 +142,7 @@ function renderProfileDecks(decks) {
         const banner = d.banner
             ? `<div class="dga-tile-banner" style="background-image: url('/images/${encodeURIComponent(d.banner)}.jpg')"></div>`
             : '';
-        const format = d.format ? `<span class="dga-tile-format">${escapeHtml(d.format)}</span>` : '';
+        const format = d.format ? `<span class="tag tag--accent">${escapeHtml(d.format)}</span>` : '';
         return `
             <div class="dga-deck-tile admin-user-tile ${d.banner ? 'has-banner' : ''}">
                 ${banner}
@@ -177,7 +177,7 @@ function renderProfileBins(bins) {
                 ${banner}
                 <div class="inv-bin-icon-row">
                     <span class="inv-bin-icon">${b.default ? '📦' : '⬡'}</span>
-                    ${b.default ? '<span class="inv-bin-default-badge">Default</span>' : ''}
+                    ${b.default ? '<span class="tag tag--accent">Default</span>' : ''}
                 </div>
                 <div class="inv-bin-name">${escapeHtml(b.name)}</div>
                 <div class="inv-bin-desc">${escapeHtml(b.desc || '')}</div>

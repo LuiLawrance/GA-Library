@@ -313,3 +313,28 @@ input::placeholder,
     box-sizing: border-box;
     animation: modalReveal 0.22s ease;
 }
+
+/* ── Tag ─────────────────────────────────
+   Tiny uppercase status label on a tile or panel header — a deck format,
+   "Public", "Default", a share role. `.tag` is the frame (mono, 3px box,
+   faint fill); a `.tag--<hue>` modifier paints it — text colour plus a
+   10% / 20% wash of the same hue. Keep a prefixed class alongside only for
+   a JS hook or a real per-element delta. */
+.tag {
+    display: inline-block;
+    width: fit-content;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+}
+.tag--accent  { color: var(--accent);  background: rgba(200, 169, 110, 0.1); border-color: rgba(200, 169, 110, 0.2); }
+.tag--success { color: var(--success); background: rgba(59, 165, 93, 0.1);   border-color: rgba(59, 165, 93, 0.2); }
+.tag--mint    { color: #7fd1a8;        background: rgba(127, 209, 168, 0.1); border-color: rgba(127, 209, 168, 0.2); }
+.tag--gold    { color: #e3b565;        background: rgba(227, 181, 101, 0.1); border-color: rgba(227, 181, 101, 0.2); }
+.tag--slate   { color: #9aa8c0;        background: rgba(154, 168, 192, 0.1); border-color: rgba(154, 168, 192, 0.2); }
