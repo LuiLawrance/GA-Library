@@ -951,3 +951,20 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     animation: none;
     opacity: 1;
 }
+/* ═══════════════════════════════════════
+   COLLABORATIVE SHARING — role gating on a shared deck
+   (share dialog + "Shared with me" tiles reuse .inv-* rules from inventory.css)
+   ═══════════════════════════════════════ */
+.dga-detail-view.dga-role-viewer .inv-detail-add-btn,
+.dga-detail-view.dga-role-viewer .inv-settings-btn:not(#dga-share-btn),
+.dga-detail-view.dga-role-viewer .dga-add-section-btn,
+.dga-detail-view.dga-role-viewer .dga-edition-lock-toggle,
+.dga-detail-view.dga-role-viewer .inv-card-tile-qty-ctrl,
+.dga-detail-view.dga-role-viewer .dga-detail-edit-icon {
+    display: none !important;
+}
+.dga-detail-view.dga-role-viewer .dga-detail-name-editable,
+.dga-detail-view.dga-role-viewer .dga-detail-desc-editable,
+.dga-detail-view.dga-role-viewer .dga-detail-meta-editable {
+    pointer-events: none;
+}

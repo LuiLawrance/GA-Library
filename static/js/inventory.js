@@ -1,6 +1,30 @@
 // ── State ──
 let invBins = {};
 let activeBin = null;
+// Collaborative access. invShared: bins other people shared with me
+// ([{name, pub_id, role, owner_username, owner_omnidex, ...}]). When a shared
+// bin is open, invActiveOwner is its owner's Omnidex ID and invActiveRole is
+// my role on it ('viewer'|'editor'|'manager'); for my own bins both are null /
+// 'owner'. Every bin mutation fetch routes its owner hint through
+// invOwnerQS()/invOwnerBody() so the same edit code drives owned and shared bins.
+let invShared = [];
+let invSharingEnabled = false;
+let invActiveOwner = null;
+let invActiveRole = 'owner';
+const INV_ROLE_RANK = {viewer: 1, editor: 2, manager: 3, owner: 4};
+function invCan(minRole) { return INV_ROLE_RANK[invActiveRole] >= INV_ROLE_RANK[minRole]; }
+function invOwnerQS(url) {
+    return invActiveOwner ? `${url}${url.includes('?') ? '&' : '?'}owner=${encodeURIComponent(invActiveOwner)}` : url;
+}
+function invOwnerBody(obj) {
+    return invActiveOwner ? {...obj, owner: invActiveOwner} : obj;
+}
+// The bin object backing the open detail view — invBins[activeBin] for one of
+// mine, or the separately-held invSharedBin when a shared bin is open (a
+// shared bin can't live in invBins: names collide, e.g. every user's default
+// "Inventory").
+let invSharedBin = null;
+function invActiveBinObj() { return invActiveOwner ? invSharedBin : invBins[activeBin]; }
 let binCardRows = [];
 let invBinPrices = {};
 let addModalCardId = null;
@@ -71,6 +95,8 @@ async function loadInventory() {
         if (!res.ok) return;
         const data = await res.json();
         invBins = data.bins || {};
+        invShared = data.shared || [];
+        invSharingEnabled = !!data.sharing_enabled;
         renderBinGrid();
     } catch {
         console.error('Failed to load inventory');
@@ -96,6 +122,61 @@ function renderBinGrid() {
     createTile.innerHTML = `<span class="inv-create-plus">+</span><span class="inv-create-label">New Bin</span>`;
     createTile.onclick = openCreateModal;
     grid.appendChild(createTile);
+
+    renderSharedBinGrid();
+}
+
+// Bins other people have shared with me — a labelled section appended inside
+// #inv-bins-grid (spanning all its columns) so it shares the grid's padding
+// and scrolls with it, and its header/border don't run edge-to-edge. Matches
+// the "All Bins" / "All Decks" sections on the public Collection/Decks pages
+// (see buildPublicBinSection in collection.js). Called after renderBinGrid has
+// cleared and refilled the grid, so it always builds fresh.
+function renderSharedBinGrid() {
+    if (!invShared.length) return;
+    const block = document.createElement('div');
+    block.id = 'inv-shared-block';
+    block.className = 'inv-shared-block dga-section-block';
+    block.innerHTML = `
+        <div class="dga-section-header">
+            <span class="dga-section-label label">Shared with me</span>
+            <span class="dga-section-count">${invShared.length} bin${invShared.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="inv-bins-grid inv-shared-tile-grid" id="inv-shared-grid"></div>`;
+    document.getElementById('inv-bins-grid').appendChild(block);
+    const grid = block.querySelector('#inv-shared-grid');
+    invShared.forEach((b, i) => grid.appendChild(buildSharedBinTile(b, i)));
+}
+
+function buildSharedBinTile(b, index) {
+    const tile = document.createElement('div');
+    tile.className = 'inv-bin-tile';
+    tile.style.animationDelay = `${Math.min(index * 50, 400)}ms`;
+    const roleBadge = `<span class="inv-bin-role-badge inv-role-${b.role}">${b.role}</span>`;
+    tile.innerHTML = `
+        <div class="inv-bin-icon-row"><span class="inv-bin-icon">⬡</span>${roleBadge}</div>
+        <div class="inv-bin-name">${b.name}</div>
+        <div class="inv-bin-desc">by ${b.owner_username}${b.desc ? ' · ' + b.desc : ''}</div>
+        <div class="inv-bin-meta-row">
+            <div class="inv-bin-meta">${b.card_count} card${b.card_count !== 1 ? 's' : ''}</div>
+            <span class="inv-bin-value-badge inv-bin-value-loading">…</span>
+        </div>`;
+    if (b.banner) {
+        tile.classList.add('has-banner');
+        const clip = document.createElement('div');
+        clip.className = 'inv-bin-banner-clip';
+        const bg = document.createElement('div');
+        bg.className = 'inv-bin-banner';
+        bg.style.backgroundImage = `url('/images/${encodeURIComponent(b.banner)}.jpg')`;
+        clip.appendChild(bg);
+        tile.prepend(clip);
+    }
+    tile.onclick = () => openSharedBinDetail(b);
+    loadBinValueUrl(
+        `/api/inventory/public/${encodeURIComponent(b.owner_omnidex)}/${encodeURIComponent(b.pub_id)}/value`,
+        tile.querySelector('.inv-bin-value-badge'),
+    );
+    return tile;
 }
 
 function buildBinTile(name, bin, index, total = 1) {
@@ -137,10 +218,14 @@ function buildBinTile(name, bin, index, total = 1) {
 }
 
 async function loadBinValue(binName, badgeEl) {
+    return loadBinValueUrl(`/api/inventory/bins/${encodeURIComponent(binName)}/value`, badgeEl);
+}
+
+async function loadBinValueUrl(url, badgeEl) {
     if (!badgeEl) return;
 
     try {
-        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(binName)}/value`);
+        const res = await fetch(url);
         if (!res.ok) throw new Error('Failed to load bin value');
         const data = await res.json();
 
@@ -311,7 +396,7 @@ function invStartDetailInlineEdit(field) {
     const labelEl = document.getElementById(isName ? 'detail-bin-name' : 'detail-bin-meta');
     if (!labelEl || labelEl.isContentEditable || !activeBin) return;
 
-    const bin = invBins[activeBin] || {};
+    const bin = invActiveBinObj() || {};
     const originalName = activeBin;
     const originalDesc = bin.desc || '';
 
@@ -382,7 +467,7 @@ function invStartDetailInlineEdit(field) {
             const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
+                body: JSON.stringify(invOwnerBody(payload))
             });
             if (!res.ok) {
                 if (isName) invRenderDetailName(originalName);
@@ -398,7 +483,7 @@ function invStartDetailInlineEdit(field) {
                 window.history.replaceState({}, '', `/inventory?bin=${encodeURIComponent(newValue)}`);
                 invWireDetailInlineEdit();
             } else {
-                if (invBins[activeBin]) invBins[activeBin].desc = newValue;
+                if (invActiveBinObj()) invActiveBinObj().desc = newValue;
                 invRenderDetailDesc(newValue);
             }
         } catch {
@@ -424,10 +509,38 @@ function invStartDetailInlineEdit(field) {
 }
 
 async function openBinDetail(binName, pushUrl = true) {
+    invActiveOwner = null;
+    invActiveRole = 'owner';
+    invSharedBin = null;
+    return _openBinDetail(binName, invBins[binName], pushUrl,
+        `/inventory?bin=${encodeURIComponent(binName)}`);
+}
+
+// A bin someone shared with me — same detail view, but every mutation carries
+// the owner hint and the UI is gated to my role (see invApplyRoleGate).
+async function openSharedBinDetail(shared) {
+    invActiveOwner = shared.owner_omnidex;
+    invActiveRole = shared.role;
+    let bin = {desc: shared.desc, banner: shared.banner, sections: {}, public: false};
+    try {
+        const res = await fetch(
+            `/api/inventory/public/${encodeURIComponent(shared.owner_omnidex)}/${encodeURIComponent(shared.pub_id)}`);
+        if (res.ok) {
+            const d = await res.json();
+            bin = d;
+            invActiveRole = d.my_role || shared.role;
+        }
+    } catch { /* fall through with the stub */ }
+    invSharedBin = bin;
+    return _openBinDetail(shared.name, bin, true,
+        `/inventory?bin=${encodeURIComponent(shared.pub_id)}&owner=${encodeURIComponent(shared.owner_omnidex)}`);
+}
+
+async function _openBinDetail(binName, bin, pushUrl, url) {
     safeDiscardEditMode();
     activeBin = binName;
     binCardRows = [];
-    const bin = invBins[binName];
+    if (!bin) return;
 
     document.getElementById('inv-bins-view').classList.add('hidden');
     document.getElementById('inv-detail-view').classList.remove('hidden');
@@ -436,6 +549,7 @@ async function openBinDetail(binName, pushUrl = true) {
     invRenderDetailDesc(bin.desc || '');
     invWireDetailInlineEdit();
     document.getElementById('inv-card-filter').value = '';
+    invApplyRoleGate();
 
     // Clear grid and reset filters when opening a new bin
     binFilters.set = '';
@@ -448,17 +562,38 @@ async function openBinDetail(binName, pushUrl = true) {
     if (grid) grid.innerHTML = '';
 
     const deleteBtn = document.getElementById('settings-delete-btn');
-    if (deleteBtn) deleteBtn.style.display = bin.default ? 'none' : '';
+    if (deleteBtn) deleteBtn.style.display = (bin.default || invActiveOwner) ? 'none' : '';
 
-    if (pushUrl) window.history.pushState({}, '', `/inventory?bin=${encodeURIComponent(binName)}`);
+    if (pushUrl) window.history.pushState({}, '', url);
+
+    // Prefetch the collaborator list so the Share dialog opens already filled.
+    if (invSharingEnabled && invCan('manager')) prefetchBinShares(invActiveOwner, binName);
 
     await enrichAndRenderBinCards(bin);
+}
+
+// Reflect the caller's role on the open bin: viewers get a read-only view,
+// editors can touch cards/sections/details, managers also see Share + public.
+// Everything above the role is hidden via the .inv-role-* container class
+// (CSS) plus these explicit guards for JS-driven affordances.
+function invApplyRoleGate() {
+    const view = document.getElementById('inv-detail-view');
+    if (!view) return;
+    view.classList.remove('inv-role-viewer', 'inv-role-editor', 'inv-role-manager', 'inv-role-owner', 'inv-shared');
+    view.classList.add(`inv-role-${invActiveRole}`);
+    if (invActiveOwner) view.classList.add('inv-shared');
+    const shareBtn = document.getElementById('inv-share-btn');
+    if (shareBtn) shareBtn.style.display = (invSharingEnabled && invCan('manager')) ? '' : 'none';
 }
 
 function closeBinDetail() {
     closeInvDrawer();
     safeDiscardEditMode();
     activeBin = null;
+    invActiveOwner = null;
+    invActiveRole = 'owner';
+    invSharedBin = null;
+    _clearSharePrefetch();
     binCardRows = [];
     document.getElementById('inv-detail-view').classList.add('hidden');
     document.getElementById('inv-bins-view').classList.remove('hidden');
@@ -482,7 +617,7 @@ async function enrichAndRenderBinCards(bin) {
             fetch('/api/inv/info'),
             fetch('/api/inv/slugs'),
             fetch('/api/inv/collector'),
-            fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/prices`)
+            fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/prices`))
         ]);
         const infoData = infoRes.ok ? await infoRes.json() : {};
         const slugData = slugRes.ok ? await slugRes.json() : {};
@@ -583,7 +718,7 @@ function renderBinCards(animate = true) {
 
     grid.innerHTML = '';
 
-    const sectionNames = Object.keys(invBins[activeBin]?.sections || {});
+    const sectionNames = Object.keys(invActiveBinObj()?.sections || {});
     const anyFilterActive = !!(filter || binFilters.set || binFilters.element || binFilters.rarity || binFilters.foil);
 
     if (sectionNames.length === 0) {
@@ -904,17 +1039,17 @@ async function applyQtyChange() {
             await fetch('/api/inventory/card', {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
+                body: JSON.stringify(invOwnerBody({
                     bin: activeBin,
                     section: c.section,
                     card_id: c.cardId,
                     edition_id: c.editionId,
                     foil_id: c.foilId,
                     quantity: c.quantity
-                })
+                }))
             });
-            if (invBins[activeBin]?.sections?.[c.section]?.[c.cardId]?.[c.editionId]) {
-                invBins[activeBin].sections[c.section][c.cardId][c.editionId][c.foilId] = c.quantity;
+            if (invActiveBinObj()?.sections?.[c.section]?.[c.cardId]?.[c.editionId]) {
+                invActiveBinObj().sections[c.section][c.cardId][c.editionId][c.foilId] = c.quantity;
             }
             const row = binCardRows.find(r => r.card_id === c.cardId && r.edition_id === c.editionId && r.foil_id === c.foilId && r.section === c.section);
             if (row) row.quantity = c.quantity;
@@ -934,15 +1069,15 @@ async function applyQtyChange() {
             await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
+                body: JSON.stringify(invOwnerBody({
                     bin: activeBin,
                     section: c.section,
                     card_id: c.cardId,
                     edition_id: c.editionId,
                     foil_id: c.foilId
-                })
+                }))
             });
-            const cards = invBins[activeBin].sections?.[c.section] || {};
+            const cards = invActiveBinObj().sections?.[c.section] || {};
             delete cards[c.cardId]?.[c.editionId]?.[c.foilId];
             if (cards[c.cardId]?.[c.editionId] && !Object.keys(cards[c.cardId][c.editionId]).length) delete cards[c.cardId][c.editionId];
             if (cards[c.cardId] && !Object.keys(cards[c.cardId]).length) delete cards[c.cardId];
@@ -998,9 +1133,9 @@ async function _commitQtyImmediate(input, staged = false) {
             await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, section, card_id: cardId, edition_id: editionId, foil_id: foilId})
+                body: JSON.stringify(invOwnerBody({bin: activeBin, section, card_id: cardId, edition_id: editionId, foil_id: foilId}))
             });
-            const cards = invBins[activeBin].sections?.[section] || {};
+            const cards = invActiveBinObj().sections?.[section] || {};
             delete cards[cardId]?.[editionId]?.[foilId];
             if (cards[cardId]?.[editionId] && !Object.keys(cards[cardId][editionId]).length) delete cards[cardId][editionId];
             if (cards[cardId] && !Object.keys(cards[cardId]).length) delete cards[cardId];
@@ -1017,17 +1152,17 @@ async function _commitQtyImmediate(input, staged = false) {
         await fetch('/api/inventory/card', {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+            body: JSON.stringify(invOwnerBody({
                 bin: activeBin,
                 section,
                 card_id: cardId,
                 edition_id: editionId,
                 foil_id: foilId,
                 quantity
-            })
+            }))
         });
-        if (invBins[activeBin]?.sections?.[section]?.[cardId]?.[editionId]) {
-            invBins[activeBin].sections[section][cardId][editionId][foilId] = quantity;
+        if (invActiveBinObj()?.sections?.[section]?.[cardId]?.[editionId]) {
+            invActiveBinObj().sections[section][cardId][editionId][foilId] = quantity;
         }
         const row = binCardRows.find(r => r.card_id === cardId && r.edition_id === editionId && r.foil_id === foilId && r.section === section);
         if (row) row.quantity = quantity;
@@ -1051,7 +1186,7 @@ function updateInvCounts() {
         valueBadge.textContent = '…';
         valueBadge.classList.add('inv-bin-value-loading');
         valueBadge.classList.remove('inv-bin-value-partial');
-        loadBinValue(activeBin, valueBadge);
+        loadBinValueUrl(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/value`), valueBadge);
     }
 }
 
@@ -1075,13 +1210,13 @@ function invBuildAddSectionButton() {
             const name = input.value.trim();
             if (!name) return cancel();
             try {
-                const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section`, {
+                const res = await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section`), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({section: name})
                 });
                 if (!res.ok) return cancel();
-                (invBins[activeBin].sections ??= {})[name] = {};
+                (invActiveBinObj().sections ??= {})[name] = {};
                 renderBinCards();
             } catch {
                 cancel();
@@ -1112,12 +1247,12 @@ function invStartSectionRename(labelEl, sectionName) {
             labelEl.textContent = sectionName;
             return;
         }
-        if (invBins[activeBin]?.sections?.[newName] !== undefined) {
+        if (invActiveBinObj()?.sections?.[newName] !== undefined) {
             labelEl.textContent = sectionName;
             return;
         }
         try {
-            const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}/rename`, {
+            const res = await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}/rename`), {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name: newName})
@@ -1126,7 +1261,7 @@ function invStartSectionRename(labelEl, sectionName) {
                 labelEl.textContent = sectionName;
                 return;
             }
-            const bin = invBins[activeBin];
+            const bin = invActiveBinObj();
             bin.sections = Object.fromEntries(
                 Object.entries(bin.sections).map(([k, v]) => [k === sectionName ? newName : k, v]));
             binCardRows.forEach(r => {
@@ -1158,11 +1293,11 @@ async function invDeleteSection(sectionName) {
     const count = binCardRows.filter(r => r.section === sectionName).length;
     if (count > 0 && !await appConfirm(`Delete section "${sectionName}" and its ${count} card entr${count !== 1 ? 'ies' : 'y'}?`, {title: 'Delete Section'})) return;
     try {
-        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}`, {
+        const res = await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/section/${encodeURIComponent(sectionName)}`), {
             method: 'DELETE'
         });
         if (!res.ok) return;
-        delete invBins[activeBin].sections[sectionName];
+        delete invActiveBinObj().sections[sectionName];
         binCardRows = binCardRows.filter(r => r.section !== sectionName);
         renderBinCards();
     } catch {
@@ -1242,7 +1377,7 @@ function invCommitSectionMove(row, toSection) {
     const {card_id, edition_id, foil_id} = row;
 
     // Optimistic local move
-    const sections = invBins[activeBin].sections;
+    const sections = invActiveBinObj().sections;
     const srcCards = sections[fromSection];
     if (srcCards?.[card_id]?.[edition_id]?.[foil_id] !== undefined) {
         const qty = srcCards[card_id][edition_id][foil_id];
@@ -1269,13 +1404,13 @@ function invCommitSectionMove(row, toSection) {
     fetch('/api/inventory/card/move', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
+        body: JSON.stringify(invOwnerBody({
             bin: activeBin, card_id, edition_id, foil_id,
             from_section: fromSection, to_section: toSection
-        })
+        }))
     }).then(res => {
-        if (!res.ok) enrichAndRenderBinCards(invBins[activeBin]);
-    }).catch(() => enrichAndRenderBinCards(invBins[activeBin]));
+        if (!res.ok) enrichAndRenderBinCards(invActiveBinObj());
+    }).catch(() => enrichAndRenderBinCards(invActiveBinObj()));
 }
 
 function buildInvCardTile(row, index, total = 1) {
@@ -1382,18 +1517,18 @@ async function saveCardModal() {
         const res = await fetch('/api/inventory/card', {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+            body: JSON.stringify(invOwnerBody({
                 bin: activeBin,
                 card_id: cardModalRow.card_id,
                 edition_id: cardModalRow.edition_id,
                 foil_id: cardModalRow.foil_id,
                 quantity: qty
-            })
+            }))
         });
 
         if (res.ok) {
             // Update local state
-            invBins[activeBin].cards[cardModalRow.card_id][cardModalRow.edition_id][cardModalRow.foil_id] = qty;
+            invActiveBinObj().cards[cardModalRow.card_id][cardModalRow.edition_id][cardModalRow.foil_id] = qty;
             const r = binCardRows.find(r => r.card_id === cardModalRow.card_id && r.edition_id === cardModalRow.edition_id && r.foil_id === cardModalRow.foil_id);
             if (r) r.quantity = qty;
             closeCardModal();
@@ -1411,16 +1546,16 @@ async function removeCardModal() {
         const res = await fetch('/api/inventory/card', {
             method: 'DELETE',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+            body: JSON.stringify(invOwnerBody({
                 bin: activeBin,
                 card_id: cardModalRow.card_id,
                 edition_id: cardModalRow.edition_id,
                 foil_id: cardModalRow.foil_id
-            })
+            }))
         });
 
         if (res.ok) {
-            const bin = invBins[activeBin];
+            const bin = invActiveBinObj();
             delete bin.cards[cardModalRow.card_id][cardModalRow.edition_id][cardModalRow.foil_id];
             if (!Object.keys(bin.cards[cardModalRow.card_id][cardModalRow.edition_id]).length)
                 delete bin.cards[cardModalRow.card_id][cardModalRow.edition_id];
@@ -1450,7 +1585,7 @@ function invPopulateAddSectionDropdown() {
     const hidden = document.getElementById('inv-add-section');
     if (!menu || !label || !hidden) return;
 
-    const sections = Object.keys(invBins[activeBin]?.sections || {});
+    const sections = Object.keys(invActiveBinObj()?.sections || {});
     const options = sections.length ? sections : ['Unsorted'];
     const preSelect = invAddTargetSection && options.includes(invAddTargetSection)
         ? invAddTargetSection
@@ -1747,18 +1882,18 @@ async function submitAddCard() {
         const res = await fetch('/api/inventory/card', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+            body: JSON.stringify(invOwnerBody({
                 bin: activeBin,
                 section: document.getElementById('inv-add-section')?.value || invAddTargetSection || 'Unsorted',
                 card_id: addModalCardId,
                 edition_id: addModalEditionId,
                 foil_id: addModalFoilId,
                 quantity
-            })
+            }))
         });
 
         if (res.ok) {
-            const bin = invBins[activeBin];
+            const bin = invActiveBinObj();
             const chosenSection = document.getElementById('inv-add-section')?.value || invAddTargetSection || 'Unsorted';
             const sec = bin.sections[chosenSection] ??= {};
             if (!sec[addModalCardId]) sec[addModalCardId] = {};
@@ -1767,7 +1902,7 @@ async function submitAddCard() {
             sec[addModalCardId][addModalEditionId][addModalFoilId] = existing + quantity;
 
             closeAddModal();
-            await enrichAndRenderBinCards(invBins[activeBin]);
+            await enrichAndRenderBinCards(invActiveBinObj());
         } else {
             btn.textContent = 'Error';
             setTimeout(() => {
@@ -1898,6 +2033,9 @@ function openBinContextMenu(e, binName) {
     if (makePublicBtn) makePublicBtn.style.display = isPublic ? 'none' : '';
     if (makePrivateBtn) makePrivateBtn.style.display = isPublic ? '' : 'none';
 
+    const shareBtn = document.getElementById('ctx-share');
+    if (shareBtn) shareBtn.style.display = invSharingEnabled ? '' : 'none';
+
     menu.classList.remove('hidden');
 
     // Position near cursor, keep within viewport
@@ -1913,6 +2051,13 @@ function closeBinContextMenu() {
     // mounted, hence the null-safe access.
     document.getElementById('inv-bin-context-menu')?.classList.add('hidden');
     ctxTargetBin = null;
+}
+
+function ctxShare() {
+    if (!ctxTargetBin) return;
+    const name = ctxTargetBin;
+    closeBinContextMenu();
+    openBinShareDialog(name, null);
 }
 
 function ctxRename() {
@@ -2174,7 +2319,7 @@ async function submitCreateBin() {
 // ═══════════════════════════════════════
 
 function openBinSettings() {
-    const bin = invBins[activeBin];
+    const bin = invActiveBinObj();
     document.getElementById('settings-bin-name').value = activeBin;
     document.getElementById('settings-bin-desc').value = bin?.desc || '';
     document.getElementById('settings-bin-error').classList.add('hidden');
@@ -2240,14 +2385,19 @@ async function submitBinSettings() {
         return;
     }
 
+    // `public` is manager+ only — omit it otherwise so an editor's save of
+    // name/desc isn't rejected by the backend's manager check.
+    const payload = {name: newName, desc};
+    if (invCan('manager')) payload.public = isPublic;
+
     try {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: newName, desc, public: isPublic})
+            body: JSON.stringify(invOwnerBody(payload))
         });
         if (res.ok) {
-            const bin = invBins[activeBin];
+            const bin = invActiveBinObj();
             bin.desc = desc;
             bin.public = isPublic;
             if (newName !== activeBin) {
@@ -2269,8 +2419,279 @@ async function submitBinSettings() {
     }
 }
 
+// ═══════════════════════════════════════
+// SHARE BIN DIALOG (collaborators)
+// ═══════════════════════════════════════
+//
+// `shareTargetBin` is the bin name whose collaborators are being managed and
+// `shareTargetOwner` its owner's Omnidex ID (null when it's one of mine).
+// Opened from the bin detail header (👥, owners + managers) or the grid
+// context menu (owned bins only).
+let shareTargetBin = null;
+let shareTargetOwner = null;
+
+const SHARE_ROLE_OPTIONS = [
+    {value: 'viewer', label: 'Viewer'},
+    {value: 'editor', label: 'Editor'},
+    {value: 'manager', label: 'Manager'},
+];
+
+// The share dialog's box — animateBoxResize() smoothly grows/shrinks it as
+// collaborators are added or removed instead of the row list snapping.
+function _binShareBox() { return document.querySelector('#inv-share-modal .inv-modal'); }
+
+// ── Collaborator picker autocomplete (username or Omnidex ID) ──
+// Shared by the bin and deck share dialogs (element ids differ, markup doesn't).
+// A pick stows the exact Omnidex ID on the input's data-omni so submit sends an
+// unambiguous grantee; typing after a pick clears it and the raw text is sent.
+let _shareAcIndex = -1;
+let _shareAcSeq = 0;
+
+async function shareUserAcFetch(inputId, listId) {
+    const input = document.getElementById(inputId);
+    const list = document.getElementById(listId);
+    delete input.dataset.omni;
+    const q = input.value.trim();
+    if (q.length < 1) { hideShareUserAc(listId); return; }
+    const seq = ++_shareAcSeq;
+    try {
+        const res = await fetch(`/api/users/suggest?q=${encodeURIComponent(q)}`);
+        if (seq !== _shareAcSeq) return; // a newer keystroke already fired
+        const users = res.ok ? (await res.json()).users || [] : [];
+        if (!users.length) { hideShareUserAc(listId); return; }
+        _shareAcIndex = -1;
+        list.innerHTML = users.map(u => `
+            <div class="autocomplete-item share-ac-item" data-username="${escapeHtml(u.username)}" data-omni="${u.omnidex_id ?? ''}">
+                <span class="share-ac-name">${escapeHtml(u.username)}</span>
+                <span class="share-ac-omni">${u.omnidex_id ? '#' + escapeHtml(u.omnidex_id) : 'no Omnidex ID'}</span>
+            </div>`).join('');
+        list.classList.remove('hidden');
+        if (!list.dataset.wired) {
+            list.dataset.wired = '1';
+            list.addEventListener('click', e => {
+                const item = e.target.closest('.share-ac-item');
+                if (item) shareUserAcPick(inputId, listId, item.dataset.username, item.dataset.omni);
+            });
+        }
+    } catch { hideShareUserAc(listId); }
+}
+
+function shareUserAcPick(inputId, listId, username, omni) {
+    const input = document.getElementById(inputId);
+    input.value = username;
+    if (omni) input.dataset.omni = omni; else delete input.dataset.omni;
+    hideShareUserAc(listId);
+}
+
+function hideShareUserAc(listId) {
+    const list = document.getElementById(listId);
+    if (list) { list.classList.add('hidden'); list.innerHTML = ''; }
+    _shareAcIndex = -1;
+}
+
+function shareUserAcKeydown(e, inputId, listId, submitFn) {
+    const list = document.getElementById(listId);
+    const items = list && !list.classList.contains('hidden') ? [...list.querySelectorAll('.share-ac-item')] : [];
+    if (e.key === 'ArrowDown' && items.length) {
+        e.preventDefault();
+        _shareAcIndex = Math.min(_shareAcIndex + 1, items.length - 1);
+        items.forEach((el, i) => el.classList.toggle('selected', i === _shareAcIndex));
+    } else if (e.key === 'ArrowUp' && items.length) {
+        e.preventDefault();
+        _shareAcIndex = Math.max(_shareAcIndex - 1, -1);
+        items.forEach((el, i) => el.classList.toggle('selected', i === _shareAcIndex));
+    } else if (e.key === 'Enter') {
+        if (_shareAcIndex >= 0 && items[_shareAcIndex]) {
+            e.preventDefault();
+            const it = items[_shareAcIndex];
+            shareUserAcPick(inputId, listId, it.dataset.username, it.dataset.omni);
+        } else {
+            submitFn();
+        }
+    } else if (e.key === 'Escape') {
+        if (items.length) { e.stopPropagation(); hideShareUserAc(listId); }
+    }
+}
+
+// Close either share dialog's autocomplete on an outside click (capture — the
+// modals call stopPropagation on their own click handler).
+document.addEventListener('click', e => {
+    if (!e.target.closest('#inv-share-omni-wrap')) hideShareUserAc('inv-share-omni-ac');
+    if (!e.target.closest('#dga-share-omni-wrap')) hideShareUserAc('dga-share-omni-ac');
+}, true);
+
+// Collaborator lists, prefetched so the Share dialog opens already populated
+// rather than showing a spinner. Keyed "<kind>|<owner-omni>|<name>"; each value
+// is a Promise<shares[] | null>. Populated when a bin/deck detail view opens
+// for someone who can manage sharing; kept fresh by the mutation responses;
+// cleared when the detail view closes. Shared with decks_ga.js (load order).
+let _sharePrefetch = {};
+function _clearSharePrefetch() { _sharePrefetch = {}; }
+
+function _binSharesUrl(owner, name, extra = '') {
+    const ident = owner ? encodeURIComponent(invSharedBin?.pub_id || name) : encodeURIComponent(name);
+    let u = `/api/inventory/bins/${ident}/shares${extra}`;
+    if (owner) u += `${u.includes('?') ? '&' : '?'}owner=${encodeURIComponent(owner)}`;
+    return u;
+}
+function _binShareUrl(extra = '') { return _binSharesUrl(shareTargetOwner, shareTargetBin, extra); }
+function _binShareKey() { return `bin|${shareTargetOwner || ''}|${shareTargetBin}`; }
+
+function prefetchBinShares(owner, name) {
+    if (!invSharingEnabled) return;
+    const key = `bin|${owner || ''}|${name}`;
+    _sharePrefetch[key] = fetch(_binSharesUrl(owner, name))
+        .then(r => (r.ok ? r.json() : null)).then(d => d?.shares ?? null).catch(() => null);
+}
+
+function _wireBinShareList() {
+    // Delegated: a row's role dropdown fires `dropdown:change`; the list
+    // container survives every renderBinShareList() so wire it just once.
+    const listEl = document.getElementById('inv-share-list');
+    if (listEl.dataset.wired) return;
+    listEl.dataset.wired = '1';
+    listEl.addEventListener('dropdown:change', e => {
+        const row = e.target.closest('.inv-share-row');
+        if (row) changeBinShareRole(row.dataset.omni, e.detail.value);
+    });
+}
+
+async function openBinShareDialog(binName, owner) {
+    if (!invSharingEnabled) return;
+    shareTargetBin = binName || activeBin;
+    // 2+ args → caller specified the owner (ctxShare passes null for "mine");
+    // 0 args (header button) → whatever bin is open.
+    shareTargetOwner = arguments.length >= 2 ? owner : invActiveOwner;
+    if (!shareTargetBin) return;
+
+    const input = document.getElementById('inv-share-omni');
+    input.value = '';
+    delete input.dataset.omni;
+    hideShareUserAc('inv-share-omni-ac');
+    document.getElementById('inv-share-error').classList.add('hidden');
+    _wireBinShareList();
+
+    // Populate the list BEFORE showing the dialog — from the detail-view
+    // prefetch when it's there, otherwise a fetch we await here.
+    const key = _binShareKey();
+    const fromCache = !!_sharePrefetch[key];
+    if (!fromCache) prefetchBinShares(shareTargetOwner, shareTargetBin);
+    const shares = await _sharePrefetch[key];
+    if (shares === null) {
+        document.getElementById('inv-share-list').innerHTML =
+            '<div class="inv-share-loading">Couldn\'t load collaborators.</div>';
+    } else {
+        renderBinShareList(shares);
+    }
+    document.getElementById('inv-share-modal').classList.remove('hidden');
+
+    // Shown from a possibly-stale cache → reconcile against the server quietly.
+    if (fromCache && shares !== null) {
+        prefetchBinShares(shareTargetOwner, shareTargetBin);
+        _sharePrefetch[key].then(fresh => {
+            const modal = document.getElementById('inv-share-modal');
+            if (fresh && modal && !modal.classList.contains('hidden') && _binShareKey() === key
+                && JSON.stringify(fresh) !== JSON.stringify(shares)) {
+                _renderBinSharesAnimated(fresh);
+            }
+        });
+    }
+}
+
+function closeBinShareDialog() {
+    document.getElementById('inv-share-modal')?.classList.add('hidden');
+    hideShareUserAc('inv-share-omni-ac');
+    resetBoxResize(_binShareBox());
+    shareTargetBin = null;
+    shareTargetOwner = null;
+}
+
+function renderBinShareList(shares) {
+    const listEl = document.getElementById('inv-share-list');
+    if (!shares.length) {
+        listEl.innerHTML = '<div class="inv-share-loading">No collaborators yet.</div>';
+        return;
+    }
+    listEl.innerHTML = shares.map(s => `
+        <div class="inv-share-row" data-omni="${s.omnidex_id}">
+            <div class="inv-share-who">
+                <span class="inv-share-name">${escapeHtml(s.username)}</span>
+                <span class="inv-share-omni-tag">#${s.omnidex_id}</span>
+            </div>
+            <span class="inv-share-role-select">${selectDropdownHTML(SHARE_ROLE_OPTIONS, s.role, {up: true})}</span>
+            <button class="inv-share-remove" title="Remove" onclick="removeBinShare('${s.omnidex_id}')">✕</button>
+        </div>`).join('');
+}
+
+// Re-render the list, smoothly resizing the dialog box around the row change.
+function _renderBinSharesAnimated(shares) {
+    animateBoxResize(_binShareBox(), () => renderBinShareList(shares));
+}
+
+async function submitBinShare() {
+    const input = document.getElementById('inv-share-omni');
+    const grantee = (input.dataset.omni || input.value).trim();
+    // New collaborators land as 'editor'; the owner adjusts each one from the
+    // per-row dropdown in the list below.
+    const role = 'editor';
+    const errEl = document.getElementById('inv-share-error');
+    errEl.classList.add('hidden');
+    if (!grantee) {
+        errEl.textContent = 'Enter a username or Omnidex ID.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+    hideShareUserAc('inv-share-omni-ac');
+    try {
+        const res = await fetch(_binShareUrl(), {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({grantee, role}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            errEl.textContent = data.detail || 'Failed to add collaborator.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        input.value = '';
+        delete input.dataset.omni;
+        _sharePrefetch[_binShareKey()] = Promise.resolve(data.shares || []);
+        _renderBinSharesAnimated(data.shares || []);
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function changeBinShareRole(omni, role) {
+    try {
+        const res = await fetch(_binShareUrl(), {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({grantee: omni, role}),
+        });
+        if (res.ok) {
+            const shares = (await res.json()).shares || [];
+            _sharePrefetch[_binShareKey()] = Promise.resolve(shares);
+            renderBinShareList(shares);
+        }
+    } catch { /* leave the dropdown as the user set it */ }
+}
+
+async function removeBinShare(omni) {
+    try {
+        const res = await fetch(_binShareUrl(`/${encodeURIComponent(omni)}`), {method: 'DELETE'});
+        if (res.ok) {
+            const shares = (await res.json()).shares || [];
+            _sharePrefetch[_binShareKey()] = Promise.resolve(shares);
+            _renderBinSharesAnimated(shares);
+        }
+    } catch { /* no-op */ }
+}
+
 async function deleteBin() {
-    if (invBins[activeBin]?.default) return;
+    if (invActiveBinObj()?.default) return;
     if (!await appConfirm(`Delete bin "${activeBin}"? Cards inside will be removed.`, {title: 'Delete Bin'})) return;
     try {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {method: 'DELETE'});
@@ -2320,7 +2741,7 @@ let ctxCardRow = null;
 
 function openCardContextMenu(e, row) {
     ctxCardRow = row;
-    const isCurrent = invBins[activeBin]?.banner === row.edition_id;
+    const isCurrent = invActiveBinObj()?.banner === row.edition_id;
     const label = document.getElementById('inv-ctx-banner-label');
     if (label) label.textContent = isCurrent ? 'Remove Banner' : 'Set as Banner';
     const menu = document.getElementById('inv-card-context-menu');
@@ -2337,16 +2758,16 @@ async function ctxCardBanner() {
     closeCardContextMenu();
 
     // Right-clicking the current banner card removes the banner
-    const banner = invBins[activeBin]?.banner === editionId ? null : editionId;
+    const banner = invActiveBinObj()?.banner === editionId ? null : editionId;
 
     try {
         const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}`, {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({banner})
+            body: JSON.stringify(invOwnerBody({banner}))
         });
         if (!res.ok) return;
-        if (invBins[activeBin]) invBins[activeBin].banner = banner;
+        if (invActiveBinObj()) invActiveBinObj().banner = banner;
     } catch {
         console.error('Failed to update banner');
     }
@@ -2492,20 +2913,20 @@ async function executeMoveCard(targetBin, targetSection = null) {
             srcRes = await fetch('/api/inventory/card', {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, section, card_id, edition_id, foil_id, quantity: remaining})
+                body: JSON.stringify(invOwnerBody({bin: activeBin, section, card_id, edition_id, foil_id, quantity: remaining}))
             });
         } else {
             srcRes = await fetch('/api/inventory/card', {
                 method: 'DELETE',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({bin: activeBin, section, card_id, edition_id, foil_id})
+                body: JSON.stringify(invOwnerBody({bin: activeBin, section, card_id, edition_id, foil_id}))
             });
         }
 
         if (!srcRes.ok) throw new Error('Failed to update source bin');
 
         // Update local state — target lands in a same-named section (server auto-creates)
-        const srcCards = invBins[activeBin].sections?.[section] || {};
+        const srcCards = invActiveBinObj().sections?.[section] || {};
         if (partial) {
             if (srcCards[card_id]?.[edition_id]) srcCards[card_id][edition_id][foil_id] = remaining;
             const srcRow = binCardRows.find(r => r.card_id === card_id && r.edition_id === edition_id && r.foil_id === foil_id && r.section === section);
@@ -2518,7 +2939,7 @@ async function executeMoveCard(targetBin, targetSection = null) {
                 delete srcCards[card_id];
         }
 
-        const tgt = invBins[targetBin];
+        const tgt = targetBin === activeBin ? invActiveBinObj() : invBins[targetBin];
         tgt.sections ??= {};
         const tgtCards = tgt.sections[targetSection] ??= {};
         if (!tgtCards[card_id]) tgtCards[card_id] = {};
@@ -2531,7 +2952,7 @@ async function executeMoveCard(targetBin, targetSection = null) {
         closeMoveModal();
         if (targetBin === activeBin) {
             // Same-bin section move: rebuild rows so the card appears in its new section
-            await enrichAndRenderBinCards(invBins[activeBin]);
+            await enrichAndRenderBinCards(invActiveBinObj());
         } else {
             renderBinCards();
         }
@@ -2694,7 +3115,7 @@ async function loadExport() {
     const textarea = document.getElementById('export-textarea');
     textarea.value = 'Loading...';
     try {
-        const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/export`);
+        const res = await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/export`));
         const data = await res.json();
         textarea.value = data.lines.join('\n');
     } catch {
@@ -2746,7 +3167,7 @@ async function submitImport() {
 
     try {
         // Step 1 — parse lines, get resolved inserts + unresolved (needs API lookup) + failed (bad format/edition/foil)
-        const parseRes = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/parse`, {
+        const parseRes = await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/parse`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({lines})
@@ -2760,7 +3181,7 @@ async function submitImport() {
 
         // Step 2 — commit all locally-resolved inserts in one shot
         if (resolved.length) {
-            await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/commit`, {
+            await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/commit`), {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({inserts: resolved})
@@ -2777,7 +3198,7 @@ async function submitImport() {
 
             for (const item of unresolved) {
                 invUpdateProgress(done, total, item.name);
-                const res = await fetch(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/resolve`, {
+                const res = await fetch(invOwnerQS(`/api/inventory/bins/${encodeURIComponent(activeBin)}/import/resolve`), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({line: item.line, slug: item.slug, section: item.section})
@@ -2795,12 +3216,18 @@ async function submitImport() {
         // Step 4 — reload inventory state and re-render
         const successCount = total - resolvedFails.length;
         if (successCount > 0) {
-            const invRes = await fetch('/api/inventory');
-            if (invRes.ok) {
-                const invData = await invRes.json();
-                invBins = invData.bins || {};
+            if (invActiveOwner) {
+                // Shared bin — re-fetch just this bin's contents.
+                const r = await fetch(`/api/inventory/public/${encodeURIComponent(invActiveOwner)}/${encodeURIComponent(invSharedBin.pub_id)}`);
+                if (r.ok) invSharedBin = await r.json();
+            } else {
+                const invRes = await fetch('/api/inventory');
+                if (invRes.ok) {
+                    const invData = await invRes.json();
+                    invBins = invData.bins || {};
+                }
             }
-            await enrichAndRenderBinCards(invBins[activeBin]);
+            await enrichAndRenderBinCards(invActiveBinObj());
             updateInvCounts();
         }
 
@@ -3107,7 +3534,13 @@ window.initInventory = async function () {
     // ── Restore bin from URL params ──
     const urlParams = new URLSearchParams(window.location.search);
     const binName = urlParams.get('bin');
-    if (binName && invBins[binName]) {
+    const ownerOmni = urlParams.get('owner');
+    if (ownerOmni) {
+        // Deep link to a bin someone shared with me — ?bin=<pub_id>&owner=<omni>.
+        const shared = invShared.find(b => b.pub_id === binName || b.name === binName)
+            || {name: binName, pub_id: binName, owner_omnidex: ownerOmni, role: 'viewer', sections: {}};
+        await openSharedBinDetail(shared);
+    } else if (binName && invBins[binName]) {
         await openBinDetail(binName, false);
     }
 };

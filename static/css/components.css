@@ -104,7 +104,9 @@
    Every <input> and <textarea> gets this base (previously a bare `input {}`
    rule in login.css). The `.input` / `.textarea` classes are aliases for
    non-native elements (contenteditable, styled wrappers). Feature stylesheets
-   override font-size / padding / width per field on their prefixed class. */
+   override font-size / padding / width per field on their prefixed class. For a
+   value picker use the .select-dropdown component (dropdown.js) rather than a
+   native <select>. */
 input,
 .input,
 .textarea {
@@ -160,6 +162,66 @@ input::placeholder,
 }
 .open > .dropdown-arrow {
     transform: rotate(90deg);
+}
+
+/* ── Select dropdown ─────────────────────
+   Value picker built from dropdown.js — an input-styled trigger + a .menu of
+   options, with the rotating .dropdown-arrow above. Feature CSS overrides only
+   size/typography on a wrapper class. */
+.select-dropdown {
+    position: relative;
+}
+.select-dropdown-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s;
+}
+.select-dropdown-btn:hover,
+.select-dropdown-btn.open {
+    border-color: var(--border-focus);
+}
+.select-dropdown-btn .dropdown-arrow {
+    color: var(--text-muted);
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+.select-dropdown-menu {
+    left: 0;
+    min-width: 100%;
+    padding: 4px;
+}
+.select-dropdown--up .select-dropdown-menu {
+    top: auto;
+    bottom: calc(100% + 6px);
+    animation-name: revealUp;
+}
+.select-dropdown-option {
+    padding: 8px 10px;
+    border-radius: calc(var(--radius) - 4px);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.select-dropdown-option:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+.select-dropdown-option.selected {
+    color: var(--text);
 }
 
 /* ── Pill toggle ─────────────────────────

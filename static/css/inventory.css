@@ -2135,3 +2135,130 @@
     display: block;
     margin-bottom: 6px;
 }
+/* ═══════════════════════════════════════
+   COLLABORATIVE SHARING
+   ═══════════════════════════════════════ */
+
+/* "Shared with me" — a full-column section appended inside the owned #inv-bins-grid
+   / #dga-deck-grid so it sits within the grid's 32px padding (header/border no
+   longer edge-to-edge) and scrolls with it. Header reuses .dga-section-block /
+   .dga-section-header / .dga-section-label / .dga-section-count from the public
+   Collection & Decks pages (decks_ga.css). */
+.inv-shared-block {
+    grid-column: 1 / -1;
+    margin-top: 12px;
+}
+/* The inner tile grid inherits .inv-bins-grid / .dga-deck-grid's own page
+   padding + internal scroll — strip both; the outer grid already provides them.
+   ID selectors so this also beats mobile.css's own .inv-bins-grid padding. */
+#inv-shared-grid,
+#dga-shared-grid {
+    padding: 0;
+    overflow: visible;
+}
+.inv-bin-role-badge {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--border, #333);
+    color: var(--text-muted, #aaa);
+}
+.inv-bin-role-badge.inv-role-editor { color: #7fd1a8; border-color: #2f6b4f; }
+.inv-bin-role-badge.inv-role-manager { color: #e3b565; border-color: #7a5a24; }
+.inv-bin-role-badge.inv-role-viewer { color: #9aa8c0; border-color: #3b465c; }
+
+/* Role gating on an open shared bin. Everything above the caller's role is
+   hidden; invApplyRoleGate() toggles the .inv-role-* class on #inv-detail-view. */
+.inv-detail-view.inv-role-viewer .inv-detail-add-btn,
+.inv-detail-view.inv-role-viewer .inv-settings-btn:not(#inv-share-btn),
+.inv-detail-view.inv-role-viewer .dga-add-section-btn,
+.inv-detail-view.inv-role-viewer .inv-card-tile-qty-ctrl,
+.inv-detail-view.inv-role-viewer .inv-detail-edit-icon {
+    display: none !important;
+}
+.inv-detail-view.inv-role-viewer .inv-detail-name-editable,
+.inv-detail-view.inv-role-viewer .inv-detail-meta-editable {
+    pointer-events: none;
+}
+.inv-detail-view.inv-role-viewer .inv-card-tile { cursor: default; }
+
+/* Share dialog */
+.inv-share-hint {
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text-muted, #9aa0aa);
+    margin: 0 0 14px;
+}
+.inv-share-hint b { color: var(--text, #ddd); font-weight: 600; }
+.inv-share-add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.inv-share-omni-wrap { flex: 1 1 auto; min-width: 0; }
+.inv-share-omni-wrap .inv-text-input { width: 100%; }
+/* Match the input's box height exactly: the input is .inv-text-input's
+   9px vertical padding + the base 1px input border; .inv-modal-submit has no
+   border, so add a transparent one and use the same padding. */
+.inv-share-add-btn {
+    flex: 0 0 auto;
+    margin-top: 0;
+    padding: 9px 18px;
+    border: 1px solid transparent;
+}
+
+/* Collaborator picker autocomplete items — "username" left, muted "#omni" right,
+   matching the card-name autocomplete look (.autocomplete-item, cards.css). */
+.share-ac-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+.share-ac-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-ac-omni {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.share-ac-item.selected .share-ac-omni,
+.share-ac-item:hover .share-ac-omni { color: var(--accent); }
+.inv-share-list {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.inv-share-loading {
+    font-size: 0.82rem;
+    color: var(--text-muted, #888);
+    padding: 8px 2px;
+}
+.inv-share-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border: 1px solid var(--border, #2c2c2c);
+    border-radius: 8px;
+}
+.inv-share-who { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.inv-share-name { font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-share-omni-tag { font-size: 0.7rem; color: var(--text-muted, #777); }
+/* Per-row role picker (a .select-dropdown wrapped in .inv-share-role-select). */
+.inv-share-row .inv-share-role-select { flex: 0 0 auto; width: 108px; }
+.inv-share-row .select-dropdown-btn { padding: 6px 10px; font-size: 0.78rem; }
+.inv-share-remove {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    color: var(--text-muted, #888);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+}
+.inv-share-remove:hover { color: #e06666; background: rgba(224, 102, 102, 0.12); }

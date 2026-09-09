@@ -4,7 +4,7 @@ from db_mode import is_db_mode
 from deck_ga import deck_init
 from inv_ga import inv_init
 from pathlib import Path
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from util_file import new_json
 
@@ -277,6 +277,35 @@ def user_find_by_omnidex(omnidex_id: str) -> str | None:
          if info.get("omnidex_id") == omnidex_id),
         None,
     )
+
+
+def user_search(query: str, limit: int = 8) -> list[dict]:
+    """[{username, omnidex_id}] for users whose username contains `query`
+    (case-insensitive) or whose Omnidex ID starts with it — for the collaborator
+    picker (see /api/users/suggest). Users with no Omnidex ID yet still match by
+    username but can't actually be granted access (a share needs one)."""
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    if is_db_mode():
+        with get_session() as session:
+            rows = session.execute(
+                select(UserModel.username, UserModel.omnidex_id)
+                .where(or_(UserModel.username.ilike(f"%{q}%"),
+                           UserModel.omnidex_id.like(f"{q}%")))
+                .order_by(UserModel.username)
+                .limit(limit)
+            ).all()
+            return [{"username": r.username, "omnidex_id": r.omnidex_id} for r in rows]
+
+    ql = q.lower()
+    out = [
+        {"username": u, "omnidex_id": info.get("omnidex_id")}
+        for u, info in _load_users_data().items()
+        if ql in u.lower() or (info.get("omnidex_id") or "").startswith(q)
+    ]
+    return sorted(out, key=lambda x: x["username"].lower())[:limit]
 
 
 def user_list() -> list[dict]:

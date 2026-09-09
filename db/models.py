@@ -385,6 +385,43 @@ class DeckCard(Base):
     position: Mapped[int | None]
 
 
+# ── Collaborative access (Postgres-only feature) ──────────────────────────────
+# A row grants one user (grantee) a role on one bin/deck they don't own. The
+# owner is never a row here — it's inventory_bins.user_id / decks.user_id.
+# Roles, low → high: viewer (see it even when private), editor (cards, sections,
+# details, bulk import), manager (+ toggle public, manage collaborators).
+# Only the owner can delete the bin/deck. See _bin_access / _deck_access in app.py.
+_SHARE_ROLES = ("viewer", "editor", "manager")
+
+
+class BinShare(Base):
+    __tablename__ = "bin_shares"
+    __table_args__ = (
+        UniqueConstraint("bin_id", "grantee_id"),
+        CheckConstraint("role IN ('viewer', 'editor', 'manager')", name="ck_bin_shares_role"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bin_id: Mapped[int] = mapped_column(ForeignKey("inventory_bins.id", ondelete="CASCADE"), nullable=False)
+    grantee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=dt.datetime.utcnow)
+
+
+class DeckShare(Base):
+    __tablename__ = "deck_shares"
+    __table_args__ = (
+        UniqueConstraint("deck_id", "grantee_id"),
+        CheckConstraint("role IN ('viewer', 'editor', 'manager')", name="ck_deck_shares_role"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deck_id: Mapped[int] = mapped_column(ForeignKey("decks.id", ondelete="CASCADE"), nullable=False)
+    grantee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=dt.datetime.utcnow)
+
+
 # ── Watchlist / Wishlist (schema only this stage — see plan) ───────────────────
 
 class WatchlistEntry(Base):

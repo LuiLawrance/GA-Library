@@ -9,7 +9,9 @@ from api_tcgplayer import clear_foil_last_scraped, clear_last_scraped, JSON_IDS,
     set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from db.connection_url import compose as compose_database_url, parse as parse_database_url
-from db.models import Deck, DeckCard, DeckSection, InventoryBin, InventoryCard, InventorySection, User
+from db.models import (
+    BinShare, Deck, DeckCard, DeckSection, DeckShare, InventoryBin, InventoryCard, InventorySection, User,
+)
 from db.session import get_session, reset_engine
 from db_connection import resolved_database_url, save_database_url
 from db_mode import is_db_mode
@@ -44,6 +46,7 @@ from user import (
     user_login,
     user_needs_setup,
     user_reset,
+    user_search,
     user_set_admin_note,
     user_set_bio,
     user_set_omnidex_id,
@@ -746,6 +749,16 @@ async def api_profile(request: Request):
         raise HTTPException(status_code=404, detail="User not found")
 
     return JSONResponse(profile)
+
+
+@app.get("/api/users/suggest")
+async def api_users_suggest(request: Request, q: str = ""):
+    """Username / Omnidex ID autocomplete for the collaborator picker. Any
+    signed-in user may search; results are just a name + public Omnidex ID.
+    Declared before /api/users/{omnidex_id} so "suggest" isn't read as an ID."""
+    if not get_current_user(request):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return JSONResponse({"users": user_search(q)})
 
 
 @app.get("/api/users/{omnidex_id}")
@@ -3288,13 +3301,14 @@ def _pubid_new(existing: set[str]) -> str:
             return pid
 
 
-def _resolve_public_entry(omnidex_id: str, ident: str, loader, label: str) -> tuple[str, str, dict]:
-    """(username, name, entry) for a public deck/bin addressed as
-    /.../<omnidex_id>/<ident>, where ident is the item's stable pub_id. Falls
-    back to matching ident as a literal name so links shared before pub_ids
-    existed keep resolving (until that item is renamed). Raises 404 if the
-    owner, item, or its public flag doesn't check out. `loader(username)` is
-    _deck_index_load or _inv_load — both return {name: {..., "pub_id", "public"}}."""
+def _resolve_public_entry(omnidex_id: str, ident: str, loader, label: str,
+                          kind: str | None = None, caller: str | None = None) -> tuple[str, str, dict]:
+    """(username, name, entry) for a deck/bin addressed as /.../<omnidex_id>/<ident>,
+    where ident is the item's stable pub_id (falls back to a literal name for
+    links shared before pub_ids). Visible when the item is public OR — with
+    `kind` ("bin"/"deck") and an authenticated `caller` — when the caller has a
+    share on it (any role). Raises 404 otherwise. `loader(username)` is
+    _deck_index_load or _inv_load."""
     username = user_find_by_omnidex(omnidex_id.strip())
     if username is None:
         raise HTTPException(status_code=404, detail=f"{label} not found")
@@ -3304,9 +3318,231 @@ def _resolve_public_entry(omnidex_id: str, ident: str, loader, label: str) -> tu
         ident if ident in data else None,
     )
     entry = data.get(match) if match else None
-    if entry is None or not entry.get("public"):
+    if entry is None:
         raise HTTPException(status_code=404, detail=f"{label} not found")
+    if not entry.get("public"):
+        shared = bool(kind and caller and _share_role(caller, username, match, kind))
+        if not (shared or caller == username):
+            raise HTTPException(status_code=404, detail=f"{label} not found")
     return username, match, entry
+
+
+# ── Collaborative access (Postgres-only) ─────────────────────────────────────
+# viewer < editor < manager < owner. See db/models.py BinShare/DeckShare and
+# the /shares endpoints. A bin/deck mutation endpoint reads an optional `owner`
+# (the owner's Omnidex ID) from its body or query string; absent → the caller's
+# own item (role "owner"), present → _bin_access/_deck_access resolves the owner
+# and checks the caller's share role against the action's minimum.
+_SHARE_ROLE_RANK = {"viewer": 1, "editor": 2, "manager": 3, "owner": 4}
+
+_SHARE_KINDS = {
+    "bin": (InventoryBin, BinShare, "bin_id"),
+    "deck": (Deck, DeckShare, "deck_id"),
+}
+
+
+def _share_role(caller: str, owner: str, name: str, kind: str) -> str | None:
+    """The caller's share role on `owner`'s bin/deck `name`, or None. None when
+    not DB mode, when caller == owner (they're the owner, handled separately),
+    or when no grant exists."""
+    if not is_db_mode() or caller == owner:
+        return None
+    Parent, Share, pcol = _SHARE_KINDS[kind]
+    owner_id, caller_id = user_get_id(owner), user_get_id(caller)
+    with get_session() as session:
+        parent_id = session.execute(
+            select(Parent.id).where(Parent.user_id == owner_id, Parent.name == name)
+        ).scalar_one_or_none()
+        if parent_id is None:
+            return None
+        return session.execute(
+            select(Share.role).where(getattr(Share, pcol) == parent_id, Share.grantee_id == caller_id)
+        ).scalar_one_or_none()
+
+
+def _find_by_ident(data: dict, ident: str) -> str | None:
+    """A pub_id match in `data` (a _inv_load / _deck_index_load dict), else the
+    literal name if present, else None."""
+    return next((n for n, e in data.items() if e.get("pub_id") == ident),
+                ident if ident in data else None)
+
+
+def _resolve_write_access(request: Request, owner_ref, ident: str, need: str,
+                          loader, kind: str, label: str) -> tuple[str, str, str]:
+    """(owner_username, name, caller_role) for a bin/deck the caller may mutate
+    at >= `need`. owner_ref falsy → the caller's own item. Raises 401/403/404,
+    or 501 when a shared item is requested outside DB mode."""
+    caller = get_current_user(request)
+    if not caller:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if not owner_ref:
+        name = _find_by_ident(loader(caller), ident)
+        if name is None:
+            raise HTTPException(status_code=404, detail=f"{label} not found")
+        return caller, name, "owner"
+
+    if not is_db_mode():
+        raise HTTPException(status_code=501, detail="Shared items require database mode")
+    owner = user_find_by_omnidex(str(owner_ref).strip())
+    if owner is None:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    name = _find_by_ident(loader(owner), ident)
+    if name is None:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    if owner == caller:
+        return owner, name, "owner"
+
+    role = _share_role(caller, owner, name, kind)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    if _SHARE_ROLE_RANK[role] < _SHARE_ROLE_RANK[need]:
+        raise HTTPException(status_code=403, detail="You don't have permission to do that")
+    return owner, name, role
+
+
+async def _owner_ref(request: Request) -> str | None:
+    """The `owner` hint (an Omnidex ID) a client sends to act on a *shared*
+    bin/deck rather than its own — from the query string or the JSON body.
+    None → the caller's own item. Starlette caches the body, so a handler that
+    also reads `await request.json()` is unaffected."""
+    q = request.query_params.get("owner")
+    if q:
+        return q
+    if request.method in ("POST", "PATCH", "PUT", "DELETE"):
+        try:
+            body = await request.json()
+        except Exception:
+            return None
+        if isinstance(body, dict):
+            return body.get("owner")
+    return None
+
+
+def _bin_access(request: Request, owner_ref, ident: str, need: str) -> tuple[str, str, str]:
+    return _resolve_write_access(request, owner_ref, ident, need, _inv_load, "bin", "Bin")
+
+
+def _deck_access(request: Request, owner_ref, ident: str, need: str) -> tuple[str, str, str]:
+    return _resolve_write_access(request, owner_ref, ident, need, _deck_index_load, "deck", "Deck")
+
+
+def _shares_list(owner_username: str, name: str, kind: str) -> list[dict]:
+    """[{username, omnidex_id, role}] for every collaborator on owner's bin/deck
+    `name`, ordered by role (manager first) then username. Owner not included."""
+    Parent, Share, pcol = _SHARE_KINDS[kind]
+    owner_id = user_get_id(owner_username)
+    with get_session() as session:
+        parent_id = session.execute(
+            select(Parent.id).where(Parent.user_id == owner_id, Parent.name == name)
+        ).scalar_one_or_none()
+        if parent_id is None:
+            return []
+        rows = session.execute(
+            select(Share.role, User.username, User.omnidex_id)
+            .join(User, User.id == Share.grantee_id)
+            .where(getattr(Share, pcol) == parent_id)
+        ).all()
+    rows.sort(key=lambda r: (-_SHARE_ROLE_RANK[r.role], r.username.lower()))
+    return [{"username": r.username, "omnidex_id": r.omnidex_id, "role": r.role} for r in rows]
+
+
+def _resolve_grantee(ref: str) -> str | None:
+    """A grantee reference from the client — an Omnidex ID or a username — to a
+    username, or None. An all-digits ref is tried as an Omnidex ID first, then
+    (if unmatched) as a username."""
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    if ref.isdigit():
+        found = user_find_by_omnidex(ref)
+        if found:
+            return found
+    return ref if user_get_id(ref) is not None else None
+
+
+def _share_upsert(owner_username: str, name: str, kind: str, grantee_ref: str, role: str) -> None:
+    if role not in _SHARE_ROLE_RANK or role == "owner":
+        raise HTTPException(status_code=400, detail="role must be viewer, editor, or manager")
+    grantee = _resolve_grantee(grantee_ref)
+    if grantee is None:
+        raise HTTPException(status_code=404, detail="No user with that username or Omnidex ID")
+    if grantee == owner_username:
+        raise HTTPException(status_code=400, detail="The owner already has full access")
+
+    Parent, Share, pcol = _SHARE_KINDS[kind]
+    owner_id = user_get_id(owner_username)
+    grantee_id = user_get_id(grantee)
+    with get_session() as session:
+        parent_id = session.execute(
+            select(Parent.id).where(Parent.user_id == owner_id, Parent.name == name)
+        ).scalar_one_or_none()
+        if parent_id is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        session.execute(
+            pg_insert(Share).values(**{pcol: parent_id}, grantee_id=grantee_id, role=role)
+            .on_conflict_do_update(index_elements=[pcol, "grantee_id"], set_={"role": role})
+        )
+
+
+def _share_remove(owner_username: str, name: str, kind: str, grantee_omnidex: str) -> None:
+    grantee = user_find_by_omnidex(str(grantee_omnidex).strip())
+    if grantee is None:
+        return
+    Parent, Share, pcol = _SHARE_KINDS[kind]
+    owner_id = user_get_id(owner_username)
+    grantee_id = user_get_id(grantee)
+    with get_session() as session:
+        parent_id = session.execute(
+            select(Parent.id).where(Parent.user_id == owner_id, Parent.name == name)
+        ).scalar_one_or_none()
+        if parent_id is None:
+            return
+        session.execute(
+            delete(Share).where(getattr(Share, pcol) == parent_id, Share.grantee_id == grantee_id)
+        )
+
+
+def _shared_with(username: str, kind: str) -> list[dict]:
+    """Every bin/deck shared with `username` (they are a grantee, not the owner)
+    as list of {name, pub_id, role, owner_username, owner_omnidex, desc, banner,
+    card_count}. [] outside DB mode."""
+    if not is_db_mode():
+        return []
+    Parent, Share, pcol = _SHARE_KINDS[kind]
+    uid = user_get_id(username)
+    with get_session() as session:
+        rows = session.execute(
+            select(Parent, Share.role, User.username, User.omnidex_id)
+            .join(Share, getattr(Share, pcol) == Parent.id)
+            .join(User, User.id == Parent.user_id)
+            .where(Share.grantee_id == uid)
+        ).all()
+        parent_ids = [p.id for p, _, _, _ in rows]
+        if kind == "bin":
+            counts = dict(session.execute(
+                select(InventorySection.bin_id, func.coalesce(func.sum(InventoryCard.quantity), 0))
+                .join(InventoryCard, InventoryCard.section_id == InventorySection.id)
+                .where(InventorySection.bin_id.in_(parent_ids))
+                .group_by(InventorySection.bin_id)
+            ).all()) if parent_ids else {}
+        else:
+            counts = dict(session.execute(
+                select(DeckSection.deck_id, func.coalesce(func.sum(DeckCard.quantity), 0))
+                .join(DeckCard, DeckCard.section_id == DeckSection.id)
+                .where(DeckSection.deck_id.in_(parent_ids))
+                .group_by(DeckSection.deck_id)
+            ).all()) if parent_ids else {}
+
+    out = [{
+        "name": p.name, "pub_id": p.pub_id, "role": role,
+        "owner_username": owner_username, "owner_omnidex": owner_omnidex,
+        "desc": p.desc or "", "banner": p.banner,
+        "card_count": counts.get(p.id, 0),
+        **({"format": p.format or "", "edition_locked": bool(p.edition_locked)} if kind == "deck" else {}),
+    } for p, role, owner_username, owner_omnidex in rows]
+    out.sort(key=lambda d: (d["owner_username"].lower(), d["name"].lower()))
+    return out
 
 
 def _inv_default_structure() -> dict:
@@ -3673,7 +3909,11 @@ async def api_inventory_get(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return JSONResponse({"bins": _inv_load(user)})
+    return JSONResponse({
+        "bins": _inv_load(user),
+        "shared": _shared_with(user, "bin"),
+        "sharing_enabled": is_db_mode(),
+    })
 
 
 def _bin_value(sections: dict, sales_data: dict, listings_data: dict) -> dict:
@@ -3746,27 +3986,15 @@ def _bin_prices(sections: dict, sales_data: dict, listings_data: dict) -> dict:
 
 @app.get("/api/inventory/bins/{bin_name}/value")
 async def api_bin_value(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
-
+    owner, bin_name, _ = _bin_access(request, request.query_params.get("owner"), bin_name, "viewer")
+    inv = _inv_load(owner)
     return JSONResponse(_bin_value(inv[bin_name].get("sections", {}), load_sales_data(), load_listings_data()))
 
 
 @app.get("/api/inventory/bins/{bin_name}/prices")
 async def api_bin_prices(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
-
+    owner, bin_name, _ = _bin_access(request, request.query_params.get("owner"), bin_name, "viewer")
+    inv = _inv_load(owner)
     return JSONResponse(_bin_prices(inv[bin_name].get("sections", {}), load_sales_data(), load_listings_data()))
 
 
@@ -3800,28 +4028,30 @@ async def api_public_bins_list():
 
 
 @app.get("/api/inventory/public/{omnidex_id}/{ident}")
-async def api_public_bin_get(omnidex_id: str, ident: str):
-    # Addressed by Omnidex ID + the bin's stable pub_id rather than
-    # username + bin name — both halves survive a rename. See
-    # _resolve_public_entry and api_public_deck_get.
-    username, bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin")
+async def api_public_bin_get(omnidex_id: str, ident: str, request: Request):
+    # Addressed by Omnidex ID + the bin's stable pub_id. Visible when the bin
+    # is public or when the caller has a share on it (any role) — see
+    # _resolve_public_entry.
+    caller = get_current_user(request)
+    username, bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin", "bin", caller)
+    role = "owner" if caller == username else (_share_role(caller, username, bin_name, "bin") if caller else None)
     return JSONResponse({**entry, "username": username, "omnidex_id": omnidex_id,
-                          "name": bin_name, "pub_id": entry.get("pub_id")})
+                          "name": bin_name, "pub_id": entry.get("pub_id"), "my_role": role})
 
 
 @app.get("/api/inventory/public/{omnidex_id}/{ident}/value")
-async def api_public_bin_value(omnidex_id: str, ident: str):
-    """Priced total for a public bin — the read-only counterpart of
-    api_bin_value, addressed like api_public_bin_get."""
-    _username, _bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin")
+async def api_public_bin_value(omnidex_id: str, ident: str, request: Request):
+    """Priced total for a public/shared bin — read-only counterpart of api_bin_value."""
+    caller = get_current_user(request)
+    _u, _n, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin", "bin", caller)
     return JSONResponse(_bin_value(entry.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
 @app.get("/api/inventory/public/{omnidex_id}/{ident}/prices")
-async def api_public_bin_prices(omnidex_id: str, ident: str):
-    """Per-card price badges for a public bin — the read-only counterpart of
-    api_bin_prices, addressed like api_public_bin_get."""
-    _username, _bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin")
+async def api_public_bin_prices(omnidex_id: str, ident: str, request: Request):
+    """Per-card price badges for a public/shared bin — read-only counterpart of api_bin_prices."""
+    caller = get_current_user(request)
+    _u, _n, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin", "bin", caller)
     return JSONResponse(_bin_prices(entry.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
@@ -3867,13 +4097,8 @@ async def api_inv_collector():
 
 @app.get("/api/inventory/bins/{bin_name}/export")
 async def api_bin_export(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    owner, bin_name, _ = _bin_access(request, request.query_params.get("owner"), bin_name, "viewer")
+    inv = _inv_load(owner)
 
     info_data = load_info_data()
     slug_data = load_slugs_data()
@@ -4041,16 +4266,9 @@ def _bin_import_resolve_line(raw_line: str, info_data: dict, slug_data: dict, se
 @app.post("/api/inventory/bins/{bin_name}/import/parse")
 async def api_bin_import_parse(bin_name: str, request: Request):
     """Parse import text. Returns resolved inserts (local match) and unresolved (need API lookup)."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
+    _owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "editor")
     lines = body.get("lines", [])
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
 
     info_data = load_info_data()
     slug_data = load_slugs_data()
@@ -4084,17 +4302,11 @@ async def api_bin_import_parse(bin_name: str, request: Request):
 @app.post("/api/inventory/bins/{bin_name}/import/commit")
 async def api_bin_import_commit(bin_name: str, request: Request):
     """Add a batch of already-resolved inserts to the bin."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "editor")
     inserts = body.get("inserts", [])  # [{card_id, edition_id, foil_id, quantity}]
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
-
+    inv = _inv_load(owner)
     sections = inv[bin_name]["sections"]
 
     for item in inserts:
@@ -4110,24 +4322,19 @@ async def api_bin_import_commit(bin_name: str, request: Request):
         existing = cards[card_id][edition_id].get(foil_id, 0)
         cards[card_id][edition_id][foil_id] = existing + quantity
 
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.post("/api/inventory/bins/{bin_name}/import/resolve")
 async def api_bin_import_resolve(bin_name: str, request: Request):
     """Resolve a single unrecognized card name via API search, then re-attempt full line resolution."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "editor")
     raw_line = body.get("line", "")
     slug = body.get("slug", "").strip()
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
 
     if not slug:
         return JSONResponse({"ok": False, "found": False, "line": raw_line, "error": "Missing slug"})
@@ -4157,7 +4364,7 @@ async def api_bin_import_resolve(bin_name: str, request: Request):
     cards.setdefault(result["card_id"], {}).setdefault(result["edition_id"], {})
     existing = cards[result["card_id"]][result["edition_id"]].get(result["foil_id"], 0)
     cards[result["card_id"]][result["edition_id"]][result["foil_id"]] = existing + result["quantity"]
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
 
     return JSONResponse({"ok": True, "found": True, "line": raw_line})
 
@@ -4190,16 +4397,11 @@ async def api_bin_create(request: Request):
 
 @app.patch("/api/inventory/bins/{bin_name}")
 async def api_bin_patch(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
+    owner, bin_name, role = _bin_access(request, await _owner_ref(request), bin_name, "editor")
     new_name = body.get("name", "").strip()
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
 
     if new_name and new_name != bin_name:
         if new_name in inv:
@@ -4213,43 +4415,87 @@ async def api_bin_patch(bin_name: str, request: Request):
         banner = body["banner"]
         inv[bin_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
     if "public" in body:
+        if _SHARE_ROLE_RANK[role] < _SHARE_ROLE_RANK["manager"]:
+            raise HTTPException(status_code=403, detail="Only a manager or the owner can change public visibility")
         inv[bin_name]["public"] = bool(body["public"])
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.post("/api/inventory/bins/{bin_name}/default")
 async def api_bin_set_default(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
-
+    # Default is a property of an inventory as a whole, so this is owner-only.
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "owner")
+    inv = _inv_load(owner)
     for name in inv:
         inv[name]["default"] = (name == bin_name)
-
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.delete("/api/inventory/bins/{bin_name}")
 async def api_bin_delete(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "owner")
+    inv = _inv_load(owner)
     if inv[bin_name].get("default"):
         raise HTTPException(status_code=400, detail="Cannot delete the default bin")
-
     del inv[bin_name]
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
+
+
+# ── Bin / deck collaborator management (Postgres-only) ──
+
+async def _require_share_manager(request: Request, ident: str, kind: str):
+    """(owner_username, name) for a bin/deck the caller may manage sharing on
+    (manager or owner). `ident` is a pub_id or name in the owner's namespace."""
+    if not is_db_mode():
+        raise HTTPException(status_code=501, detail="Sharing requires database mode")
+    access = _bin_access if kind == "bin" else _deck_access
+    owner, name, _role = access(request, await _owner_ref(request), ident, "manager")
+    return owner, name
+
+
+@app.get("/api/inventory/bins/{ident}/shares")
+async def api_bin_shares_list(ident: str, request: Request):
+    owner, name = await _require_share_manager(request, ident, "bin")
+    return JSONResponse({"shares": _shares_list(owner, name, "bin")})
+
+
+@app.put("/api/inventory/bins/{ident}/shares")
+async def api_bin_shares_put(ident: str, request: Request):
+    body = await request.json()
+    owner, name = await _require_share_manager(request, ident, "bin")
+    _share_upsert(owner, name, "bin", body.get("grantee") or body.get("omnidex_id", ""), body.get("role", ""))
+    return JSONResponse({"ok": True, "shares": _shares_list(owner, name, "bin")})
+
+
+@app.delete("/api/inventory/bins/{ident}/shares/{grantee_omnidex}")
+async def api_bin_shares_delete(ident: str, grantee_omnidex: str, request: Request):
+    owner, name = await _require_share_manager(request, ident, "bin")
+    _share_remove(owner, name, "bin", grantee_omnidex)
+    return JSONResponse({"ok": True, "shares": _shares_list(owner, name, "bin")})
+
+
+@app.get("/api/decks/{ident}/shares")
+async def api_deck_shares_list(ident: str, request: Request):
+    owner, name = await _require_share_manager(request, ident, "deck")
+    return JSONResponse({"shares": _shares_list(owner, name, "deck")})
+
+
+@app.put("/api/decks/{ident}/shares")
+async def api_deck_shares_put(ident: str, request: Request):
+    body = await request.json()
+    owner, name = await _require_share_manager(request, ident, "deck")
+    _share_upsert(owner, name, "deck", body.get("grantee") or body.get("omnidex_id", ""), body.get("role", ""))
+    return JSONResponse({"ok": True, "shares": _shares_list(owner, name, "deck")})
+
+
+@app.delete("/api/decks/{ident}/shares/{grantee_omnidex}")
+async def api_deck_shares_delete(ident: str, grantee_omnidex: str, request: Request):
+    owner, name = await _require_share_manager(request, ident, "deck")
+    _share_remove(owner, name, "deck", grantee_omnidex)
+    return JSONResponse({"ok": True, "shares": _shares_list(owner, name, "deck")})
 
 
 # ── Card CRUD ──
@@ -4258,50 +4504,38 @@ async def api_bin_delete(bin_name: str, request: Request):
 
 @app.post("/api/inventory/bins/{bin_name}/section")
 async def api_bin_section_add(bin_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "editor")
     section = body.get("section", "").strip()
     if not section:
         raise HTTPException(status_code=400, detail="Section name required")
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
     if section in inv[bin_name]["sections"]:
         raise HTTPException(status_code=400, detail="Section already exists")
     inv[bin_name]["sections"][section] = {}
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.delete("/api/inventory/bins/{bin_name}/section/{section_name}")
 async def api_bin_section_delete(bin_name: str, section_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "editor")
+    inv = _inv_load(owner)
     if section_name not in inv[bin_name]["sections"]:
         raise HTTPException(status_code=404, detail="Section not found")
     del inv[bin_name]["sections"][section_name]
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.patch("/api/inventory/bins/{bin_name}/section/{section_name}/rename")
 async def api_bin_section_rename(bin_name: str, section_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), bin_name, "editor")
     new_name = body.get("name", "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="Name required")
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
     sections = inv[bin_name]["sections"]
     if section_name not in sections:
         raise HTTPException(status_code=404, detail="Section not found")
@@ -4309,7 +4543,7 @@ async def api_bin_section_rename(bin_name: str, section_name: str, request: Requ
         raise HTTPException(status_code=400, detail="Section name already taken")
     # Rebuild dict preserving insertion order
     inv[bin_name]["sections"] = {new_name if k == section_name else k: v for k, v in sections.items()}
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
@@ -4317,20 +4551,15 @@ async def api_bin_section_rename(bin_name: str, section_name: str, request: Requ
 async def api_inv_card_move(request: Request):
     """Move a card entry (card+edition+foil) between sections of a bin.
     Quantities merge if the same entry already exists in the target."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
-    bin_name = body.get("bin")
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), body.get("bin"), "editor")
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
     from_section = body.get("from_section", "")
     to_section = body.get("to_section", "")
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
     sections = inv[bin_name]["sections"]
     if from_section not in sections or to_section not in sections:
         raise HTTPException(status_code=404, detail="Section not found")
@@ -4347,30 +4576,24 @@ async def api_inv_card_move(request: Request):
     dst.setdefault(card_id, {}).setdefault(edition_id, {})
     dst[card_id][edition_id][foil_id] = dst[card_id][edition_id].get(foil_id, 0) + qty
 
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.post("/api/inventory/card")
 async def api_card_add(request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
-    bin_name = body.get("bin")
     section = body.get("section", "").strip()
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
     quantity = int(body.get("quantity", 1))
 
-    if not all([bin_name, section, card_id, edition_id, foil_id]):
+    if not all([body.get("bin"), section, card_id, edition_id, foil_id]):
         raise HTTPException(status_code=400, detail="Missing required fields")
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), body.get("bin"), "editor")
+    inv = _inv_load(owner)
 
     # Section is auto-created so flows like move-to-bin can land cards
     # in a matching section of the target bin without a separate call
@@ -4379,53 +4602,41 @@ async def api_card_add(request: Request):
     existing = cards[card_id][edition_id].get(foil_id, 0)
     cards[card_id][edition_id][foil_id] = existing + quantity
 
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.patch("/api/inventory/card")
 async def api_card_patch(request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
-    bin_name = body.get("bin")
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), body.get("bin"), "editor")
     section = body.get("section", "").strip()
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
     quantity = int(body.get("quantity", 1))
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
 
     try:
         inv[bin_name]["sections"][section][card_id][edition_id][foil_id] = quantity
     except KeyError:
         raise HTTPException(status_code=404, detail="Card entry not found")
 
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
 @app.delete("/api/inventory/card")
 async def api_card_delete(request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
-    bin_name = body.get("bin")
+    owner, bin_name, _ = _bin_access(request, await _owner_ref(request), body.get("bin"), "editor")
     section = body.get("section", "").strip()
     card_id = body.get("card_id")
     edition_id = body.get("edition_id")
     foil_id = body.get("foil_id")
 
-    inv = _inv_load(user)
-    if bin_name not in inv:
-        raise HTTPException(status_code=404, detail="Bin not found")
+    inv = _inv_load(owner)
 
     try:
         cards = inv[bin_name]["sections"][section]
@@ -4436,7 +4647,7 @@ async def api_card_delete(request: Request):
     except KeyError:
         raise HTTPException(status_code=404, detail="Card entry not found")
 
-    _inv_save(user, inv)
+    _inv_save(owner, inv)
     return JSONResponse({"ok": True})
 
 
@@ -5185,6 +5396,7 @@ async def api_decks_list(request: Request):
         raise HTTPException(status_code=401, detail="Not authenticated")
     index = _deck_index_load(user)
     result = {}
+    extra = {"shared": _shared_with(user, "deck"), "sharing_enabled": is_db_mode()}
     if is_db_mode():
         content = _deck_bulk_content_db(user_get_id(user))
         for name, entry in index.items():
@@ -5193,7 +5405,7 @@ async def api_decks_list(request: Request):
                             "desc": c.get("desc", entry.get("desc", "")),
                             "format": c.get("format", entry.get("format", "")),
                             "card_count": c.get("card_count", 0)}
-        return JSONResponse({"decks": result})
+        return JSONResponse({"decks": result, **extra})
 
     for name, entry in index.items():
         deck_data = _deck_load(user, name)
@@ -5203,7 +5415,7 @@ async def api_decks_list(request: Request):
                         "desc": (deck_data or {}).get("desc", entry.get("desc", "")),
                         "format": (deck_data or {}).get("format", entry.get("format", "")),
                         "card_count": count}
-    return JSONResponse({"decks": result})
+    return JSONResponse({"decks": result, **extra})
 
 
 @app.post("/api/decks")
@@ -5231,9 +5443,7 @@ async def api_deck_create(request: Request):
 
 @app.get("/api/decks/{deck_name}/export")
 async def api_deck_export(deck_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    user, deck_name, _ = _deck_access(request, request.query_params.get("owner"), deck_name, "viewer")
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
@@ -5264,10 +5474,8 @@ async def api_deck_export(deck_name: str, request: Request):
 @app.post("/api/decks/{deck_name}/import/parse")
 async def api_deck_import_parse(deck_name: str, request: Request):
     """Parse import text. Returns resolved cards (local match) and unresolved (need API lookup)."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     text = body.get("text", "")
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
@@ -5312,10 +5520,8 @@ async def api_deck_import_parse(deck_name: str, request: Request):
 @app.post("/api/decks/{deck_name}/import/commit")
 async def api_deck_import_commit(deck_name: str, request: Request):
     """Add a batch of already-resolved cards to the deck."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     cards = body.get("cards", [])  # [{card_id, qty, section}]
 
     deck_data = _deck_load(user, deck_name)
@@ -5340,10 +5546,8 @@ async def api_deck_import_commit(deck_name: str, request: Request):
 @app.post("/api/decks/{deck_name}/import/resolve")
 async def api_deck_import_resolve(deck_name: str, request: Request):
     """Resolve a single card name via API search and add it to the deck."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     card_name = body.get("name", "").strip()
     section = body.get("section", "").strip()
     qty = int(body.get("qty", 1))
@@ -5381,36 +5585,37 @@ async def api_public_decks_list():
     return JSONResponse({"decks": _public_decks_list()})
 
 
-def _deck_resolve_public(omnidex_id: str, ident: str) -> tuple[str, str, dict]:
-    """(username, deck_name, index_entry) for a public deck addressed as
-    /api/decks/public/<omnidex_id>/<ident>. See _resolve_public_entry."""
-    return _resolve_public_entry(omnidex_id, ident, _deck_index_load, "Deck")
+def _deck_resolve_public(omnidex_id: str, ident: str, caller: str | None = None) -> tuple[str, str, dict]:
+    """(username, deck_name, index_entry) for a deck addressed as
+    /api/decks/public/<omnidex_id>/<ident>. Visible when public or shared with
+    `caller`. See _resolve_public_entry."""
+    return _resolve_public_entry(omnidex_id, ident, _deck_index_load, "Deck", "deck", caller)
 
 
 @app.get("/api/decks/public/{omnidex_id}/{ident}")
-async def api_public_deck_get(omnidex_id: str, ident: str):
-    # Addressed by Omnidex ID + the deck's stable pub_id rather than
-    # username + deck name — both halves survive a rename. See
-    # _deck_resolve_public and api_public_profile.
-    username, deck_name, entry = _deck_resolve_public(omnidex_id, ident)
+async def api_public_deck_get(omnidex_id: str, ident: str, request: Request):
+    # Addressed by Omnidex ID + the deck's stable pub_id. Visible when public
+    # or shared with the caller — see _deck_resolve_public.
+    caller = get_current_user(request)
+    username, deck_name, entry = _deck_resolve_public(omnidex_id, ident, caller)
     deck_data = _deck_load(username, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
     edition_locked = bool(entry.get("edition_locked", False))
+    role = "owner" if caller == username else (_share_role(caller, username, deck_name, "deck") if caller else None)
     # Per-card price badges are Edition-Locked-only (see the client's
     # renderPublicDeckSections) — skip the price lookup entirely otherwise.
     card_prices = _deck_prices(deck_data["sections"], load_sales_data(), load_listings_data()) if edition_locked else {}
     return JSONResponse({**_deck_detail_payload(deck_data), "username": username, "omnidex_id": omnidex_id,
-                          "name": deck_name, "pub_id": entry.get("pub_id"),
+                          "name": deck_name, "pub_id": entry.get("pub_id"), "my_role": role,
                           "banner": entry.get("banner"), "edition_locked": edition_locked,
                           "card_prices": card_prices})
 
 
 @app.get("/api/decks/public/{omnidex_id}/{ident}/value")
-async def api_public_deck_value(omnidex_id: str, ident: str):
-    """Priced total for a public deck — the read-only counterpart of
-    api_deck_value, addressed like api_public_deck_get."""
-    username, deck_name, _ = _deck_resolve_public(omnidex_id, ident)
+async def api_public_deck_value(omnidex_id: str, ident: str, request: Request):
+    """Priced total for a public/shared deck — read-only counterpart of api_deck_value."""
+    username, deck_name, _ = _deck_resolve_public(omnidex_id, ident, get_current_user(request))
     deck_data = _deck_load(username, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
@@ -5448,14 +5653,10 @@ async def api_deck_value(deck_name: str, request: Request):
 
 @app.patch("/api/decks/{deck_name}")
 async def api_deck_patch(deck_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    owner, deck_name, role = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     new_name = body.get("name", "").strip()
-    index = _deck_index_load(user)
-    if deck_name not in index:
-        raise HTTPException(status_code=404, detail="Deck not found")
+    index = _deck_index_load(owner)
     if new_name and new_name != deck_name:
         if new_name in index:
             raise HTTPException(status_code=400, detail="Deck name already taken")
@@ -5467,14 +5668,14 @@ async def api_deck_patch(deck_name: str, request: Request):
             # this itself: from its point of view the old name just
             # vanished and a new one appeared, which it can only read as
             # "delete the old deck, create an empty new one."
-            user_id = user_get_id(user)
+            owner_id = user_get_id(owner)
             with get_session() as session:
                 session.execute(
-                    update(Deck).where(Deck.user_id == user_id, Deck.name == deck_name).values(name=new_name)
+                    update(Deck).where(Deck.user_id == owner_id, Deck.name == deck_name).values(name=new_name)
                 )
         else:
-            old_path = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
-            new_path = f"{DIR_DECKS_GA}/{user}/{new_name}.json"
+            old_path = f"{DIR_DECKS_GA}/{owner}/{deck_name}.json"
+            new_path = f"{DIR_DECKS_GA}/{owner}/{new_name}.json"
             if os.path.exists(old_path):
                 os.rename(old_path, new_path)
         deck_name = new_name
@@ -5482,15 +5683,17 @@ async def api_deck_patch(deck_name: str, request: Request):
         banner = body["banner"]
         index[deck_name]["banner"] = banner.strip() if isinstance(banner, str) and banner.strip() else None
     if "public" in body:
+        if _SHARE_ROLE_RANK[role] < _SHARE_ROLE_RANK["manager"]:
+            raise HTTPException(status_code=403, detail="Only a manager or the owner can change public visibility")
         index[deck_name]["public"] = bool(body["public"])
     if "edition_locked" in body:
         index[deck_name]["edition_locked"] = bool(body["edition_locked"])
     index[deck_name]["modified"] = date.today().isoformat()
-    _deck_index_save(user, index)
+    _deck_index_save(owner, index)
     if "format" in body or "desc" in body:
         fmt = body.get("format", "").strip()
         desc = body.get("desc", "").strip()
-        deck_data = _deck_load(user, deck_name)
+        deck_data = _deck_load(owner, deck_name)
         if deck_data is None:
             # Deck file missing — rebuild it so format/desc aren't silently lost
             deck_data = _make_deck_data(desc, fmt)
@@ -5499,21 +5702,17 @@ async def api_deck_patch(deck_name: str, request: Request):
                 deck_data["format"] = fmt
             if "desc" in body:
                 deck_data["desc"] = desc
-        _deck_save(user, deck_name, deck_data)
+        _deck_save(owner, deck_name, deck_data)
     return JSONResponse({"ok": True})
 
 
 @app.delete("/api/decks/{deck_name}")
 async def api_deck_delete(deck_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    index = _deck_index_load(user)
-    if deck_name not in index:
-        raise HTTPException(status_code=404, detail="Deck not found")
+    owner, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "owner")
+    index = _deck_index_load(owner)
     del index[deck_name]
-    _deck_index_save(user, index)
-    deck_file = f"{DIR_DECKS_GA}/{user}/{deck_name}.json"
+    _deck_index_save(owner, index)
+    deck_file = f"{DIR_DECKS_GA}/{owner}/{deck_name}.json"
     if os.path.exists(deck_file):
         os.remove(deck_file)
     return JSONResponse({"ok": True})
@@ -5525,10 +5724,8 @@ async def api_deck_card_edition(deck_name: str, request: Request):
     which edition/foil a card slot points to without touching its quantity or
     position, so the owner doesn't have to delete the old row and re-add the
     new one."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
     from_edition_id = body.get("from_edition_id") or None
@@ -5568,11 +5765,8 @@ async def api_deck_card_edition(deck_name: str, request: Request):
 @app.post("/api/decks/{deck_name}/card/move")
 async def api_deck_card_move(deck_name: str, request: Request):
     """Move a card to a new position — within a section or across sections."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     card_id = body.get("card_id", "")
     edition_id = body.get("edition_id") or None
     foil_id = body.get("foil_id") or None
@@ -5625,10 +5819,8 @@ async def api_deck_card_move(deck_name: str, request: Request):
 
 @app.post("/api/decks/{deck_name}/card")
 async def api_deck_card_add(deck_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
     edition_id = body.get("edition_id") or None
@@ -5653,10 +5845,8 @@ async def api_deck_card_add(deck_name: str, request: Request):
 @app.patch("/api/decks/{deck_name}/card")
 async def api_deck_card_set(deck_name: str, request: Request):
     """Set the absolute quantity of a card in a deck section."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
     edition_id = body.get("edition_id") or None
@@ -5712,10 +5902,8 @@ async def api_deck_card_set(deck_name: str, request: Request):
 async def api_deck_card_delete(deck_name: str, request: Request):
     """Remove a card from a deck section — a specific printing when Edition
     Locked, or every row for that card_id (the whole collapsed tile) when not."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     card_id = body.get("card_id", "").strip()
     section = body.get("section", "").strip()
     edition_id = body.get("edition_id") or None
@@ -5739,10 +5927,8 @@ async def api_deck_card_delete(deck_name: str, request: Request):
 
 @app.post("/api/decks/{deck_name}/section")
 async def api_deck_section_add(deck_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     section = body.get("section", "").strip()
     if not section:
         raise HTTPException(status_code=400, detail="Section name required")
@@ -5758,9 +5944,7 @@ async def api_deck_section_add(deck_name: str, request: Request):
 
 @app.delete("/api/decks/{deck_name}/section/{section_name}")
 async def api_deck_section_delete(deck_name: str, section_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+    user, deck_name, _ = _deck_access(request, request.query_params.get("owner"), deck_name, "editor")
     deck_data = _deck_load(user, deck_name)
     if deck_data is None:
         raise HTTPException(status_code=404, detail="Deck not found")
@@ -5773,10 +5957,8 @@ async def api_deck_section_delete(deck_name: str, section_name: str, request: Re
 
 @app.patch("/api/decks/{deck_name}/section/{section_name}/rename")
 async def api_deck_section_rename(deck_name: str, section_name: str, request: Request):
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
     body = await request.json()
+    user, deck_name, _ = _deck_access(request, await _owner_ref(request), deck_name, "editor")
     new_name = body.get("name", "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="Name required")

@@ -3,6 +3,26 @@ let gaDecks = {};
 let activeDeck = null;
 let activeDeckData = null;
 
+// Collaborative access — mirrors inventory.js. dgaShared: decks shared with me;
+// when one is open dgaActiveOwner is its owner's Omnidex ID, dgaActiveRole my
+// role, dgaSharedEntry the index-entry stub (has pub_id). For my own decks:
+// null / 'owner'. Every deck mutation fetch threads the owner hint through
+// dgaOwnerQS()/dgaOwnerBody().
+let dgaShared = [];
+let dgaSharingEnabled = false;
+let dgaActiveOwner = null;
+let dgaActiveRole = 'owner';
+let dgaSharedEntry = null;
+const DGA_ROLE_RANK = {viewer: 1, editor: 2, manager: 3, owner: 4};
+function dgaCan(minRole) { return DGA_ROLE_RANK[dgaActiveRole] >= DGA_ROLE_RANK[minRole]; }
+function dgaOwnerQS(url) {
+    return dgaActiveOwner ? `${url}${url.includes('?') ? '&' : '?'}owner=${encodeURIComponent(dgaActiveOwner)}` : url;
+}
+function dgaOwnerBody(obj) {
+    return dgaActiveOwner ? {...obj, owner: dgaActiveOwner} : obj;
+}
+function dgaActiveEntry() { return dgaActiveOwner ? (dgaSharedEntry || {}) : (gaDecks[activeDeck] || {}); }
+
 // ── Add modal state ──
 let dgaAddModalCardId = null;
 let dgaAddModalCardName = null;
@@ -41,6 +61,9 @@ function dgaOpenContextMenu(e, deckName) {
     const makePrivateBtn = document.getElementById('dga-ctx-make-private');
     if (makePublicBtn) makePublicBtn.style.display = isPublic ? 'none' : '';
     if (makePrivateBtn) makePrivateBtn.style.display = isPublic ? '' : 'none';
+
+    const shareBtn = document.getElementById('dga-ctx-share');
+    if (shareBtn) shareBtn.style.display = dgaSharingEnabled ? '' : 'none';
 
     menu.classList.remove('hidden');
     const x = Math.min(e.clientX, window.innerWidth - 180);
@@ -119,7 +142,7 @@ let dgaCtxCardTarget = null; // {cardId, cardName, section, editionId, foilId}
 function dgaOpenCardContextMenu(e, editionId, cardId, cardName, rowEditionId, rowFoilId, sectionName) {
     dgaCtxTargetEdition = editionId;
     dgaCtxCardTarget = {cardId, cardName, section: sectionName, editionId: rowEditionId, foilId: rowFoilId};
-    const isCurrent = gaDecks[activeDeck]?.banner === editionId;
+    const isCurrent = dgaActiveEntry()?.banner === editionId;
     document.getElementById('dga-ctx-banner-label').textContent =
         isCurrent ? 'Remove Banner' : 'Set as Banner';
     // Swapping a printing only makes sense for a specific, known row —
@@ -145,10 +168,10 @@ async function dgaCtxSetBanner() {
     dgaCloseCardContextMenu();
 
     // Right-clicking the current banner card removes the banner
-    const banner = gaDecks[activeDeck]?.banner === editionId ? null : editionId;
+    const banner = dgaActiveEntry()?.banner === editionId ? null : editionId;
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}`), {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({banner})
@@ -292,7 +315,7 @@ async function submitDgaEditionSwap() {
     btn.textContent = 'Changing...';
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/edition`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card/edition`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -535,6 +558,8 @@ async function loadMyDecks() {
         if (!res.ok) return;
         const data = await res.json();
         gaDecks = data.decks || {};
+        dgaShared = data.shared || [];
+        dgaSharingEnabled = !!data.sharing_enabled;
         renderDeckGrid();
     } catch {
         console.error('Failed to load decks');
@@ -558,6 +583,59 @@ function renderDeckGrid() {
     createTile.innerHTML = `<span class="dga-create-plus">+</span><span class="dga-create-label">New Deck</span>`;
     createTile.onclick = openCreateDeckModal;
     grid.appendChild(createTile);
+
+    renderSharedDeckGrid();
+}
+
+// Decks other people have shared with me — a labelled section appended inside
+// #dga-deck-grid (spanning all columns) so it shares the grid's padding/scroll
+// and its header doesn't run edge-to-edge, matching the public Decks page's
+// "All Decks" section. Called after renderDeckGrid refills the grid.
+function renderSharedDeckGrid() {
+    if (!dgaShared.length) return;
+    const block = document.createElement('div');
+    block.id = 'dga-shared-block';
+    block.className = 'inv-shared-block dga-section-block';
+    block.innerHTML = `
+        <div class="dga-section-header">
+            <span class="dga-section-label label">Shared with me</span>
+            <span class="dga-section-count">${dgaShared.length} deck${dgaShared.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="dga-deck-grid inv-shared-tile-grid" id="dga-shared-grid"></div>`;
+    document.getElementById('dga-deck-grid').appendChild(block);
+    const grid = block.querySelector('#dga-shared-grid');
+    dgaShared.forEach((d, i) => grid.appendChild(buildSharedDeckTile(d, i)));
+}
+
+function buildSharedDeckTile(d, index) {
+    const tile = document.createElement('div');
+    tile.className = 'dga-deck-tile';
+    tile.style.animationDelay = `${Math.min(index * 50, 400)}ms`;
+    const fmt = d.format ? `<span class="dga-tile-format">${d.format}</span>` : '';
+    const roleBadge = `<span class="inv-bin-role-badge inv-role-${d.role}">${d.role}</span>`;
+    const valueBadge = d.edition_locked
+        ? '<span class="inv-bin-value-badge inv-bin-value-loading">…</span>' : '';
+    tile.innerHTML = `
+        <div class="dga-tile-icon-row"><span class="dga-tile-icon">⬡</span>${fmt}${roleBadge}</div>
+        <div class="dga-tile-name">${d.name}</div>
+        <div class="dga-tile-desc">by ${d.owner_username}${d.desc ? ' · ' + d.desc : ''}</div>
+        <div class="dga-tile-meta-row inv-bin-meta-row">
+            <div class="dga-tile-meta">${d.card_count} card${d.card_count !== 1 ? 's' : ''}</div>
+            ${valueBadge}
+        </div>`;
+    if (d.edition_locked) {
+        loadDeckValue(tile.querySelector('.inv-bin-value-badge'),
+            `/api/decks/public/${encodeURIComponent(d.owner_omnidex)}/${encodeURIComponent(d.pub_id)}/value`);
+    }
+    if (d.banner) {
+        tile.classList.add('has-banner');
+        const bg = document.createElement('div');
+        bg.className = 'dga-tile-banner';
+        bg.style.backgroundImage = `url('/images/${encodeURIComponent(d.banner)}.jpg')`;
+        tile.prepend(bg);
+    }
+    tile.onclick = () => openSharedDeckDetail(d);
+    return tile;
 }
 
 function buildDeckTile(name, entry, index, total) {
@@ -655,7 +733,7 @@ function dgaStartDetailInlineEdit(field) {
     const labelEl = document.getElementById(isName ? 'dga-detail-name' : 'dga-detail-desc');
     if (!labelEl || labelEl.isContentEditable || !activeDeck) return;
 
-    const entry = gaDecks[activeDeck] || {};
+    const entry = dgaActiveEntry();
     const originalName = activeDeck;
     const originalDesc = entry.desc || '';
 
@@ -724,7 +802,7 @@ function dgaStartDetailInlineEdit(field) {
         };
 
         try {
-            const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+            const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}`), {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
@@ -736,15 +814,21 @@ function dgaStartDetailInlineEdit(field) {
             }
 
             if (isName) {
-                const existing = gaDecks[originalName];
-                delete gaDecks[originalName];
-                gaDecks[newValue] = {...existing, format: entry.format || '', desc: originalDesc};
-                activeDeck = newValue;
+                if (dgaActiveOwner) {
+                    dgaSharedEntry = {...dgaSharedEntry, name: newValue};
+                    activeDeck = newValue;
+                } else {
+                    const existing = gaDecks[originalName];
+                    delete gaDecks[originalName];
+                    gaDecks[newValue] = {...existing, format: entry.format || '', desc: originalDesc};
+                    activeDeck = newValue;
+                    window.history.replaceState({}, '', `/decks_ga?deck=${encodeURIComponent(newValue)}`);
+                }
                 dgaRenderDetailName(newValue);
-                window.history.replaceState({}, '', `/decks_ga?deck=${encodeURIComponent(newValue)}`);
                 dgaWireDetailInlineEdit();
             } else {
                 if (gaDecks[activeDeck]) gaDecks[activeDeck].desc = newValue;
+                else if (dgaSharedEntry) dgaSharedEntry.desc = newValue;
                 dgaRenderDetailDesc(newValue);
             }
         } catch {
@@ -775,18 +859,37 @@ function dgaStartDetailInlineEdit(field) {
 }
 
 async function openDeckDetail(deckName, pushUrl = true) {
+    dgaActiveOwner = null;
+    dgaActiveRole = 'owner';
+    dgaSharedEntry = null;
+    return _openDeckDetail(deckName, gaDecks[deckName] || {}, pushUrl,
+        `/decks_ga?deck=${encodeURIComponent(deckName)}`,
+        `/api/decks/${encodeURIComponent(deckName)}`);
+}
+
+// A deck someone shared with me — same detail view, gated to my role.
+async function openSharedDeckDetail(shared) {
+    dgaActiveOwner = shared.owner_omnidex;
+    dgaActiveRole = shared.role;
+    dgaSharedEntry = shared;
+    return _openDeckDetail(shared.name, shared, true,
+        `/decks_ga?deck=${encodeURIComponent(shared.pub_id)}&owner=${encodeURIComponent(shared.owner_omnidex)}`,
+        `/api/decks/public/${encodeURIComponent(shared.owner_omnidex)}/${encodeURIComponent(shared.pub_id)}`);
+}
+
+async function _openDeckDetail(deckName, entry, pushUrl, url, fetchUrl) {
     activeDeck = deckName;
     activeDeckData = null;
 
     document.getElementById('dga-list-view').classList.add('hidden');
     document.getElementById('dga-detail-view').classList.remove('hidden');
 
-    const entry = gaDecks[deckName] || {};
     document.getElementById('dga-detail-format').textContent = entry.format ? `[${entry.format}]` : '';
     dgaRenderDetailName(deckName);
     dgaRenderDetailDesc(entry.desc || '');
     dgaWireDetailInlineEdit();
     _setEditionLockedPillUI(!!entry.edition_locked);
+    dgaApplyRoleGate();
 
     const grid = document.getElementById('dga-card-grid');
     if (grid) grid.innerHTML = '<p class="dga-loading">Loading...</p>';
@@ -801,17 +904,34 @@ async function openDeckDetail(deckName, pushUrl = true) {
         valEl.classList.remove('inv-bin-value-partial');
     }
 
-    if (pushUrl) window.history.pushState({}, '', `/decks_ga?deck=${encodeURIComponent(deckName)}`);
+    if (pushUrl) window.history.pushState({}, '', url);
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(deckName)}`);
+        const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error();
         activeDeckData = await res.json();
+        if (activeDeckData.my_role) dgaActiveRole = activeDeckData.my_role;
+        if (dgaSharedEntry) dgaSharedEntry = {...dgaSharedEntry, ...activeDeckData};
+        dgaApplyRoleGate();
+        // Prefetch the collaborator list so the Share dialog opens already filled.
+        if (dgaSharingEnabled && dgaCan('manager')) prefetchDeckShares(dgaActiveOwner, deckName);
         _setEditionLockedPillUI(!!activeDeckData.edition_locked); // authoritative, once known
+        dgaRenderDetailName(activeDeckData.name || deckName);
         renderDeckSections(activeDeckData);
     } catch {
         if (grid) grid.innerHTML = '<p class="dga-loading">Failed to load deck.</p>';
     }
+}
+
+// viewer → read-only; editor → cards/sections/details; manager → + Share + public.
+function dgaApplyRoleGate() {
+    const view = document.getElementById('dga-detail-view');
+    if (!view) return;
+    view.classList.remove('dga-role-viewer', 'dga-role-editor', 'dga-role-manager', 'dga-role-owner', 'dga-shared');
+    view.classList.add(`dga-role-${dgaActiveRole}`);
+    if (dgaActiveOwner) view.classList.add('dga-shared');
+    const shareBtn = document.getElementById('dga-share-btn');
+    if (shareBtn) shareBtn.style.display = (dgaSharingEnabled && dgaCan('manager')) ? '' : 'none';
 }
 
 // Edition Locked (pill toggle next to the "+" add-card button, dga-edition-locked-toggle
@@ -831,7 +951,7 @@ async function setDgaEditionLocked(value) {
     _setEditionLockedPillUI(value);
     if (!activeDeck) return;
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}`), {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({edition_locked: value})
@@ -866,6 +986,10 @@ function closeDeckDetail() {
     }
     activeDeck = null;
     activeDeckData = null;
+    dgaActiveOwner = null;
+    dgaActiveRole = 'owner';
+    dgaSharedEntry = null;
+    _clearSharePrefetch();
     document.getElementById('dga-detail-view').classList.add('hidden');
     document.getElementById('dga-list-view').classList.remove('hidden');
     window.history.pushState({}, '', '/decks_ga');
@@ -1006,7 +1130,7 @@ function dgaCommitCardMove(toSection, index) {
     }
     renderDeckSections(activeDeckData, false);
 
-    fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card/move`, {
+    fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card/move`), {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -1024,7 +1148,10 @@ function dgaCommitCardMove(toSection, index) {
 async function dgaReloadActiveDeck() {
     if (!activeDeck) return;
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`);
+        const url = dgaActiveOwner
+            ? `/api/decks/public/${encodeURIComponent(dgaActiveOwner)}/${encodeURIComponent(dgaSharedEntry.pub_id)}`
+            : `/api/decks/${encodeURIComponent(activeDeck)}`;
+        const res = await fetch(url);
         if (!res.ok) return;
         activeDeckData = await res.json();
         renderDeckSections(activeDeckData, false);
@@ -1193,7 +1320,7 @@ function dgaBuildAddSectionButton() {
             if (!name) return cancel();
             if (activeDeckData?.sections?.[name] !== undefined) return cancel();
             try {
-                const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section`, {
+                const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/section`), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({section: name})
@@ -1217,7 +1344,7 @@ function dgaBuildAddSectionButton() {
 function dgaRefreshDetailValue() {
     const badge = document.getElementById('dga-detail-value');
     if (!badge) return;
-    const locked = !!gaDecks[activeDeck]?.edition_locked;
+    const locked = !!(activeDeckData?.edition_locked ?? dgaActiveEntry()?.edition_locked);
     badge.classList.toggle('hidden', !locked);
     if (locked && activeDeck) {
         loadDeckValue(badge, `/api/decks/${encodeURIComponent(activeDeck)}/value`);
@@ -1244,13 +1371,13 @@ const dgaDeckEditMode = new TileEditMode('dga-qty-confirm-bar', async (changes) 
 
         try {
             if (c.quantity <= 0) {
-                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card`), {
                     method: 'DELETE',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({card_id: c.cardId, section, edition_id: editionId, foil_id: foilId})
                 });
             } else {
-                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card`), {
                     method: 'PATCH',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({card_id: c.cardId, section, edition_id: editionId, foil_id: foilId, quantity: c.quantity})
@@ -1494,7 +1621,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
             && (r.edition_id || null) === rowEditionId && (r.foil_id || null) === rowFoilId);
         try {
             if (newQty <= 0) {
-                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card`), {
                     method: 'DELETE',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({card_id, section: sectionName, edition_id: rowEditionId, foil_id: rowFoilId})
@@ -1505,7 +1632,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
                     if (row) cards.splice(cards.indexOf(row), 1);
                 }
             } else {
-                await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+                await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card`), {
                     method: 'PATCH',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({card_id, section: sectionName, edition_id: rowEditionId, foil_id: rowFoilId, quantity: newQty})
@@ -1645,7 +1772,7 @@ async function submitCreateDeck() {
 
 function openDeckSettingsModal() {
     if (!activeDeck) return;
-    const entry = gaDecks[activeDeck] || {};
+    const entry = dgaActiveEntry();
     document.getElementById('dga-settings-name').value = activeDeck;
     setDgaFormatValue('settings', entry.format || '');
     document.getElementById('dga-settings-desc').value = entry.desc || '';
@@ -1719,7 +1846,7 @@ function dgaStartInlineRename(labelEl, sectionName) {
         }
 
         try {
-            const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}/rename`, {
+            const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}/rename`), {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({name: newName})
@@ -1787,7 +1914,7 @@ async function submitRenameSectionModal() {
     }
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(oldName)}/rename`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(oldName)}/rename`), {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({name: newName})
@@ -1839,7 +1966,7 @@ async function submitAddSectionModal() {
     }
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/section`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({section: name})
@@ -1864,7 +1991,7 @@ async function submitAddSection() {
     if (!name || !activeDeck) return;
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/section`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({section: name})
@@ -1884,7 +2011,7 @@ async function submitDeleteSection(sectionName) {
     if (!await appConfirm(`Delete section "${sectionName}" and all its cards?`, {title: 'Delete Section'})) return;
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}`, {method: 'DELETE'});
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/section/${encodeURIComponent(sectionName)}`), {method: 'DELETE'});
         if (!res.ok) return;
         delete activeDeckData.sections[sectionName];
         renderSectionList();
@@ -1917,7 +2044,7 @@ async function submitDeckSettings() {
     }
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}`), {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({name: newName, format, desc, public: isPublic})
@@ -1954,7 +2081,7 @@ async function submitDeleteDeck() {
     if (!await appConfirm(`Delete deck "${activeDeck}"? Cards inside will be removed.`, {title: 'Delete Deck'})) return;
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`, {method: 'DELETE'});
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}`), {method: 'DELETE'});
         if (!res.ok) throw new Error();
         delete gaDecks[activeDeck];
         closeDeckSettingsModal();
@@ -2094,7 +2221,7 @@ async function dgaLoadExport() {
     const textarea = document.getElementById('dga-export-textarea');
     textarea.value = 'Loading...';
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/export`);
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/export`));
         const data = await res.json();
         textarea.value = data.text || '';
     } catch {
@@ -2126,7 +2253,7 @@ async function dgaSubmitImport() {
 
     try {
         // Step 1 — parse text, get resolved + unresolved lists
-        const parseRes = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import/parse`, {
+        const parseRes = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/import/parse`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({text: lines})
@@ -2139,7 +2266,7 @@ async function dgaSubmitImport() {
 
         // Step 2 — commit all locally-resolved cards in one shot
         if (resolved.length) {
-            await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import/commit`, {
+            await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/import/commit`), {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({cards: resolved})
@@ -2156,7 +2283,7 @@ async function dgaSubmitImport() {
 
             for (const item of unresolved) {
                 dgaUpdateProgress(done, total, item.name);
-                const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/import/resolve`, {
+                const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/import/resolve`), {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({name: item.name, qty: item.qty, section: item.section})
@@ -2169,7 +2296,7 @@ async function dgaSubmitImport() {
         }
 
         // Step 4 — reload deck and render
-        const deckRes = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}`);
+        const deckRes = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}`));
         activeDeckData = await deckRes.json();
         renderDeckSections(activeDeckData);
         renderSectionList();
@@ -2559,7 +2686,7 @@ async function submitDgaAddCard() {
     btn.textContent = 'Adding...';
 
     try {
-        const res = await fetch(`/api/decks/${encodeURIComponent(activeDeck)}/card`, {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/card`), {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({card_id: dgaAddModalCardId, section, quantity, edition_id: editionId, foil_id: foilId})
@@ -2937,6 +3064,168 @@ document.addEventListener('click', e => {
 }, true);
 
 
+// ═══════════════════════════════════════
+// SHARE DECK DIALOG (collaborators) — mirrors inventory.js
+// ═══════════════════════════════════════
+
+let dgaShareTargetDeck = null;
+let dgaShareTargetOwner = null;
+
+// The share dialog's box — animateBoxResize() grows/shrinks it as collaborators
+// change. SHARE_ROLE_OPTIONS is defined in inventory.js (loaded first).
+function _deckShareBox() { return document.querySelector('#dga-share-modal .inv-modal'); }
+
+function _deckSharesUrl(owner, name, extra = '') {
+    const ident = owner ? encodeURIComponent(dgaSharedEntry?.pub_id || name) : encodeURIComponent(name);
+    let u = `/api/decks/${ident}/shares${extra}`;
+    if (owner) u += `${u.includes('?') ? '&' : '?'}owner=${encodeURIComponent(owner)}`;
+    return u;
+}
+function _deckShareUrl(extra = '') { return _deckSharesUrl(dgaShareTargetOwner, dgaShareTargetDeck, extra); }
+function _deckShareKey() { return `deck|${dgaShareTargetOwner || ''}|${dgaShareTargetDeck}`; }
+
+// _sharePrefetch / _clearSharePrefetch live in inventory.js (loaded first).
+function prefetchDeckShares(owner, name) {
+    if (!dgaSharingEnabled) return;
+    const key = `deck|${owner || ''}|${name}`;
+    _sharePrefetch[key] = fetch(_deckSharesUrl(owner, name))
+        .then(r => (r.ok ? r.json() : null)).then(d => d?.shares ?? null).catch(() => null);
+}
+
+function _wireDeckShareList() {
+    const listEl = document.getElementById('dga-share-list');
+    if (listEl.dataset.wired) return;
+    listEl.dataset.wired = '1';
+    listEl.addEventListener('dropdown:change', e => {
+        const row = e.target.closest('.inv-share-row');
+        if (row) changeDeckShareRole(row.dataset.omni, e.detail.value);
+    });
+}
+
+async function openDeckShareDialog(deckName, owner) {
+    if (!dgaSharingEnabled) return;
+    dgaShareTargetDeck = deckName || activeDeck;
+    dgaShareTargetOwner = arguments.length >= 2 ? owner : dgaActiveOwner;
+    if (!dgaShareTargetDeck) return;
+
+    const input = document.getElementById('dga-share-omni');
+    input.value = '';
+    delete input.dataset.omni;
+    hideShareUserAc('dga-share-omni-ac');
+    document.getElementById('dga-share-error').classList.add('hidden');
+    _wireDeckShareList();
+
+    const key = _deckShareKey();
+    const fromCache = !!_sharePrefetch[key];
+    if (!fromCache) prefetchDeckShares(dgaShareTargetOwner, dgaShareTargetDeck);
+    const shares = await _sharePrefetch[key];
+    if (shares === null) {
+        document.getElementById('dga-share-list').innerHTML =
+            '<div class="inv-share-loading">Couldn\'t load collaborators.</div>';
+    } else {
+        renderDeckShareList(shares);
+    }
+    document.getElementById('dga-share-modal').classList.remove('hidden');
+
+    if (fromCache && shares !== null) {
+        prefetchDeckShares(dgaShareTargetOwner, dgaShareTargetDeck);
+        _sharePrefetch[key].then(fresh => {
+            const modal = document.getElementById('dga-share-modal');
+            if (fresh && modal && !modal.classList.contains('hidden') && _deckShareKey() === key
+                && JSON.stringify(fresh) !== JSON.stringify(shares)) {
+                _renderDeckSharesAnimated(fresh);
+            }
+        });
+    }
+}
+
+function closeDeckShareDialog() {
+    document.getElementById('dga-share-modal')?.classList.add('hidden');
+    hideShareUserAc('dga-share-omni-ac');
+    resetBoxResize(_deckShareBox());
+    dgaShareTargetDeck = null;
+    dgaShareTargetOwner = null;
+}
+
+function renderDeckShareList(shares) {
+    const listEl = document.getElementById('dga-share-list');
+    if (!shares.length) { listEl.innerHTML = '<div class="inv-share-loading">No collaborators yet.</div>'; return; }
+    listEl.innerHTML = shares.map(s => `
+        <div class="inv-share-row" data-omni="${s.omnidex_id}">
+            <div class="inv-share-who">
+                <span class="inv-share-name">${escapeHtml(s.username)}</span>
+                <span class="inv-share-omni-tag">#${s.omnidex_id}</span>
+            </div>
+            <span class="inv-share-role-select">${selectDropdownHTML(SHARE_ROLE_OPTIONS, s.role, {up: true})}</span>
+            <button class="inv-share-remove" title="Remove" onclick="removeDeckShare('${s.omnidex_id}')">✕</button>
+        </div>`).join('');
+}
+
+function _renderDeckSharesAnimated(shares) {
+    animateBoxResize(_deckShareBox(), () => renderDeckShareList(shares));
+}
+
+async function submitDeckShare() {
+    const input = document.getElementById('dga-share-omni');
+    const grantee = (input.dataset.omni || input.value).trim();
+    const role = 'editor'; // adjusted per-row after adding — see submitBinShare
+    const errEl = document.getElementById('dga-share-error');
+    errEl.classList.add('hidden');
+    if (!grantee) {
+        errEl.textContent = 'Enter a username or Omnidex ID.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+    hideShareUserAc('dga-share-omni-ac');
+    try {
+        const res = await fetch(_deckShareUrl(), {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({grantee, role}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { errEl.textContent = data.detail || 'Failed to add collaborator.'; errEl.classList.remove('hidden'); return; }
+        input.value = '';
+        delete input.dataset.omni;
+        _sharePrefetch[_deckShareKey()] = Promise.resolve(data.shares || []);
+        _renderDeckSharesAnimated(data.shares || []);
+    } catch {
+        errEl.textContent = 'Request failed.';
+        errEl.classList.remove('hidden');
+    }
+}
+
+async function changeDeckShareRole(omni, role) {
+    try {
+        const res = await fetch(_deckShareUrl(), {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({grantee: omni, role}),
+        });
+        if (res.ok) {
+            const shares = (await res.json()).shares || [];
+            _sharePrefetch[_deckShareKey()] = Promise.resolve(shares);
+            renderDeckShareList(shares);
+        }
+    } catch { /* leave the dropdown as set */ }
+}
+
+async function removeDeckShare(omni) {
+    try {
+        const res = await fetch(_deckShareUrl(`/${encodeURIComponent(omni)}`), {method: 'DELETE'});
+        if (res.ok) {
+            const shares = (await res.json()).shares || [];
+            _sharePrefetch[_deckShareKey()] = Promise.resolve(shares);
+            _renderDeckSharesAnimated(shares);
+        }
+    } catch { /* no-op */ }
+}
+
+function dgaCtxShare() {
+    if (!dgaCtxTargetDeck) return;
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    openDeckShareDialog(name, null);
+}
+
 function renderDecksGaGuestPrompt() {
     const subtitle = document.getElementById('dga-subtitle');
     const createBtn = document.querySelector('.dga-create-btn');
@@ -2961,7 +3250,12 @@ window.initDecksGa = async function () {
 
     const urlParams = new URLSearchParams(window.location.search);
     const deckName = urlParams.get('deck');
-    if (deckName && gaDecks[deckName]) {
+    const ownerOmni = urlParams.get('owner');
+    if (ownerOmni) {
+        const shared = dgaShared.find(d => d.pub_id === deckName || d.name === deckName)
+            || {name: deckName, pub_id: deckName, owner_omnidex: ownerOmni, role: 'viewer'};
+        await openSharedDeckDetail(shared);
+    } else if (deckName && gaDecks[deckName]) {
         await openDeckDetail(deckName, false);
     }
 };
