@@ -2431,7 +2431,7 @@ async function submitBinSettings() {
 //
 // `shareTargetBin` is the bin name whose collaborators are being managed and
 // `shareTargetOwner` its owner's Omnidex ID (null when it's one of mine).
-// Opened from the bin detail header (👥, owners + managers) or the grid
+// Opened from the bin detail header (🔗, owners + managers) or the grid
 // context menu (owned bins only).
 let shareTargetBin = null;
 let shareTargetOwner = null;

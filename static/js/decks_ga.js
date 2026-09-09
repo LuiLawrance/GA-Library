@@ -123,14 +123,198 @@ function dgaCtxOpenBannerSearch() {
     openDeckBannerModal(name);
 }
 
+function dgaCtxOpenBuilderFor() {
+    const name = dgaCtxTargetDeck;
+    dgaCloseContextMenu();
+    if (!name) return;
+    // Open the deck if it isn't already the active one, then the panel.
+    (activeDeck === name ? Promise.resolve() : openDeckDetail(name)).then(openDeckBuilder);
+}
+
 document.addEventListener('click', e => {
     if (!e.target.closest('#dga-context-menu')) dgaCloseContextMenu();
     if (!e.target.closest('#dga-card-context-menu')) dgaCloseCardContextMenu();
+    if (!e.target.closest('#dga-builder-context-menu')) dgaCloseBuilderContextMenu();
 });
 document.addEventListener('contextmenu', e => {
     if (!e.target.closest('.dga-deck-tile')) dgaCloseContextMenu();
     if (!e.target.closest('.dga-card-tile')) dgaCloseCardContextMenu();
+
+    // Right-click anywhere in the open deck's detail view (but not on a card
+    // tile — those keep their own menu, and not inside a menu/modal/the panel
+    // itself) toggles the Deck Builder side panel.
+    const inDetail = e.target.closest('#dga-detail-view');
+    const onExcluded = e.target.closest(
+        '.dga-card-tile, .menu, .overlay, .inv-modal-overlay, [class*="context-menu"], #dga-builder'
+    );
+    if (inDetail && !onExcluded) {
+        e.preventDefault();
+        dgaOpenBuilderContextMenu(e);
+    } else if (!e.target.closest('#dga-builder-context-menu')) {
+        dgaCloseBuilderContextMenu();
+    }
 });
+
+// ═══════════════════════════════════════
+// DECK BUILDER PANEL
+// A left-side panel that cross-references the open deck against the CALLER's
+// inventory bins (GET /api/decks/{name}/buildability) — which cards they own
+// enough of vs. are short on. Unlike #card-drawer it does NOT overlay: while
+// open, #dga-page switches to flex-row (.dga-builder-open) so the detail view
+// shrinks beside it. Stays open until its ✕ or a deck switch — closeDeckBuilder
+// is called from _openDeckDetail / closeDeckDetail; dgaBuilderRefresh is called
+// from updateDeckCounts so it tracks every add / remove / qty edit / import.
+// ═══════════════════════════════════════
+
+let dgaBuilderOpen = false;
+let _dgaBuilderHideTimer = null;
+
+function openDeckBuilder() {
+    const panel = document.getElementById('dga-builder');
+    const page = document.getElementById('dga-page');
+    if (!panel || !page || !activeDeck) return;
+    clearTimeout(_dgaBuilderHideTimer);
+    panel.classList.remove('hidden');
+    page.classList.remove('dga-builder-collapsed');
+    // Next frame so the 0 → 340px width change actually transitions.
+    requestAnimationFrame(() => page.classList.add('dga-builder-open'));
+    dgaBuilderOpen = true;
+    dgaBuilderRefresh();
+}
+
+function closeDeckBuilder() {
+    dgaBuilderOpen = false;
+    const panel = document.getElementById('dga-builder');
+    const page = document.getElementById('dga-page');
+    if (!page || !panel) return;
+    clearTimeout(_dgaBuilderHideTimer);
+    if (!page.classList.contains('dga-builder-open')) {
+        page.classList.remove('dga-builder-collapsed');
+        panel.classList.add('hidden');
+        return;
+    }
+    // Collapse the width first (row layout stays put so the grid slides back),
+    // then drop the row-mode classes once the transition ends — flipping to
+    // column while the panel is still wide would reflow the page for a frame.
+    page.classList.add('dga-builder-collapsed');
+    _dgaBuilderHideTimer = setTimeout(() => {
+        page.classList.remove('dga-builder-open', 'dga-builder-collapsed');
+        panel.classList.add('hidden');
+    }, 260);
+}
+
+function dgaCtxToggleBuilder() {
+    dgaCloseBuilderContextMenu();
+    dgaBuilderOpen ? closeDeckBuilder() : openDeckBuilder();
+}
+
+function dgaOpenBuilderContextMenu(e) {
+    const menu = document.getElementById('dga-builder-context-menu');
+    if (!menu) return;
+    const label = document.getElementById('dga-builder-ctx-label');
+    if (label) label.textContent = dgaBuilderOpen ? 'Close Deck Builder' : 'Open Deck Builder';
+    menu.classList.remove('hidden');
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+    menu.style.top = Math.min(e.clientY, window.innerHeight - 80) + 'px';
+}
+
+function dgaCloseBuilderContextMenu() {
+    document.getElementById('dga-builder-context-menu')?.classList.add('hidden');
+}
+
+async function dgaBuilderRefresh() {
+    if (!dgaBuilderOpen || !activeDeck) return;
+    const body = document.getElementById('dga-builder-body');
+    if (!body) return;
+    if (!body.children.length) body.innerHTML = '<div class="dga-builder-loading">Loading…</div>';
+    try {
+        const res = await fetch(dgaOwnerQS(`/api/decks/${encodeURIComponent(activeDeck)}/buildability`));
+        if (!res.ok) throw new Error();
+        dgaRenderBuilder(await res.json());
+    } catch {
+        body.innerHTML = '<div class="dga-builder-empty">Couldn’t load the inventory comparison.</div>';
+    }
+}
+
+function _dgaBuilderEsc(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+function _dgaBuilderBinTitle(card) {
+    const parts = Object.entries(card.by_bin || {}).map(([b, q]) => `${b}: ${q}`);
+    return parts.length ? `In your bins — ${parts.join(', ')}` : 'Not in any of your bins';
+}
+
+function dgaRenderBuilder(data) {
+    const body = document.getElementById('dga-builder-body');
+    if (!body) return;
+
+    const cards = data.cards || {};
+    const sections = data.sections || {};
+    const t = data.totals || {};
+
+    if (!Object.keys(cards).length) {
+        body.innerHTML = '<div class="dga-builder-empty">This deck has no cards yet.</div>';
+        return;
+    }
+
+    const uniqueOk = t.unique_ok ?? 0;
+    const unique = t.unique ?? 0;
+    const short = t.copies_short ?? 0;
+
+    const summary = `
+        <div class="dga-builder-summary">
+            <div class="dga-builder-summary-line">
+                <span>Buildable cards</span>
+                <span class="dga-builder-summary-val ${uniqueOk >= unique ? 'dga-builder-summary-val--ok' : 'dga-builder-summary-val--short'}">${uniqueOk} / ${unique}</span>
+            </div>
+            <div class="dga-builder-summary-line dga-builder-summary-line--sub">
+                <span>Copies still needed</span>
+                <span class="dga-builder-summary-val ${short ? 'dga-builder-summary-val--short' : 'dga-builder-summary-val--ok'}">${short}</span>
+            </div>
+        </div>`;
+
+    const groups = Object.entries(sections).map(([name, ids]) => {
+        const rows = (ids || []).map(id => {
+            const c = cards[id];
+            if (!c) return '';
+            const ok = c.owned >= c.needed;
+            const shortBy = Math.max(0, c.needed - c.owned);
+            return `
+                <div class="dga-builder-row ${ok ? 'dga-builder-row--ok' : 'dga-builder-row--short'}"
+                     data-card-id="${_dgaBuilderEsc(id)}" title="${_dgaBuilderEsc(_dgaBuilderBinTitle(c))}">
+                    <span class="dga-builder-row-name">${_dgaBuilderEsc(c.name)}</span>
+                    <span class="dga-builder-row-count">${c.owned} / ${c.needed}${shortBy ? `<span class="dga-builder-row-short-badge">−${shortBy}</span>` : ''}</span>
+                </div>`;
+        }).join('');
+        if (!rows) return '';
+        return `
+            <div class="dga-builder-section">
+                <span class="dga-builder-section-label label">${_dgaBuilderEsc(name)}</span>
+                ${rows}
+            </div>`;
+    }).join('');
+
+    body.innerHTML = summary + groups;
+    body.querySelectorAll('.dga-builder-row').forEach(row => {
+        row.onclick = () => dgaBuilderJumpToCard(row.dataset.cardId);
+    });
+}
+
+// Scroll the matching deck tile into view and flash it. Deck tiles carry
+// data-card-id (see buildDeckCardTile).
+function dgaBuilderJumpToCard(cardId) {
+    const grid = document.getElementById('dga-card-grid');
+    if (!grid || !cardId) return;
+    const tile = grid.querySelector(`.dga-card-tile[data-card-id="${(window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId}"]`);
+    if (!tile) return;
+    tile.scrollIntoView({behavior: 'smooth', block: 'center'});
+    tile.classList.remove('dga-builder-tile-flash');
+    void tile.offsetWidth;
+    tile.classList.add('dga-builder-tile-flash');
+}
 
 // ── Deck card context menu (right-click a card inside a deck) ──
 
@@ -878,6 +1062,10 @@ async function openSharedDeckDetail(shared) {
 }
 
 async function _openDeckDetail(deckName, entry, pushUrl, url, fetchUrl) {
+    // The Deck Builder is scoped to one deck — close it when switching decks
+    // (it's re-openable via right-click on the new deck).
+    if (typeof closeDeckBuilder === 'function') closeDeckBuilder();
+
     activeDeck = deckName;
     activeDeckData = null;
 
@@ -980,6 +1168,7 @@ async function setDgaEditionLocked(value) {
 
 function closeDeckDetail() {
     if (typeof dgaDeckEditMode !== 'undefined') dgaDeckEditMode.discard(true);
+    closeDeckBuilder();
     // Clean up drawer state so inventory drawer works correctly afterward
     if (typeof drawerIsOpen !== 'undefined' && drawerIsOpen) {
         closeCardDrawer();
@@ -1358,6 +1547,8 @@ function updateDeckCounts(unique, total) {
     // Re-price on every count change (add / remove / qty edit / import) — same
     // refresh trigger as Inventory's updateInvCounts → loadBinValue.
     dgaRefreshDetailValue();
+    // Keep the Deck Builder's inventory comparison in step with the same edits.
+    dgaBuilderRefresh();
 }
 
 // ── Deck tile edit mode — uses TileEditMode from tiles.js ──

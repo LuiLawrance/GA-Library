@@ -287,6 +287,18 @@
         flex: 1;
     }
 
+    /* Deck Builder is a desktop-only side-by-side panel (opened by right-click,
+       which phones don't have) — there's no room to sit it beside the deck view
+       here. Force it hidden and keep the page in its normal single column even
+       if .dga-builder-open somehow lingers from a desktop session. */
+    .dga-builder {
+        display: none !important;
+    }
+
+    .dga-page.dga-builder-open {
+        flex-direction: column;
+    }
+
     /* List-view "+ New Bin / + New Deck" — full-width tap target. */
     .inv-bins-create-btn,
     .dga-create-btn {

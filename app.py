@@ -5651,6 +5651,80 @@ async def api_deck_value(deck_name: str, request: Request):
     return JSONResponse(_deck_value(deck_data.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
+def _inv_owned_by_card(username: str) -> dict[str, dict[str, int]]:
+    """{card_id: {bin_name: quantity}} summed across every section of every bin
+    the user owns — the same nested sections→card_id→edition_id→foil_id→qty walk
+    as _bin_value, collapsed to card_id (printing-agnostic). Feeds the Deck
+    Builder's "do I own enough of this?" comparison."""
+    owned: dict[str, dict[str, int]] = {}
+    for bin_name, bin_info in _inv_load(username).items():
+        for cards in bin_info.get("sections", {}).values():
+            for card_id, editions in cards.items():
+                for foils in editions.values():
+                    for quantity in foils.values():
+                        if quantity and quantity > 0:
+                            owned.setdefault(card_id, {})
+                            owned[card_id][bin_name] = owned[card_id].get(bin_name, 0) + quantity
+    return owned
+
+
+@app.get("/api/decks/{deck_name}/buildability")
+async def api_deck_buildability(deck_name: str, request: Request):
+    """Cross-references a deck against the CALLER's inventory bins: per card_id,
+    how many copies the deck needs vs. how many the caller owns across all bins.
+    Works for the caller's own decks and (via ?owner=) decks shared with them —
+    but the inventory compared is always the caller's own. v1 matches at card_id
+    level for both locked and unlocked decks (printing-agnostic, mirroring how
+    unlocked decks already collapse printings in renderDeckSections); per-printing
+    matching for Edition-Locked decks is a possible later enhancement."""
+    me = get_current_user(request)
+    if not me:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    owner, deck_name, _ = _deck_access(request, request.query_params.get("owner"), deck_name, "viewer")
+    deck_data = _deck_load(owner, deck_name)
+    if deck_data is None:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    owned = _inv_owned_by_card(me)
+    name_map = {d["card_id"]: d["name"] for d in load_slugs_data().values()}
+
+    sections: dict[str, list[str]] = {}
+    cards: dict[str, dict] = {}
+    for section_name, rows in deck_data.get("sections", {}).items():
+        order: list[str] = []
+        for row in rows:
+            card_id = row["card_id"]
+            qty = row.get("quantity", 0) or 0
+            entry = cards.get(card_id)
+            if entry is None:
+                by_bin = owned.get(card_id, {})
+                entry = cards[card_id] = {
+                    "name": name_map.get(card_id, card_id),
+                    "needed": 0,
+                    "owned": sum(by_bin.values()),
+                    "by_bin": by_bin,
+                }
+            entry["needed"] += qty
+            if card_id not in order:
+                order.append(card_id)
+        sections[section_name] = order
+
+    unique_ok = sum(1 for c in cards.values() if c["owned"] >= c["needed"])
+    copies_needed = sum(c["needed"] for c in cards.values())
+    copies_short = sum(max(0, c["needed"] - c["owned"]) for c in cards.values())
+
+    return JSONResponse({
+        "sections": sections,
+        "cards": cards,
+        "totals": {
+            "unique": len(cards),
+            "unique_ok": unique_ok,
+            "copies_needed": copies_needed,
+            "copies_short": copies_short,
+        },
+    })
+
+
 @app.patch("/api/decks/{deck_name}")
 async def api_deck_patch(deck_name: str, request: Request):
     body = await request.json()

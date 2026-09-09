@@ -1,5 +1,20 @@
 <div class="dga-page page" id="dga-page">
 
+    <!-- ── Deck Builder panel ──
+         A left-side panel that cross-references the open deck against the
+         caller's inventory bins (GET /api/decks/{name}/buildability). Unlike
+         #card-drawer it does NOT overlay — .dga-page switches to flex-row while
+         it's open (.dga-builder-open) so the detail view shrinks beside it.
+         Stays open until its ✕ or a deck switch. First child of .dga-page so
+         it's a flex sibling of the list/detail views. -->
+    <aside class="dga-builder hidden" id="dga-builder">
+        <div class="dga-builder-header">
+            <span class="dga-builder-title label">Deck Builder</span>
+            <button class="dga-builder-close btn btn--icon" onclick="closeDeckBuilder()" title="Close">✕</button>
+        </div>
+        <div class="dga-builder-body scroll-thin" id="dga-builder-body"></div>
+    </aside>
+
     <!-- ── Deck card context menu ── -->
     <div class="inv-context-menu hidden" id="dga-card-context-menu">
         <button class="inv-context-item" onclick="dgaCtxSetBanner()">
@@ -11,6 +26,17 @@
         </button>
     </div>
 
+    <!-- ── Deck Builder right-click menu ──
+         Shown on a right-click anywhere in the deck detail view that isn't a
+         card tile (cards keep dga-card-context-menu). Toggles the left-side
+         Deck Builder panel — see dgaOpenBuilderContextMenu in decks_ga.js. -->
+    <div class="inv-context-menu hidden" id="dga-builder-context-menu">
+        <button class="inv-context-item" onclick="dgaCtxToggleBuilder()">
+            <span class="inv-context-icon">🔧</span>
+            <span id="dga-builder-ctx-label">Open Deck Builder</span>
+        </button>
+    </div>
+
     <!-- ── Deck context menu ── -->
     <div class="inv-context-menu hidden" id="dga-context-menu">
         <button class="inv-context-item" onclick="dgaCtxRename()">
@@ -18,6 +44,9 @@
         </button>
         <button class="inv-context-item" onclick="dgaCtxEditDesc()">
             <span class="inv-context-icon">≡</span> Edit Description
+        </button>
+        <button class="inv-context-item" onclick="dgaCtxOpenBuilderFor()">
+            <span class="inv-context-icon">🔧</span> Deck Builder
         </button>
         <button class="inv-context-item" id="dga-ctx-set-banner" onclick="dgaCtxOpenBannerSearch()">
             <span class="inv-context-icon">🖼</span> Set Banner
@@ -32,7 +61,7 @@
             <span class="inv-context-icon">🔒</span> Make Private
         </button>
         <button class="inv-context-item" id="dga-ctx-share" onclick="dgaCtxShare()">
-            <span class="inv-context-icon">👥</span> Share
+            <span class="inv-context-icon">🔗</span> Share
         </button>
         <div class="inv-context-divider"></div>
         <button class="inv-context-item inv-context-item-danger" onclick="dgaCtxDelete()">
@@ -159,7 +188,7 @@
                                     onclick="setDgaEditionLocked(true)">Locked</button>
                         </div>
                         <button class="inv-detail-add-btn btn btn--ghost" onclick="openDeckAddModal()" title="Add card">+</button>
-                        <button class="inv-settings-btn btn btn--icon" id="dga-share-btn" onclick="openDeckShareDialog()" title="Share deck" style="display:none">👥</button>
+                        <button class="inv-settings-btn btn btn--icon" id="dga-share-btn" onclick="openDeckShareDialog()" title="Share deck" style="display:none">🔗</button>
                         <button class="inv-settings-btn btn btn--icon" onclick="openDeckSettingsModal()" title="Deck settings">⚙
                         </button>
                     </div>
