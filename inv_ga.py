@@ -4,6 +4,7 @@ from pricing_ga import _select_foil
 from util_file import new_dir, new_json
 
 import json
+import uuid
 
 DIR_INV = "DATA_GA/INV_GA"
 JSON_EDITIONS = "DATA_GA/CARDS_GA/EDITIONS.json"
@@ -57,9 +58,18 @@ def _load_inv(username: str) -> dict:
     return raw
 
 
+def _new_pub_id(existing: set[str]) -> str:
+    """A fresh 8-hex-char bin handle not already in `existing` — the stable,
+    rename-proof second segment of a public bin URL (see app.py InventoryBin.pub_id)."""
+    while True:
+        pid = uuid.uuid4().hex[:8]
+        if pid not in existing:
+            return pid
+
+
 def _make_default_structure() -> dict:
     return {DEFAULT_BIN: {"banner": None, "default": True, "desc": "", "symbol": None, "tags": None,
-                          "cards": {}}}
+                          "pub_id": _new_pub_id(set()), "cards": {}}}
 
 
 def _print_inv_table(rows: list[tuple[str, str, str, int]]) -> None:
@@ -305,6 +315,7 @@ def bin_create(username: str, debug: bool = False) -> None:
         return
 
     inv_data[name] = {"banner": None, "default": False, "desc": "", "symbol": None, "tags": None,
+                      "pub_id": _new_pub_id({b.get("pub_id") for b in inv_data.values() if b.get("pub_id")}),
                       "cards": {}}
 
     _save_inv(username, inv_data)

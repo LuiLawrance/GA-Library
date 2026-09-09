@@ -594,10 +594,21 @@ def migrate_inventory(user_ids: dict[str, int], known_foil_pairs: set[tuple[str,
                 skipped_users.append(username)
                 continue
 
-            for bin_name, bin_data in _load(path).items():
+            bins_of_user = _load(path)
+            used_bin_pub_ids = {b["pub_id"] for b in bins_of_user.values()
+                                if isinstance(b, dict) and b.get("pub_id")}
+            for bin_name, bin_data in bins_of_user.items():
+                pub_id = bin_data.get("pub_id")
+                while not pub_id:
+                    candidate = uuid.uuid4().hex[:8]
+                    if candidate not in used_bin_pub_ids:
+                        pub_id = candidate
+                used_bin_pub_ids.add(pub_id)
+
                 bin_row = {
                     "user_id": user_ids[username],
                     "name": bin_name,
+                    "pub_id": pub_id,
                     "desc": bin_data.get("desc", ""),
                     "banner": bin_data.get("banner"),
                     "symbol": bin_data.get("symbol"),
@@ -606,7 +617,7 @@ def migrate_inventory(user_ids: dict[str, int], known_foil_pairs: set[tuple[str,
                 }
                 stmt = pg_insert(InventoryBin).values(bin_row).on_conflict_do_update(
                     index_elements=["user_id", "name"],
-                    set_={k: v for k, v in bin_row.items() if k not in ("user_id", "name")},
+                    set_={k: v for k, v in bin_row.items() if k not in ("user_id", "name", "pub_id")},
                 )
                 bin_id = session.execute(stmt.returning(InventoryBin.id)).scalar_one()
                 bin_count += 1

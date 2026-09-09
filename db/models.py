@@ -292,11 +292,15 @@ class PriceSale(Base):
 
 class InventoryBin(Base):
     __tablename__ = "inventory_bins"
-    __table_args__ = (UniqueConstraint("user_id", "name"),)
+    __table_args__ = (UniqueConstraint("user_id", "name"), UniqueConstraint("user_id", "pub_id"))
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    # Stable, opaque per-bin handle minted once at creation and never rewritten
+    # on rename — the second segment of a public bin URL
+    # (/collection?omni=<omnidex_id>&bin=<pub_id>). Same rationale as Deck.pub_id.
+    pub_id: Mapped[str] = mapped_column(Text, nullable=False)
     desc: Mapped[str | None] = mapped_column(Text)
     banner: Mapped[str | None] = mapped_column(Text)
     symbol: Mapped[str | None] = mapped_column(Text)

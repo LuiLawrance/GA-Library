@@ -3278,8 +3278,40 @@ async def api_watchlist_delete(request: Request):
 DEFAULT_BIN = "Inventory"
 
 
+def _pubid_new(existing: set[str]) -> str:
+    """A fresh 8-hex-char handle not already in `existing` — the stable,
+    rename-proof second segment of a public deck/bin URL. See Deck.pub_id /
+    InventoryBin.pub_id."""
+    while True:
+        pid = uuid.uuid4().hex[:8]
+        if pid not in existing:
+            return pid
+
+
+def _resolve_public_entry(omnidex_id: str, ident: str, loader, label: str) -> tuple[str, str, dict]:
+    """(username, name, entry) for a public deck/bin addressed as
+    /.../<omnidex_id>/<ident>, where ident is the item's stable pub_id. Falls
+    back to matching ident as a literal name so links shared before pub_ids
+    existed keep resolving (until that item is renamed). Raises 404 if the
+    owner, item, or its public flag doesn't check out. `loader(username)` is
+    _deck_index_load or _inv_load — both return {name: {..., "pub_id", "public"}}."""
+    username = user_find_by_omnidex(omnidex_id.strip())
+    if username is None:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    data = loader(username)
+    match = next(
+        (name for name, entry in data.items() if entry.get("pub_id") == ident),
+        ident if ident in data else None,
+    )
+    entry = data.get(match) if match else None
+    if entry is None or not entry.get("public"):
+        raise HTTPException(status_code=404, detail=f"{label} not found")
+    return username, match, entry
+
+
 def _inv_default_structure() -> dict:
-    return {DEFAULT_BIN: {"banner": None, "default": True, "public": False, "desc": "", "symbol": None, "tags": None, "sections": {}}}
+    return {DEFAULT_BIN: {"banner": None, "default": True, "public": False, "desc": "", "symbol": None,
+                          "tags": None, "pub_id": _pubid_new(set()), "sections": {}}}
 
 
 def _inv_load(username: str) -> dict:
@@ -3311,6 +3343,18 @@ def _inv_load(username: str) -> dict:
             b["sections"] = {}
         if isinstance(b, dict) and "public" not in b:
             b["public"] = False
+
+    # Lazy backfill: bins created before pub_ids existed get one on first load,
+    # persisted once so the handle is stable from then on. (DB mode is
+    # backfilled by its migration instead.) Mirrors _deck_index_load.
+    missing = [n for n, b in raw.items() if isinstance(b, dict) and not b.get("pub_id")]
+    if missing:
+        used = {b["pub_id"] for b in raw.values() if isinstance(b, dict) and b.get("pub_id")}
+        for n in missing:
+            pid = _pubid_new(used)
+            used.add(pid)
+            raw[n]["pub_id"] = pid
+        _inv_save(username, raw)
 
     return raw
 
@@ -3393,6 +3437,7 @@ def _inv_load_db(username: str) -> dict:
                 "desc": bin_row.desc or "",
                 "symbol": bin_row.symbol,
                 "tags": bin_row.tags,
+                "pub_id": bin_row.pub_id,
                 "sections": sections_data,
             }
 
@@ -3431,27 +3476,43 @@ def _inv_save_db(username: str, data: dict) -> None:
             cards_by_section.setdefault(c.section_id, {})[(c.card_id, c.edition_id, c.foil_id)] = c
 
         # Bins dropped entirely (cascades to their sections/cards at the DB
-        # level via ON DELETE CASCADE).
+        # level via ON DELETE CASCADE). Flushed before any INSERT below so a
+        # rename — which reaches here as "old name gone, new name new" — frees
+        # its (user_id, name) AND (user_id, pub_id) rows before the new-name
+        # row (carrying the same pub_id) is inserted.
+        dropped = False
         for name, bin_row in existing_bins_by_name.items():
             if name not in data:
                 session.delete(bin_row)
+                dropped = True
+        if dropped:
+            session.flush()
 
+        used_pubids = {b["pub_id"] for b in data.values() if b.get("pub_id")}
         for bin_name, bin_data in data.items():
             bin_row = existing_bins_by_name.get(bin_name)
             if bin_row is None:
                 bin_row = InventoryBin(user_id=user_id, name=bin_name)
                 session.add(bin_row)
-                session.flush()  # need bin_row.id for the InventorySection rows below
                 current_sections: dict[str, InventorySection] = {}
             else:
                 current_sections = sections_by_bin.get(bin_row.id, {})
 
+            pub_id = bin_data.get("pub_id")
+            if not pub_id:
+                pub_id = _pubid_new(used_pubids)
+                used_pubids.add(pub_id)
+                bin_data["pub_id"] = pub_id
+            bin_row.pub_id = pub_id
             bin_row.desc = bin_data.get("desc", "")
             bin_row.banner = bin_data.get("banner")
             bin_row.symbol = bin_data.get("symbol")
             bin_row.tags = bin_data.get("tags")
             bin_row.is_default = bool(bin_data.get("default"))
             bin_row.is_public = bool(bin_data.get("public"))
+
+            if bin_row.id is None:
+                session.flush()  # need bin_row.id for the InventorySection rows below
 
             new_sections = bin_data.get("sections", {})
 
@@ -3722,6 +3783,7 @@ def _public_bins_list() -> list[dict]:
                 continue
             bins.append({
                 "name": name,
+                "pub_id": entry.get("pub_id"),
                 "username": username,
                 "omnidex_id": omnidex_id,
                 "desc": entry.get("desc", ""),
@@ -3737,42 +3799,29 @@ async def api_public_bins_list():
     return JSONResponse({"bins": _public_bins_list()})
 
 
-@app.get("/api/inventory/public/{omnidex_id}/{bin_name}")
-async def api_public_bin_get(omnidex_id: str, bin_name: str):
-    # Looked up by Omnidex ID rather than username — same rationale as the
-    # public deck route (api_public_deck_get).
-    username = user_find_by_omnidex(omnidex_id.strip())
-    if username is None:
-        raise HTTPException(status_code=404, detail="Bin not found")
-    entry = _inv_load(username).get(bin_name)
-    if entry is None or not entry.get("public"):
-        raise HTTPException(status_code=404, detail="Bin not found")
-    return JSONResponse({**entry, "username": username, "omnidex_id": omnidex_id})
+@app.get("/api/inventory/public/{omnidex_id}/{ident}")
+async def api_public_bin_get(omnidex_id: str, ident: str):
+    # Addressed by Omnidex ID + the bin's stable pub_id rather than
+    # username + bin name — both halves survive a rename. See
+    # _resolve_public_entry and api_public_deck_get.
+    username, bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin")
+    return JSONResponse({**entry, "username": username, "omnidex_id": omnidex_id,
+                          "name": bin_name, "pub_id": entry.get("pub_id")})
 
 
-@app.get("/api/inventory/public/{omnidex_id}/{bin_name}/value")
-async def api_public_bin_value(omnidex_id: str, bin_name: str):
+@app.get("/api/inventory/public/{omnidex_id}/{ident}/value")
+async def api_public_bin_value(omnidex_id: str, ident: str):
     """Priced total for a public bin — the read-only counterpart of
-    api_bin_value, addressed by Omnidex ID like api_public_deck_value."""
-    username = user_find_by_omnidex(omnidex_id.strip())
-    if username is None:
-        raise HTTPException(status_code=404, detail="Bin not found")
-    entry = _inv_load(username).get(bin_name)
-    if entry is None or not entry.get("public"):
-        raise HTTPException(status_code=404, detail="Bin not found")
+    api_bin_value, addressed like api_public_bin_get."""
+    _username, _bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin")
     return JSONResponse(_bin_value(entry.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
-@app.get("/api/inventory/public/{omnidex_id}/{bin_name}/prices")
-async def api_public_bin_prices(omnidex_id: str, bin_name: str):
+@app.get("/api/inventory/public/{omnidex_id}/{ident}/prices")
+async def api_public_bin_prices(omnidex_id: str, ident: str):
     """Per-card price badges for a public bin — the read-only counterpart of
-    api_bin_prices, addressed by Omnidex ID like api_public_deck_get."""
-    username = user_find_by_omnidex(omnidex_id.strip())
-    if username is None:
-        raise HTTPException(status_code=404, detail="Bin not found")
-    entry = _inv_load(username).get(bin_name)
-    if entry is None or not entry.get("public"):
-        raise HTTPException(status_code=404, detail="Bin not found")
+    api_bin_prices, addressed like api_public_bin_get."""
+    _username, _bin_name, entry = _resolve_public_entry(omnidex_id, ident, _inv_load, "Bin")
     return JSONResponse(_bin_prices(entry.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
@@ -4132,8 +4181,9 @@ async def api_bin_create(request: Request):
     if name in inv:
         raise HTTPException(status_code=400, detail="Bin already exists")
 
+    pub_id = _pubid_new({b.get("pub_id") for b in inv.values() if b.get("pub_id")})
     inv[name] = {"banner": None, "default": False, "public": False, "desc": desc, "symbol": None, "tags": None,
-                 "sections": {}}
+                 "pub_id": pub_id, "sections": {}}
     _inv_save(user, inv)
     return JSONResponse({"ok": True})
 
@@ -4399,15 +4449,6 @@ DIR_DECKS_GA = "DATA_GA/DECKS_GA"
 DEFAULT_SECTIONS = ["Material Deck", "Main Deck"]
 
 
-def _deck_pubid_new(existing: set[str]) -> str:
-    """A fresh 8-hex-char deck handle not already in `existing` — the stable,
-    rename-proof second segment of a public deck URL. See Deck.pub_id."""
-    while True:
-        pid = uuid.uuid4().hex[:8]
-        if pid not in existing:
-            return pid
-
-
 def _deck_index_load(username: str) -> dict:
     if is_db_mode():
         return _deck_index_load_db(username)
@@ -4425,7 +4466,7 @@ def _deck_index_load(username: str) -> dict:
     if missing:
         used = {entry["pub_id"] for entry in index.values() if entry.get("pub_id")}
         for name in missing:
-            pid = _deck_pubid_new(used)
+            pid = _pubid_new(used)
             used.add(pid)
             index[name]["pub_id"] = pid
         os.makedirs(DIR_DECK_INDEX, exist_ok=True)
@@ -4538,7 +4579,7 @@ def _deck_index_save_db(username: str, data: dict) -> None:
             modified = date.fromisoformat(entry["modified"]) if entry.get("modified") else None
             pub_id = entry.get("pub_id")
             if not pub_id:
-                pub_id = _deck_pubid_new(used_pubids)
+                pub_id = _pubid_new(used_pubids)
                 used_pubids.add(pub_id)
                 entry["pub_id"] = pub_id
             index_fields = {
@@ -4967,7 +5008,7 @@ def _import_decks_bulk(decks: dict) -> dict:
 
             pub_id = src_index.get("pub_id")
             if not pub_id or pub_id in used_pubids:
-                pub_id = _deck_pubid_new(used_pubids)
+                pub_id = _pubid_new(used_pubids)
             used_pubids.add(pub_id)
 
             new_index[deck_name] = {
@@ -5180,7 +5221,7 @@ async def api_deck_create(request: Request):
     if name in index:
         raise HTTPException(status_code=400, detail="Deck already exists")
     created = date.today().isoformat()
-    pub_id = _deck_pubid_new({e.get("pub_id") for e in index.values() if e.get("pub_id")})
+    pub_id = _pubid_new({e.get("pub_id") for e in index.values() if e.get("pub_id")})
     index[name] = {"banner": None, "symbol": None, "tags": None, "public": False,
                    "edition_locked": False, "pub_id": pub_id, "created": created, "modified": created}
     _deck_index_save(user, index)
@@ -5342,22 +5383,8 @@ async def api_public_decks_list():
 
 def _deck_resolve_public(omnidex_id: str, ident: str) -> tuple[str, str, dict]:
     """(username, deck_name, index_entry) for a public deck addressed as
-    /api/decks/public/<omnidex_id>/<ident>, where ident is the deck's stable
-    pub_id. Falls back to matching ident as a literal deck name so links
-    shared before pub_ids existed keep resolving (until that deck is renamed).
-    Raises 404 if the owner, deck, or its public flag doesn't check out."""
-    username = user_find_by_omnidex(omnidex_id.strip())
-    if username is None:
-        raise HTTPException(status_code=404, detail="Deck not found")
-    index = _deck_index_load(username)
-    match = next(
-        (name for name, entry in index.items() if entry.get("pub_id") == ident),
-        ident if ident in index else None,
-    )
-    entry = index.get(match) if match else None
-    if entry is None or not entry.get("public"):
-        raise HTTPException(status_code=404, detail="Deck not found")
-    return username, match, entry
+    /api/decks/public/<omnidex_id>/<ident>. See _resolve_public_entry."""
+    return _resolve_public_entry(omnidex_id, ident, _deck_index_load, "Deck")
 
 
 @app.get("/api/decks/public/{omnidex_id}/{ident}")

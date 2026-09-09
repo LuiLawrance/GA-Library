@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════
 
 let colBins = [];
-let colActiveBin = null; // {omnidexId, name}
+let colActiveBin = null; // {omnidexId, ident, name}
 let colActiveBinData = null;
 
 async function loadPublicBins() {
@@ -69,6 +69,10 @@ function buildPublicBinTile(bin, index, total) {
 
     const count = bin.card_count || 0;
 
+    // pub_id is the bin's stable public handle; bin.name is the fallback for a
+    // bin not yet backfilled (see openPublicBinDetail).
+    const binIdent = bin.pub_id || bin.name;
+
     tile.innerHTML = `
         <div class="dga-tile-icon-row">
             <span class="dga-tile-icon">⬡</span>
@@ -84,7 +88,7 @@ function buildPublicBinTile(bin, index, total) {
     if (bin.omnidex_id) {
         loadPublicBinValue(
             tile.querySelector('.inv-bin-value-badge'),
-            `/api/inventory/public/${encodeURIComponent(bin.omnidex_id)}/${encodeURIComponent(bin.name)}/value`,
+            `/api/inventory/public/${encodeURIComponent(bin.omnidex_id)}/${encodeURIComponent(binIdent)}/value`,
         );
     }
 
@@ -96,7 +100,7 @@ function buildPublicBinTile(bin, index, total) {
         tile.prepend(bg);
     }
 
-    tile.onclick = () => openPublicBinDetail(bin.omnidex_id, bin.name, true, bin.username);
+    tile.onclick = () => openPublicBinDetail(bin.omnidex_id, binIdent, true, bin.username, bin.name);
     return tile;
 }
 
@@ -129,11 +133,14 @@ async function loadPublicBinValue(badgeEl, url) {
     }
 }
 
-// omnidexId (not username) addresses the bin in the URL/API — same rationale
-// as the public Decks/profile pages. displayUsername is an optional immediate
-// value for the "by ..." byline, shown before the bin fetch resolves (which
-// also carries username, confirming/filling it in for a direct/deep-linked
-// visit where no tile click supplied it upfront).
+// omnidexId + ident (the bin's stable pub_id, not its name) address the bin in
+// the URL/API — both halves survive a rename (see _resolve_public_entry and the
+// public Decks/profile pages). ident falls back to a raw bin name for a link
+// shared before pub_ids existed; the server resolves either, and the fetched
+// payload's pub_id is used to rewrite the address bar to the canonical form.
+// displayName / displayUsername are optional immediate values for the header
+// and "by ..." byline, shown before the fetch resolves (which also carries
+// name + username).
 function _colSetDetailOwner(omnidexId, username) {
     const el = document.getElementById('col-detail-owner');
     if (!el) return;
@@ -144,13 +151,13 @@ function _colSetDetailOwner(omnidexId, username) {
     el.innerHTML = `by <a class="pd-owner-link" href="/@${encodeURIComponent(omnidexId)}" data-link>${escapeHtml(username)}</a>`;
 }
 
-async function openPublicBinDetail(omnidexId, binName, pushUrl = true, displayUsername = null) {
-    colActiveBin = {omnidexId, name: binName};
+async function openPublicBinDetail(omnidexId, ident, pushUrl = true, displayUsername = null, displayName = null) {
+    colActiveBin = {omnidexId, ident, name: displayName};
 
     document.getElementById('col-list-view').classList.add('hidden');
     document.getElementById('col-detail-view').classList.remove('hidden');
 
-    document.getElementById('col-detail-name').textContent = binName;
+    document.getElementById('col-detail-name').textContent = displayName || '';
     document.getElementById('col-detail-desc').textContent = '';
     _colSetDetailOwner(omnidexId, displayUsername);
 
@@ -165,22 +172,31 @@ async function openPublicBinDetail(omnidexId, binName, pushUrl = true, displayUs
     }
 
     if (pushUrl) {
-        window.history.pushState({}, '', `/collection?omni=${encodeURIComponent(omnidexId)}&bin=${encodeURIComponent(binName)}`);
+        window.history.pushState({}, '', `/collection?omni=${encodeURIComponent(omnidexId)}&bin=${encodeURIComponent(ident)}`);
     }
 
     try {
-        const res = await fetch(`/api/inventory/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(binName)}`);
+        const res = await fetch(`/api/inventory/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(ident)}`);
         if (!res.ok) throw new Error();
         const data = await res.json();
 
+        document.getElementById('col-detail-name').textContent = data.name || displayName || '';
         document.getElementById('col-detail-desc').textContent = data.desc || '';
         _colSetDetailOwner(omnidexId, data.username);
 
+        // Upgrade the address bar to the canonical pub_id URL — handles an
+        // inbound link that still used the bin's (possibly stale) name.
+        const canonical = data.pub_id || ident;
+        if (data.pub_id && data.pub_id !== ident) {
+            colActiveBin = {omnidexId, ident: data.pub_id, name: data.name};
+            window.history.replaceState({}, '', `/collection?omni=${encodeURIComponent(omnidexId)}&bin=${encodeURIComponent(data.pub_id)}`);
+        }
+
         colActiveBinData = data;
-        await renderPublicBinSections(data, omnidexId, binName);
+        await renderPublicBinSections(data, omnidexId, canonical);
 
         if (valEl) {
-            loadPublicBinValue(valEl, `/api/inventory/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(binName)}/value`);
+            loadPublicBinValue(valEl, `/api/inventory/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(canonical)}/value`);
         }
     } catch {
         if (grid) grid.innerHTML = '<p class="dga-loading">Failed to load bin.</p>';
@@ -202,7 +218,7 @@ function closePublicBinDetail() {
 // then paints one .dga-section-block per section. Duplicated from inventory.js
 // rather than shared — same rationale as decks.js's own split from
 // decks_ga.js: no shared module between page-specific files here.
-async function renderPublicBinSections(binData, omnidexId, binName) {
+async function renderPublicBinSections(binData, omnidexId, ident) {
     const grid = document.getElementById('col-card-grid');
     const sections = binData.sections || {};
 
@@ -232,7 +248,7 @@ async function renderPublicBinSections(binData, omnidexId, binName) {
             fetch('/api/inv/info'),
             fetch('/api/inv/slugs'),
             fetch('/api/inv/collector'),
-            fetch(`/api/inventory/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(binName)}/prices`),
+            fetch(`/api/inventory/public/${encodeURIComponent(omnidexId)}/${encodeURIComponent(ident)}/prices`),
         ]);
         infoData = infoRes.ok ? await infoRes.json() : {};
         slugData = slugRes.ok ? await slugRes.json() : {};
@@ -342,8 +358,10 @@ window.initCollection = async function () {
 
     const urlParams = new URLSearchParams(window.location.search);
     const omnidexId = urlParams.get('omni');
-    const binName = urlParams.get('bin');
-    if (omnidexId && binName) {
-        await openPublicBinDetail(omnidexId, binName, false);
+    // ?bin= carries the bin's pub_id (a raw name still resolves server-side for
+    // older links); openPublicBinDetail fills the header from the fetch.
+    const ident = urlParams.get('bin');
+    if (omnidexId && ident) {
+        await openPublicBinDetail(omnidexId, ident, false);
     }
 };
