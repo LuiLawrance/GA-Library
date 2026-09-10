@@ -168,24 +168,61 @@ document.addEventListener('contextmenu', e => {
 
 let dgaBuilderOpen = false;
 let _dgaBuilderHideTimer = null;
+// Last buildability payload's per-card data ({card_id: {owned, needed, ...}}),
+// kept so renderDeckSections can repaint the deck-grid overlays synchronously
+// on a re-render without waiting for dgaBuilderRefresh's re-fetch.
+let dgaLastBuildability = null;
+// Which panel the builder body shows: 'sets' (Where to find the rest) or
+// 'list' (per-section owned/needed). Persists across re-renders.
+let dgaBuilderTab = 'sets';
+// Per-set collapse overrides in the Sets view (set key → collapsed bool).
+// Only holds sets the user has toggled by hand; the rest follow the default
+// (single-card sets collapsed, multi-card expanded). Cleared on builder close.
+const dgaBuilderSetCollapse = new Map();
+
+// Keep the detail-header 🔧 toggle button's pressed state matching the panel —
+// it and the right-click context menu are two entry points to the same panel,
+// so the button reflects the panel's state however it was last changed.
+function _dgaSyncBuilderToggleBtn() {
+    const btn = document.getElementById('dga-builder-toggle-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', dgaBuilderOpen);
+    btn.setAttribute('aria-pressed', dgaBuilderOpen ? 'true' : 'false');
+}
+
+// Header-button entry point — the context menu uses dgaCtxToggleBuilder.
+function toggleDeckBuilder() {
+    dgaBuilderOpen ? closeDeckBuilder() : openDeckBuilder();
+}
 
 function openDeckBuilder() {
     const panel = document.getElementById('dga-builder');
     const page = document.getElementById('dga-page');
     if (!panel || !page || !activeDeck) return;
+    // The deck grid goes read-only for quantities while the builder is open
+    // (buildability overlays take over the tile face) — drop any half-made
+    // qty edit rather than stranding its confirm bar behind the lock.
+    if (typeof dgaDeckEditMode !== 'undefined') dgaDeckEditMode.discard(true);
     clearTimeout(_dgaBuilderHideTimer);
     panel.classList.remove('hidden');
     page.classList.remove('dga-builder-collapsed');
-    // Next frame so the 0 → 340px width change actually transitions.
+    // Next frame so the 0 → --dga-builder-w width change actually transitions.
     requestAnimationFrame(() => page.classList.add('dga-builder-open'));
     dgaBuilderOpen = true;
+    _dgaSyncBuilderToggleBtn();
     dgaBuilderRefresh();
 }
 
 function closeDeckBuilder() {
     dgaBuilderOpen = false;
+    dgaLastBuildability = null;
+    dgaBuilderSetCollapse.clear();
+    _dgaSyncBuilderToggleBtn();
     const panel = document.getElementById('dga-builder');
     const page = document.getElementById('dga-page');
+    // Fade the overlays out (rather than yank them) only when the panel is
+    // actually on screen to animate alongside.
+    dgaClearDeckOverlays({fadeOut: !!(page && page.classList.contains('dga-builder-open'))});
     if (!page || !panel) return;
     clearTimeout(_dgaBuilderHideTimer);
     if (!page.classList.contains('dga-builder-open')) {
@@ -247,6 +284,25 @@ function _dgaBuilderBinTitle(card) {
     return parts.length ? `In your bins — ${parts.join(', ')}` : 'Not in any of your bins';
 }
 
+// Switch the builder body between its 'sets' and 'list' panels (both are
+// rendered; this toggles which is shown). Persists via dgaBuilderTab.
+// `animate` crossfades the two panels — passed on a tab click, not on the
+// re-render that follows a deck edit (which just re-applies the current tab).
+function _dgaSetBuilderTab(tab, animate = false) {
+    dgaBuilderTab = tab;
+    const body = document.getElementById('dga-builder-body');
+    if (!body) return;
+    body.querySelectorAll('.dga-builder-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    const panels = [...body.querySelectorAll('.dga-builder-panel')];
+    const inEl = panels.find(p => p.dataset.panel === tab);
+    const outEl = panels.find(p => p !== inEl && !p.classList.contains('hidden'));
+    if (animate && inEl && outEl && typeof crossFade === 'function') {
+        crossFade(outEl, inEl, () => {}, {outMs: 110, inMs: 160});
+    } else {
+        panels.forEach(p => p.classList.toggle('hidden', p !== inEl));
+    }
+}
+
 function dgaRenderBuilder(data) {
     const body = document.getElementById('dga-builder-body');
     if (!body) return;
@@ -276,14 +332,77 @@ function dgaRenderBuilder(data) {
             </div>
         </div>`;
 
+    // ── "Where to find the rest" ──
+    // Every set family that prints one of the deck's still-missing cards
+    // (set_coverage from api_deck_buildability, already sorted biggest-first),
+    // each shown as a header + a grid of the actual card thumbnails it covers.
+    // The lead answers "what's the single greatest common set"; clicking a
+    // thumbnail (or a header) flashes those tiles in the deck grid below.
+    const coverage = data.set_coverage || [];
+    const missingUnique = unique - uniqueOk;
+    let coverageHTML = '';
+    if (coverage.length && missingUnique > 0) {
+        const top = coverage[0];
+        const lead = (top.cards >= missingUnique && missingUnique > 1)
+            ? `All <strong>${missingUnique}</strong> of your missing cards are in ${_dgaBuilderEsc(top.name)}.`
+            : `${_dgaBuilderEsc(top.name)} covers the most — <strong>${top.cards}</strong> of your ${missingUnique} missing card${missingUnique !== 1 ? 's' : ''}.`;
+
+        const groupsHTML = coverage.map((s, i) => {
+            const ids = s.items.map(it => it.card_id).join(',');
+            const thumbs = s.items.map(it => {
+                const src = it.edition_id ? `/images/${encodeURIComponent(it.edition_id)}.jpg` : '';
+                return `
+                    <div class="dga-builder-thumb" data-card-id="${_dgaBuilderEsc(it.card_id)}" data-img="${_dgaBuilderEsc(src)}"
+                         title="${_dgaBuilderEsc(it.name)}${it.short_by ? ` — need ${it.short_by} more` : ''}">
+                        <div class="edition-tile-wrap">
+                            ${src ? `<div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>` : ''}
+                            <img class="${src ? '' : 'tile-img-loaded'}" alt="${_dgaBuilderEsc(it.name)}"
+                                 onload="revealTileImage(this)" onerror="this.style.opacity='0.15';revealTileImage(this)">
+                        </div>
+                        ${it.short_by ? `<span class="dga-builder-thumb-badge">−${it.short_by}</span>` : ''}
+                    </div>`;
+            }).join('');
+            // Single-card sets collapse by default; a manual toggle sticks.
+            const collapsed = dgaBuilderSetCollapse.has(s.key)
+                ? dgaBuilderSetCollapse.get(s.key)
+                : s.cards === 1;
+            return `
+                <div class="dga-builder-set-group${i === 0 ? ' dga-builder-set-group--top' : ''}${collapsed ? ' is-collapsed' : ''}"
+                     data-set-key="${_dgaBuilderEsc(s.key)}">
+                    <div class="dga-builder-set-group-head" data-card-ids="${_dgaBuilderEsc(ids)}"
+                         title="Expand / collapse — also highlights these in the deck">
+                        <span class="dga-builder-set-group-caret">›</span>
+                        <span class="dga-builder-set-group-name">${_dgaBuilderEsc(s.name)}</span>
+                        <span class="dga-builder-set-group-count">${s.cards}</span>
+                    </div>
+                    <div class="dga-builder-set-group-grid${collapsed ? ' dga-grid-hidden' : ''}">${thumbs}</div>
+                </div>`;
+        }).join('');
+
+        coverageHTML = `
+            <div class="dga-builder-sets">
+                <p class="dga-builder-sets-lead">${lead}</p>
+                ${groupsHTML}
+            </div>`;
+    }
+    const setsPanelHTML = coverageHTML ||
+        '<div class="dga-builder-empty">You own every card in this deck.</div>';
+
+    // ── Per-section list ──
+    // A compact owned/needed line per deck card, grouped by deck section. The
+    // visual "how short am I" read now lives on the actual deck grid instead —
+    // dgaApplyDeckOverlays paints each deck tile's own qty indicator while the
+    // builder is open. Clicking a row scrolls/flashes that tile.
     const groups = Object.entries(sections).map(([name, ids]) => {
         const rows = (ids || []).map(id => {
             const c = cards[id];
             if (!c) return '';
-            const ok = c.owned >= c.needed;
+            // Three states: have all (green), have some but not enough (yellow),
+            // have zero (red). Same split drives the deck-grid overlays.
             const shortBy = Math.max(0, c.needed - c.owned);
+            const state = shortBy === 0 ? 'ok' : (c.owned === 0 ? 'none' : 'part');
             return `
-                <div class="dga-builder-row ${ok ? 'dga-builder-row--ok' : 'dga-builder-row--short'}"
+                <div class="dga-builder-row dga-builder-row--${state}"
                      data-card-id="${_dgaBuilderEsc(id)}" title="${_dgaBuilderEsc(_dgaBuilderBinTitle(c))}">
                     <span class="dga-builder-row-name">${_dgaBuilderEsc(c.name)}</span>
                     <span class="dga-builder-row-count">${c.owned} / ${c.needed}${shortBy ? `<span class="dga-builder-row-short-badge">−${shortBy}</span>` : ''}</span>
@@ -297,10 +416,141 @@ function dgaRenderBuilder(data) {
             </div>`;
     }).join('');
 
-    body.innerHTML = summary + groups;
+    body.innerHTML = summary + `
+        <div class="dga-builder-tabs">
+            <button class="dga-builder-tab" data-tab="sets">Sets</button>
+            <button class="dga-builder-tab" data-tab="list">List</button>
+        </div>
+        <div class="dga-builder-panel" data-panel="sets">${setsPanelHTML}</div>
+        <div class="dga-builder-panel" data-panel="list">${groups}</div>`;
+
+    _dgaSetBuilderTab(dgaBuilderTab);
+    body.querySelectorAll('.dga-builder-tab').forEach(btn => {
+        btn.onclick = () => { if (btn.dataset.tab !== dgaBuilderTab) _dgaSetBuilderTab(btn.dataset.tab, true); };
+    });
     body.querySelectorAll('.dga-builder-row').forEach(row => {
         row.onclick = () => dgaBuilderJumpToCard(row.dataset.cardId);
     });
+    body.querySelectorAll('.dga-builder-set-group-head').forEach(head => {
+        head.onclick = () => {
+            const group = head.closest('.dga-builder-set-group');
+            const grid = group.querySelector('.dga-builder-set-group-grid');
+            const nowCollapsed = !group.classList.contains('is-collapsed');
+            // .is-collapsed flips the caret + row margin right away (both
+            // transition); the thumbnail grid wipes its height over the same
+            // beat so the sets below slide to make / reclaim the space.
+            group.classList.toggle('is-collapsed', nowCollapsed);
+            if (group.dataset.setKey) dgaBuilderSetCollapse.set(group.dataset.setKey, nowCollapsed);
+            if (typeof animateHeightWipe === 'function') {
+                if (nowCollapsed) {
+                    animateHeightWipe(grid, false, {duration: 200}).then(() => {
+                        grid.classList.add('dga-grid-hidden');
+                        resetHeightWipe(grid);
+                    });
+                } else {
+                    grid.classList.remove('dga-grid-hidden');
+                    animateHeightWipe(grid, true, {duration: 200});
+                }
+            } else {
+                grid.classList.toggle('dga-grid-hidden', nowCollapsed);
+            }
+            dgaBuilderFlashCards((head.dataset.cardIds || '').split(',').filter(Boolean));
+        };
+    });
+    body.querySelectorAll('.dga-builder-thumb').forEach(thumb => {
+        if (thumb.dataset.img) queueTileImageLoad(thumb.querySelector('img'), thumb.dataset.img);
+        thumb.onclick = () => dgaBuilderFlashCards([thumb.dataset.cardId]);
+    });
+
+    // Paint the buildability indicator boxes onto the real deck grid. The very
+    // first paint after the builder opens fades them in; later re-applies (deck
+    // edits) just update in place.
+    const firstPaint = !dgaLastBuildability;
+    dgaLastBuildability = cards;
+    if (dgaBuilderOpen) dgaApplyDeckOverlays(cards, {fadeIn: firstPaint});
+}
+
+// ── Deck-grid buildability overlays ──
+// While the Deck Builder is open, every deck tile shows its own indicator box
+// (reusing Cards' edit-mode .inv-tile-qty-indicator / -box): red −N if the deck
+// needs N more copies of that card than you own, green +N if you own spares,
+// green ✓ if it's exactly covered. Counts are per card_id, aggregated across
+// sections (same model as the buildability endpoint). The CSS (keyed on
+// .dga-page.dga-builder-open) pins these visible and hides the per-tile qty
+// controls, so the deck can't be re-quantified while it's in this mode.
+function dgaApplyDeckOverlays(cardsData, {fadeIn = false} = {}) {
+    const grid = document.getElementById('dga-card-grid');
+    if (!grid || !cardsData) return;
+    grid.querySelectorAll('.dga-card-tile').forEach(tile => {
+        let ind = tile.querySelector('.inv-tile-qty-indicator');
+        if (!ind) {
+            ind = document.createElement('div');
+            ind.className = 'inv-tile-qty-indicator';
+            tile.appendChild(ind);
+        }
+        const c = cardsData[tile.dataset.cardId];
+        if (!c) {
+            ind.innerHTML = '';
+            return;
+        }
+        // Three states: have all → green (+N spare / ✓), have some but not
+        // enough → yellow (−N), have zero → red (−N). Mirrors the panel list.
+        const shortBy = c.needed - c.owned;
+        let cls, glyph;
+        if (shortBy <= 0) {
+            cls = 'indicator-add';
+            glyph = shortBy < 0 ? `+${-shortBy}` : '✓';
+        } else {
+            cls = c.owned === 0 ? 'indicator-sub' : 'dga-indicator-partial';
+            glyph = `−${shortBy}`;
+        }
+        const wasEmpty = !ind.firstElementChild;
+        ind.innerHTML = `<div class="inv-tile-qty-indicator-box ${cls}">${glyph}</div>`;
+        if (fadeIn && wasEmpty) ind.classList.add('dga-overlay-armed');
+        tile.title = `${c.name} — own ${c.owned} of ${c.needed} · ${_dgaBuilderBinTitle(c)}`;
+    });
+    if (fadeIn) {
+        // Release on the next frames so the armed (opacity 0) state paints once
+        // before the transition to opacity 1 runs; the timer is a fallback so
+        // the badges can't get stranded invisible if rAF is throttled.
+        const release = () => grid.querySelectorAll('.inv-tile-qty-indicator.dga-overlay-armed')
+            .forEach(ind => ind.classList.remove('dga-overlay-armed'));
+        requestAnimationFrame(() => requestAnimationFrame(release));
+        setTimeout(release, 80);
+    }
+}
+
+function dgaClearDeckOverlays({fadeOut = false} = {}) {
+    const grid = document.getElementById('dga-card-grid');
+    if (!grid) return;
+    const inds = [...grid.querySelectorAll('.dga-card-tile .inv-tile-qty-indicator')];
+    if (fadeOut && inds.some(ind => ind.firstElementChild)) {
+        inds.forEach(ind => ind.classList.add('dga-overlay-armed'));   // → opacity 0
+        setTimeout(() => inds.forEach(ind => {
+            ind.innerHTML = '';
+            ind.classList.remove('dga-overlay-armed');
+        }), 240);
+    } else {
+        inds.forEach(ind => { ind.innerHTML = ''; ind.classList.remove('dga-overlay-armed'); });
+    }
+}
+
+// Flash every deck tile for the given card_ids and scroll the first into view
+// — the set-coverage rows use this to show which cards a set would cover.
+function dgaBuilderFlashCards(cardIds) {
+    const grid = document.getElementById('dga-card-grid');
+    if (!grid || !cardIds.length) return;
+    const esc = id => (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    let first = null;
+    for (const id of cardIds) {
+        for (const tile of grid.querySelectorAll(`.dga-card-tile[data-card-id="${esc(id)}"]`)) {
+            if (!first) first = tile;
+            tile.classList.remove('dga-builder-tile-flash');
+            void tile.offsetWidth;
+            tile.classList.add('dga-builder-tile-flash');
+        }
+    }
+    first?.scrollIntoView({behavior: 'smooth', block: 'center'});
 }
 
 // Scroll the matching deck tile into view and flash it. Deck tiles carry
@@ -1488,6 +1738,11 @@ function renderDeckSections(deckData, animate = true) {
 
     // Add section button — always visible; swaps into an inline name input
     grid.appendChild(dgaBuildAddSectionButton());
+
+    // Rebuilding the grid wiped the freshly-emptied qty indicators — repaint
+    // the buildability overlays now (with the last known counts) so there's no
+    // gap before dgaBuilderRefresh's re-fetch lands.
+    if (dgaBuilderOpen && dgaLastBuildability) dgaApplyDeckOverlays(dgaLastBuildability);
 }
 
 function dgaBuildAddSectionButton() {

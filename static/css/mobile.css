@@ -291,7 +291,9 @@
        which phones don't have) — there's no room to sit it beside the deck view
        here. Force it hidden and keep the page in its normal single column even
        if .dga-builder-open somehow lingers from a desktop session. */
-    .dga-builder {
+    .dga-builder,
+    /* its detail-header toggle button goes too — nothing for it to open here */
+    .dga-builder-toggle-btn {
         display: none !important;
     }
 

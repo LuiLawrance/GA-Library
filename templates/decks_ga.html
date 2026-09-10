@@ -179,6 +179,13 @@
                         <span class="inv-bin-value-badge inv-bin-value-loading" id="dga-detail-value">…</span>
                     </div>
                     <div class="inv-detail-controls">
+                        <!-- Deck Builder toggle — same icon-button treatment as the ⚙ settings
+                             button, sitting just left of the Unlocked/Locked pill. Opens/closes
+                             the left-side Deck Builder panel (also reachable by right-click in
+                             the detail view). Its pressed state is kept in sync with the panel
+                             by _dgaSyncBuilderToggleBtn in decks_ga.js. -->
+                        <button class="inv-settings-btn btn btn--icon dga-builder-toggle-btn" id="dga-builder-toggle-btn"
+                                onclick="toggleDeckBuilder()" title="Deck Builder" aria-pressed="false">🔧</button>
                         <div class="pill-toggle dga-edition-lock-toggle" id="dga-edition-locked-toggle"
                              title="Locked: pick a specific printing when adding cards, and list every printing separately. Unlocked: printings are assigned randomly and collapsed into one card.">
                             <span class="pill-indicator"></span>

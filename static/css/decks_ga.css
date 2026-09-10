@@ -297,6 +297,20 @@
     padding: 5px 10px;
 }
 
+/* Deck Builder toggle — shares .inv-settings-btn (inventory.css) with the ⚙
+   button, sitting immediately left of the edition pill. .active is the
+   panel-open state (kept in sync by _dgaSyncBuilderToggleBtn), lit with the
+   accent so it reads as a pressed toggle rather than a one-shot action. */
+.dga-builder-toggle-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.dga-builder-toggle-btn.active:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .dga-detail-back {
     display: flex;
     align-items: center;
@@ -934,7 +948,10 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
    (share dialog + "Shared with me" tiles reuse .inv-* rules from inventory.css)
    ═══════════════════════════════════════ */
 .dga-detail-view.dga-role-viewer .inv-detail-add-btn,
-.dga-detail-view.dga-role-viewer .inv-settings-btn:not(#dga-share-btn),
+/* #dga-builder-toggle-btn stays — the Deck Builder compares the deck against
+   the *caller's* own inventory (buildability needs only viewer), so it's
+   useful on a deck shared read-only, same as it's already right-clickable. */
+.dga-detail-view.dga-role-viewer .inv-settings-btn:not(#dga-share-btn):not(#dga-builder-toggle-btn),
 .dga-detail-view.dga-role-viewer .dga-add-section-btn,
 .dga-detail-view.dga-role-viewer .dga-edition-lock-toggle,
 .dga-detail-view.dga-role-viewer .inv-card-tile-qty-ctrl,
@@ -968,6 +985,9 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
 }
 
 .dga-builder {
+    /* Open width — the header/body min-width and the JS transition comment
+       all key off this one value. */
+    --dga-builder-w: 460px;
     flex-shrink: 0;
     width: 0;
     overflow: hidden;
@@ -979,14 +999,14 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
 }
 
 .dga-page.dga-builder-open .dga-builder {
-    width: 340px;
+    width: var(--dga-builder-w);
 }
 
 /* Closing: keep the row layout (and the min-width:0 fixes above) in place while
    the panel width animates back to 0, so the deck grid slides back smoothly.
    The row-mode classes are only dropped once that transition has finished —
    see closeDeckBuilder — otherwise flipping straight to column with the panel
-   still 340px wide reflows the whole page for a frame ("cuts out then returns").*/
+   still at full width reflows the whole page for a frame ("cuts out then returns").*/
 .dga-page.dga-builder-open.dga-builder-collapsed .dga-builder {
     width: 0;
 }
@@ -1000,7 +1020,7 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     /* Don't let the header text wrap/clip while the panel animates open. */
-    min-width: 340px;
+    min-width: var(--dga-builder-w);
 }
 
 .dga-builder-title {
@@ -1021,7 +1041,7 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     flex: 1;
     overflow-y: auto;
     padding: 14px 18px 24px;
-    min-width: 340px;
+    min-width: var(--dga-builder-w);
 }
 
 .dga-builder-loading,
@@ -1070,6 +1090,39 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     color: var(--warning);
 }
 
+/* Sets / List tab switcher — underline tabs, same shape as the import/export
+   modal's (.inv-import-export-tab), sized down for the panel. */
+.dga-builder-tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
+}
+
+.dga-builder-tab {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 7px 12px;
+    margin-bottom: -1px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.dga-builder-tab:hover {
+    color: var(--text);
+}
+
+.dga-builder-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
 /* Per-section group */
 .dga-builder-section {
     margin-bottom: 18px;
@@ -1082,6 +1135,10 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     display: block;
 }
 
+/* Per-section list row — a compact owned/needed line per deck card. Clicking
+   it scrolls/flashes that card's tile in the deck grid. The "how short am I"
+   visual read lives on the deck grid itself now (see the .dga-builder-open
+   overlay rules further down). */
 .dga-builder-row {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -1098,12 +1155,18 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     background: var(--bg-hover);
 }
 
+/* Three states: --ok have all (green), --part have some but not enough
+   (yellow), --none have zero (red). */
 .dga-builder-row--ok {
     border-left-color: var(--success);
 }
 
-.dga-builder-row--short {
+.dga-builder-row--part {
     border-left-color: var(--warning);
+}
+
+.dga-builder-row--none {
+    border-left-color: var(--error);
 }
 
 .dga-builder-row-name {
@@ -1125,21 +1188,237 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
     color: var(--success);
 }
 
-.dga-builder-row--short .dga-builder-row-count {
+.dga-builder-row--part .dga-builder-row-count {
     color: var(--warning);
 }
 
+.dga-builder-row--none .dga-builder-row-count {
+    color: var(--error);
+}
+
 .dga-builder-row-short-badge {
+    --badge-c: var(--warning);   /* --part; --none rows override below */
     font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--warning);
-    border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
-    background: color-mix(in srgb, var(--warning) 10%, transparent);
+    color: var(--badge-c);
+    border: 1px solid color-mix(in srgb, var(--badge-c) 45%, transparent);
+    background: color-mix(in srgb, var(--badge-c) 10%, transparent);
     border-radius: 4px;
     padding: 1px 5px;
     margin-left: 6px;
+}
+
+.dga-builder-row--none .dga-builder-row-short-badge {
+    --badge-c: var(--error);
+}
+
+/* ── Deck-grid buildability overlays ──
+   While the Deck Builder is open, every deck tile carries a status box
+   (dgaApplyDeckOverlays fills it): red −N when the deck needs more copies than
+   you own, green +N / ✓ when it's covered. That box is the ONLY thing that
+   differs between "have it" and "don't" — no per-status dimming, and the normal
+   card hover (zoom + .card-tile-dim) is left untouched for every tile. The
+   per-tile qty stepper is hidden so the deck can't be re-quantified here. */
+.dga-page.dga-builder-open .dga-card-tile .inv-card-tile-qty-ctrl {
+    display: none !important;
+}
+
+/* The indicator layer just holds the box — no full-tile scrim. It fades in on
+   the builder's first paint and out on close (dgaApplyDeckOverlays /
+   dgaClearDeckOverlays toggle .dga-overlay-armed). */
+.dga-page.dga-builder-open .dga-card-tile .inv-tile-qty-indicator {
+    opacity: 1;
+    background: transparent;
+    transition: opacity 0.22s ease;
+}
+
+.dga-page.dga-builder-open .dga-card-tile .inv-tile-qty-indicator.dga-overlay-armed {
+    opacity: 0;
+}
+
+/* Solid dark chip so the glyph reads the same on any card art. Three colours:
+   green = have all (indicator-add), yellow = have some but not enough
+   (dga-indicator-partial), red = have zero (indicator-sub, lifted toward the
+   green's luminance since the Cards palette's red is inherently darker).
+   Scoped to the builder so Cards/Inventory edit mode keep the base palette. */
+.dga-page.dga-builder-open .dga-card-tile .inv-tile-qty-indicator-box {
+    background: rgba(0, 0, 0, 0.55);
+}
+
+.dga-page.dga-builder-open .dga-card-tile .inv-tile-qty-indicator-box.indicator-sub {
+    color: rgba(255, 122, 112, 1);
+    border-color: rgba(255, 122, 112, 0.8);
+}
+
+.dga-page.dga-builder-open .dga-card-tile .inv-tile-qty-indicator-box.dga-indicator-partial {
+    color: rgba(245, 200, 100, 1);
+    border-color: rgba(245, 200, 100, 0.8);
+}
+
+/* "Where to find the rest" — every set family that prints one of the deck's
+   still-missing cards, biggest first, each a header + a thumbnail grid of the
+   cards it covers. Sits between the summary and the per-section lists. */
+.dga-builder-sets {
+    margin-bottom: 18px;
+}
+
+.dga-builder-sets-lead {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    margin: 6px 0 12px;
+}
+
+.dga-builder-sets-lead strong {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.dga-builder-set-group {
+    margin-bottom: 14px;
+    padding-left: 8px;
+    border-left: 2px solid var(--border);
+    transition: margin-bottom 0.2s ease;
+}
+
+/* Collapsed — tighten the row (the caret + this margin transition together;
+   the thumbnail grid's height is wiped by animateHeightWipe in the click
+   handler). Single-card sets start collapsed — see dgaRenderBuilder. */
+.dga-builder-set-group.is-collapsed {
+    margin-bottom: 6px;
+}
+
+/* Grid visibility is owned by the collapse animation, not .is-collapsed —
+   the class only drives the caret + row spacing so the wipe can measure the
+   grid before it's hidden. */
+.dga-builder-set-group-grid.dga-grid-hidden {
+    display: none;
+}
+
+/* The greatest-common set — accent-lined and its header lit. */
+.dga-builder-set-group--top {
+    border-left-color: var(--accent);
+}
+
+.dga-builder-set-group-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 0 8px;
+    cursor: pointer;
+}
+
+.dga-builder-set-group.is-collapsed .dga-builder-set-group-head {
+    padding-bottom: 2px;
+}
+
+.dga-builder-set-group-caret {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1;
+    color: var(--text-muted);
+    transform: rotate(90deg);   /* expanded → points down */
+    transition: transform 0.15s;
+    flex-shrink: 0;
+}
+
+.dga-builder-set-group.is-collapsed .dga-builder-set-group-caret {
+    transform: rotate(0deg);    /* collapsed → points right */
+}
+
+.dga-builder-set-group-head:hover .dga-builder-set-group-caret {
+    color: var(--text);
+}
+
+.dga-builder-set-group-name {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.02em;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.dga-builder-set-group-head:hover .dga-builder-set-group-name {
+    color: var(--accent);
+}
+
+.dga-builder-set-group--top .dga-builder-set-group-name {
+    color: var(--accent);
+}
+
+.dga-builder-set-group-count {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.dga-builder-set-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 6px;
+}
+
+.dga-builder-thumb {
+    position: relative;
+    cursor: pointer;
+    border-radius: 5px;
+    overflow: hidden;
+    transition: transform 0.12s ease;
+}
+
+.dga-builder-thumb:hover {
+    transform: translateY(-2px);
+}
+
+.dga-builder-thumb .edition-tile-wrap {
+    position: relative;
+    aspect-ratio: 5 / 7;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.dga-builder-thumb:hover .edition-tile-wrap {
+    border-color: var(--accent);
+}
+
+/* Spinner-to-image crossfade, same shape as .inv-card-tile's (inventory.css) —
+   revealTileImage (tiles.js) adds .tile-img-loaded once the image is ready. */
+.dga-builder-thumb .edition-tile-wrap img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.dga-builder-thumb .edition-tile-wrap img.tile-img-loaded {
+    opacity: 1;
+}
+
+.dga-builder-thumb-badge {
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text);
+    background: color-mix(in srgb, var(--warning) 85%, black);
+    border-radius: 3px;
+    padding: 2px 4px;
 }
 
 /* Brief flash when a builder row is clicked and its deck tile scrolls into view */

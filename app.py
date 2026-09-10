@@ -5651,6 +5651,62 @@ async def api_deck_value(deck_name: str, request: Request):
     return JSONResponse(_deck_value(deck_data.get("sections", {}), load_sales_data(), load_listings_data()))
 
 
+def _set_family_index(featured_sets: dict) -> dict[str, str]:
+    """set_prefix → family label. A prefix inside a featured-set group (AMB,
+    AMB 1st, AMB Alter, AMBSD → "Mortal Ambition") maps to that group's name;
+    any prefix not in a group (promos, demos, proxies) is its own family and
+    isn't listed here — callers fall back to the prefix itself."""
+    idx: dict[str, str] = {}
+    for group_name, group in featured_sets.items():
+        for s in group.get("sets", []):
+            if s.get("prefix"):
+                idx[s["prefix"]] = group_name
+    return idx
+
+
+def _deck_set_coverage(short_ids: list[str], cards: dict, info_data: dict,
+                       family_index: dict[str, str]) -> list[dict]:
+    """For a deck's still-missing cards, which of them each set family can
+    supply — the Deck Builder's "where do I find the rest" view. Every family
+    that prints at least one missing card is returned (even a single-card one),
+    each with a thumbnail-ready `items` list; a card printed across several
+    families appears once under each. `cards` counts distinct missing cards,
+    `copies` sums their shortfalls. Sorted by cards desc, then copies desc,
+    then name — the caller renders them in that order (biggest set first)."""
+    fam_items: dict[str, dict[str, dict]] = {}  # fam → {card_id → item}
+    fam_copies: dict[str, int] = {}
+    fam_name: dict[str, str] = {}
+    for card_id in short_ids:
+        entry = cards[card_id]
+        short_by = max(0, entry["needed"] - entry["owned"])
+        seen: set[str] = set()
+        for edition_id, einfo in info_data.get(card_id, {}).get("editions", {}).items():
+            prefix = einfo.get("set_prefix")
+            if not prefix:
+                continue
+            if prefix in family_index:
+                fam = display = family_index[prefix]
+            else:
+                fam, display = prefix, (einfo.get("set_name") or prefix)
+            if fam in seen:
+                continue  # one thumbnail per card per family — first printing wins
+            seen.add(fam)
+            fam_name.setdefault(fam, display)
+            fam_items.setdefault(fam, {})[card_id] = {
+                "card_id": card_id, "name": entry["name"],
+                "edition_id": edition_id, "short_by": short_by,
+            }
+            fam_copies[fam] = fam_copies.get(fam, 0) + short_by
+
+    result = [
+        {"key": fam, "name": fam_name[fam], "cards": len(items),
+         "copies": fam_copies[fam], "items": list(items.values())}
+        for fam, items in fam_items.items()
+    ]
+    result.sort(key=lambda r: (-r["cards"], -r["copies"], r["name"].lower()))
+    return result
+
+
 def _inv_owned_by_card(username: str) -> dict[str, dict[str, int]]:
     """{card_id: {bin_name: quantity}} summed across every section of every bin
     the user owns — the same nested sections→card_id→edition_id→foil_id→qty walk
@@ -5713,9 +5769,18 @@ async def api_deck_buildability(deck_name: str, request: Request):
     copies_needed = sum(c["needed"] for c in cards.values())
     copies_short = sum(max(0, c["needed"] - c["owned"]) for c in cards.values())
 
+    # "Where to find the rest" — rank set families by how many of the deck's
+    # still-missing cards each one can supply. Only computed when something's
+    # actually short (info_data is the full catalog hydration — skip it otherwise).
+    short_ids = [cid for cid, c in cards.items() if c["owned"] < c["needed"]]
+    set_coverage = _deck_set_coverage(
+        short_ids, cards, load_info_data(), _set_family_index(load_featured_sets_data())
+    ) if short_ids else []
+
     return JSONResponse({
         "sections": sections,
         "cards": cards,
+        "set_coverage": set_coverage,
         "totals": {
             "unique": len(cards),
             "unique_ok": unique_ok,
