@@ -1430,3 +1430,13 @@ body.dga-drag-active .inv-card-tile:hover .inv-card-tile-qty-ctrl {
 .dga-builder-tile-flash {
     animation: dgaBuilderTileFlash 1s ease;
 }
+
+/* Persistent outline for the deck tile currently selected from the Deck
+   Builder panel (a list row, a Sets thumbnail, or a set-group header) — stays
+   until a different card is selected or the builder closes/exits
+   (dgaClearDeckOverlays). border-radius matches .edition-tile-wrap's (tiles.css)
+   so the ring hugs the card image rather than a squared-off box. */
+.dga-builder-tile-selected {
+    border-radius: 14px;
+    box-shadow: 0 0 0 3px var(--accent);
+}

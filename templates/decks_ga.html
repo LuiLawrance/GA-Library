@@ -45,9 +45,6 @@
         <button class="inv-context-item" onclick="dgaCtxEditDesc()">
             <span class="inv-context-icon">≡</span> Edit Description
         </button>
-        <button class="inv-context-item" onclick="dgaCtxOpenBuilderFor()">
-            <span class="inv-context-icon">🔧</span> Deck Builder
-        </button>
         <button class="inv-context-item" id="dga-ctx-set-banner" onclick="dgaCtxOpenBannerSearch()">
             <span class="inv-context-icon">🖼</span> Set Banner
         </button>
@@ -120,6 +117,24 @@
             <div class="inv-modal-header">
                 <span class="inv-modal-title">Edit Description</span>
                 <button class="inv-modal-close" onclick="dgaCloseDescModal()">✕</button>
+            </div>
+            <div class="inv-field-group">
+                <label class="inv-field-label label label--muted">Format</label>
+                <div class="dga-fmt-dropdown-wrap">
+                    <button class="dga-fmt-dropdown-btn btn btn--ghost btn--mono" id="dga-desc-format-btn"
+                            onclick="toggleDgaFormatDropdown('desc')"
+                            type="button">
+                        <span id="dga-desc-format-label">None</span>
+                        <span class="dga-fmt-dropdown-arrow dropdown-arrow">&#8249;</span>
+                    </button>
+                    <div class="dga-fmt-dropdown-menu menu hidden" id="dga-desc-format-menu">
+                        <div class="dga-fmt-dropdown-option selected" data-value="">None</div>
+                        <div class="dga-fmt-dropdown-option" data-value="Standard">Standard</div>
+                        <div class="dga-fmt-dropdown-option" data-value="Draft">Draft</div>
+                        <div class="dga-fmt-dropdown-option" data-value="Pantheon">Pantheon</div>
+                    </div>
+                    <input id="dga-desc-format" type="hidden" value="">
+                </div>
             </div>
             <div class="inv-field-group">
                 <label class="inv-field-label label label--muted">Description <span class="inv-optional">(optional)</span></label>

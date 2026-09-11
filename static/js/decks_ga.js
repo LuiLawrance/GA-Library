@@ -123,14 +123,6 @@ function dgaCtxOpenBannerSearch() {
     openDeckBannerModal(name);
 }
 
-function dgaCtxOpenBuilderFor() {
-    const name = dgaCtxTargetDeck;
-    dgaCloseContextMenu();
-    if (!name) return;
-    // Open the deck if it isn't already the active one, then the panel.
-    (activeDeck === name ? Promise.resolve() : openDeckDetail(name)).then(openDeckBuilder);
-}
-
 document.addEventListener('click', e => {
     if (!e.target.closest('#dga-context-menu')) dgaCloseContextMenu();
     if (!e.target.closest('#dga-card-context-menu')) dgaCloseCardContextMenu();
@@ -319,16 +311,14 @@ function dgaRenderBuilder(data) {
     const uniqueOk = t.unique_ok ?? 0;
     const unique = t.unique ?? 0;
     const short = t.copies_short ?? 0;
+    const needed = t.copies_needed ?? 0;
+    const owned = needed - short;
 
     const summary = `
         <div class="dga-builder-summary">
             <div class="dga-builder-summary-line">
-                <span>Buildable cards</span>
-                <span class="dga-builder-summary-val ${uniqueOk >= unique ? 'dga-builder-summary-val--ok' : 'dga-builder-summary-val--short'}">${uniqueOk} / ${unique}</span>
-            </div>
-            <div class="dga-builder-summary-line dga-builder-summary-line--sub">
-                <span>Copies still needed</span>
-                <span class="dga-builder-summary-val ${short ? 'dga-builder-summary-val--short' : 'dga-builder-summary-val--ok'}">${short}</span>
+                <span>Cards owned</span>
+                <span class="dga-builder-summary-val ${owned >= needed ? 'dga-builder-summary-val--ok' : 'dga-builder-summary-val--short'}">${owned} / ${needed}</span>
             </div>
         </div>`;
 
@@ -353,6 +343,7 @@ function dgaRenderBuilder(data) {
                 const src = it.edition_id ? `/images/${encodeURIComponent(it.edition_id)}.jpg` : '';
                 return `
                     <div class="dga-builder-thumb" data-card-id="${_dgaBuilderEsc(it.card_id)}" data-img="${_dgaBuilderEsc(src)}"
+                         data-edition-id="${_dgaBuilderEsc(it.edition_id || '')}" data-card-name="${_dgaBuilderEsc(it.name)}"
                          title="${_dgaBuilderEsc(it.name)}${it.short_by ? ` — need ${it.short_by} more` : ''}">
                         <div class="edition-tile-wrap">
                             ${src ? `<div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>` : ''}
@@ -459,7 +450,7 @@ function dgaRenderBuilder(data) {
     });
     body.querySelectorAll('.dga-builder-thumb').forEach(thumb => {
         if (thumb.dataset.img) queueTileImageLoad(thumb.querySelector('img'), thumb.dataset.img);
-        thumb.onclick = () => dgaBuilderFlashCards([thumb.dataset.cardId]);
+        thumb.onclick = () => dgaBuilderFlashCards([thumb.dataset.cardId], thumb.dataset.editionId, thumb.dataset.cardName);
     });
 
     // Paint the buildability indicator boxes onto the real deck grid. The very
@@ -523,6 +514,8 @@ function dgaApplyDeckOverlays(cardsData, {fadeIn = false} = {}) {
 function dgaClearDeckOverlays({fadeOut = false} = {}) {
     const grid = document.getElementById('dga-card-grid');
     if (!grid) return;
+    grid.querySelectorAll('.dga-card-tile.dga-builder-tile-selected')
+        .forEach(t => t.classList.remove('dga-builder-tile-selected'));
     const inds = [...grid.querySelectorAll('.dga-card-tile .inv-tile-qty-indicator')];
     if (fadeOut && inds.some(ind => ind.firstElementChild)) {
         inds.forEach(ind => ind.classList.add('dga-overlay-armed'));   // → opacity 0
@@ -535,12 +528,81 @@ function dgaClearDeckOverlays({fadeOut = false} = {}) {
     }
 }
 
+// Persistently outline the deck tile(s) for the given card_ids so the
+// selection stays visible after the scroll/flash finishes, and clear any
+// previous selection first — only one builder-driven selection at a time.
+// Cleared by dgaClearDeckOverlays (panel close / builder mode exit) and by
+// the user manually scrolling the deck grid (see the 'scroll' listener below).
+function _dgaBuilderSelectTiles(cardIds) {
+    const grid = document.getElementById('dga-card-grid');
+    if (!grid) return;
+    grid.querySelectorAll('.dga-card-tile.dga-builder-tile-selected')
+        .forEach(t => t.classList.remove('dga-builder-tile-selected'));
+    const esc = id => (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    for (const id of cardIds) {
+        grid.querySelectorAll(`.dga-card-tile[data-card-id="${esc(id)}"]`)
+            .forEach(t => t.classList.add('dga-builder-tile-selected'));
+    }
+}
+
+// scrollIntoView's own smooth-scroll fires the same 'scroll' events a manual
+// scroll would, so the deselect-on-scroll listener below needs a way to tell
+// "we did that" apart from the user scrolling — this flag is it. Cleared on
+// 'scrollend' where supported, with a timeout fallback for browsers that
+// don't fire it (comfortably past a smooth scroll's ~300-500ms typical run).
+let _dgaBuilderIgnoreScroll = false;
+let _dgaBuilderIgnoreScrollTimer = null;
+
+function _dgaBuilderScrollToTile(tile) {
+    if (!tile) return;
+    const wrap = tile.closest('.dga-card-grid-wrap');
+    _dgaBuilderIgnoreScroll = true;
+    clearTimeout(_dgaBuilderIgnoreScrollTimer);
+    const release = () => {
+        _dgaBuilderIgnoreScroll = false;
+        wrap?.removeEventListener('scrollend', release);
+    };
+    wrap?.addEventListener('scrollend', release, {once: true});
+    _dgaBuilderIgnoreScrollTimer = setTimeout(release, 900);
+    tile.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+// A manual scroll of the deck grid (wheel, drag, keyboard) deselects the
+// Deck Builder's outlined tile — capture phase since 'scroll' doesn't bubble,
+// and the wrap element may not exist yet when this script first runs (the My
+// Decks fragment mounts/unmounts as the user navigates).
+document.addEventListener('scroll', e => {
+    if (_dgaBuilderIgnoreScroll) return;
+    if (!e.target.classList?.contains('dga-card-grid-wrap')) return;
+    document.querySelectorAll('.dga-card-tile.dga-builder-tile-selected')
+        .forEach(t => t.classList.remove('dga-builder-tile-selected'));
+}, true);
+
 // Flash every deck tile for the given card_ids and scroll the first into view
 // — the set-coverage rows use this to show which cards a set would cover.
-function dgaBuilderFlashCards(cardIds) {
+// A repeat click on a single already-selected card (a Sets-tab thumbnail, not
+// a multi-card set-group header) opens its card drawer instead of re-flashing.
+// This calls openCardDrawer directly with the THUMBNAIL's own edition_id
+// rather than reusing the deck tile's click handler (which always opens the
+// deck's own fixed printing) — a thumb for a different printing of the same
+// card must switch the open drawer to that edition, not just re-toggle the
+// one it's already showing (openDrawer in drawer.js closes on an exact
+// card+edition repeat, so passing the wrong edition here would wrongly close it).
+function dgaBuilderFlashCards(cardIds, editionId, cardName) {
     const grid = document.getElementById('dga-card-grid');
     if (!grid || !cardIds.length) return;
     const esc = id => (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+    if (cardIds.length === 1) {
+        const tile = grid.querySelector(`.dga-card-tile[data-card-id="${esc(cardIds[0])}"]`);
+        if (tile?.classList.contains('dga-builder-tile-selected')) {
+            if (editionId && document.getElementById('card-drawer')) {
+                openCardDrawer(cardIds[0], editionId, cardName || tile.querySelector('.dga-card-tile-name')?.textContent || '');
+            } else {
+                tile.click();
+            }
+            return;
+        }
+    }
     let first = null;
     for (const id of cardIds) {
         for (const tile of grid.querySelectorAll(`.dga-card-tile[data-card-id="${esc(id)}"]`)) {
@@ -550,20 +612,27 @@ function dgaBuilderFlashCards(cardIds) {
             tile.classList.add('dga-builder-tile-flash');
         }
     }
-    first?.scrollIntoView({behavior: 'smooth', block: 'center'});
+    _dgaBuilderSelectTiles(cardIds);
+    _dgaBuilderScrollToTile(first);
 }
 
 // Scroll the matching deck tile into view and flash it. Deck tiles carry
-// data-card-id (see buildDeckCardTile).
+// data-card-id (see buildDeckCardTile). A repeat click on an already-selected
+// row opens its card drawer instead — see dgaBuilderFlashCards above.
 function dgaBuilderJumpToCard(cardId) {
     const grid = document.getElementById('dga-card-grid');
     if (!grid || !cardId) return;
     const tile = grid.querySelector(`.dga-card-tile[data-card-id="${(window.CSS && CSS.escape) ? CSS.escape(cardId) : cardId}"]`);
     if (!tile) return;
-    tile.scrollIntoView({behavior: 'smooth', block: 'center'});
+    if (tile.classList.contains('dga-builder-tile-selected')) {
+        tile.click();
+        return;
+    }
     tile.classList.remove('dga-builder-tile-flash');
     void tile.offsetWidth;
     tile.classList.add('dga-builder-tile-flash');
+    _dgaBuilderSelectTiles([cardId]);
+    _dgaBuilderScrollToTile(tile);
 }
 
 // ── Deck card context menu (right-click a card inside a deck) ──
@@ -843,6 +912,7 @@ function dgaCtxEditDesc() {
     const input = document.getElementById('dga-desc-input');
     input.value = gaDecks[name]?.desc || '';
     input.dataset.deck = name;
+    setDgaFormatValue('desc', gaDecks[name]?.format || '');
     document.getElementById('dga-desc-error').classList.add('hidden');
     document.getElementById('dga-desc-modal').classList.remove('hidden');
     setTimeout(() => {
@@ -852,26 +922,34 @@ function dgaCtxEditDesc() {
 
 function dgaCloseDescModal() {
     document.getElementById('dga-desc-modal').classList.add('hidden');
+    closeDgaFormatDropdown('desc');
 }
 
 async function dgaSubmitDesc() {
     const input = document.getElementById('dga-desc-input');
     const desc = input.value.trim();
     const name = input.dataset.deck;
+    const format = document.getElementById('dga-desc-format').value.trim();
     const errEl = document.getElementById('dga-desc-error');
 
     try {
         const res = await fetch(`/api/decks/${encodeURIComponent(name)}`, {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name, format: gaDecks[name]?.format || '', desc})
+            body: JSON.stringify({name, format, desc})
         });
         if (!res.ok) {
             errEl.textContent = 'Failed to save.';
             errEl.classList.remove('hidden');
             return;
         }
-        if (gaDecks[name]) gaDecks[name].desc = desc;
+        if (gaDecks[name]) {
+            gaDecks[name].desc = desc;
+            gaDecks[name].format = format;
+        }
+        if (name === activeDeck) {
+            document.getElementById('dga-detail-format').textContent = format ? `[${format}]` : '';
+        }
         dgaCloseDescModal();
         renderDeckGrid();
     } catch {
@@ -932,6 +1010,7 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.dga-fmt-dropdown-wrap')) {
         closeDgaFormatDropdown('create');
         closeDgaFormatDropdown('settings');
+        closeDgaFormatDropdown('desc');
     }
 }, true);
 
@@ -942,7 +1021,7 @@ document.addEventListener('click', e => {
     if (!opt) return;
     const menu = opt.closest('.dga-fmt-dropdown-menu');
     if (!menu) return;
-    const scope = menu.id.includes('create') ? 'create' : 'settings';
+    const scope = menu.id.replace(/^dga-/, '').replace(/-format-menu$/, '');
     selectDgaFormat(scope, opt.dataset.value, opt.textContent);
 }, true);
 
