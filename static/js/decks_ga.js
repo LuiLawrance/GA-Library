@@ -187,6 +187,65 @@ function toggleDeckBuilder() {
     dgaBuilderOpen ? closeDeckBuilder() : openDeckBuilder();
 }
 
+// The panel's width transition (0.25s, decks_ga.css) changes how many columns
+// fit in the deck grid, so every tile re-lays-out mid-animation — visibly
+// glitchy if left on screen. These hide the grid instantly for the duration
+// of that transition and fade it back in once the width has settled, on both
+// open and close.
+//
+// On open, the buildability fetch (dgaBuilderRefresh) races the width
+// transition — sometimes it resolves first, sometimes after — so revealing
+// the grid can't just be "wait 260ms": the badges (painted by
+// dgaApplyDeckOverlays once that fetch resolves) need to pop in at the exact
+// same moment, not before or after. _dgaBuilderRevealGate tracks both halves
+// independently ('width' from the timer below, 'badges' from
+// dgaApplyDeckOverlays / dgaBuilderRefresh's error path) and only actually
+// reveals once both are in. Close has no badges to wait on, so it marks that
+// half satisfied immediately — see closeDeckBuilder.
+let _dgaBuilderGridFadeTimer = null;
+const _dgaBuilderRevealGate = {width: false, badges: false};
+
+function _dgaBuilderHideGrid() {
+    _dgaBuilderRevealGate.width = false;
+    _dgaBuilderRevealGate.badges = false;
+    const wrap = document.querySelector('.dga-card-grid-wrap');
+    if (!wrap) return;
+    clearTimeout(_dgaBuilderGridFadeTimer);
+    wrap.style.transition = 'none';
+    wrap.style.opacity = '0';
+    void wrap.offsetWidth; // flush so the instant hide commits before anything re-enables the transition
+    wrap.style.transition = '';
+}
+
+function _dgaBuilderRevealGrid() {
+    const wrap = document.querySelector('.dga-card-grid-wrap');
+    if (wrap) {
+        wrap.style.transition = 'opacity 0.18s ease';
+        wrap.style.opacity = '1';
+    }
+    // Release any buildability badges that armed while the grid was still
+    // hidden, so they fade in alongside the cards rather than popping in
+    // separately. Deferred a frame rather than an instant class removal —
+    // when the badges gate is the one that completes this reveal (a fetch
+    // resolving right as dgaApplyDeckOverlays arms them), the arm and this
+    // release would otherwise land in the same paint, and a transition can't
+    // animate from a state that was never actually painted; the timeout is a
+    // fallback in case rAF is throttled.
+    const release = () => document.getElementById('dga-card-grid')
+        ?.querySelectorAll('.inv-tile-qty-indicator.dga-overlay-armed')
+        .forEach(ind => ind.classList.remove('dga-overlay-armed'));
+    requestAnimationFrame(() => requestAnimationFrame(release));
+    setTimeout(release, 80);
+}
+
+// Marks one half of the reveal gate satisfied; reveals once both are. Safe
+// to call more than once (e.g. a late-arriving fetch after the grid's
+// already visible) — _dgaBuilderRevealGrid is idempotent.
+function _dgaBuilderGateReady(which) {
+    _dgaBuilderRevealGate[which] = true;
+    if (_dgaBuilderRevealGate.width && _dgaBuilderRevealGate.badges) _dgaBuilderRevealGrid();
+}
+
 function openDeckBuilder() {
     const panel = document.getElementById('dga-builder');
     const page = document.getElementById('dga-page');
@@ -196,6 +255,7 @@ function openDeckBuilder() {
     // qty edit rather than stranding its confirm bar behind the lock.
     if (typeof dgaDeckEditMode !== 'undefined') dgaDeckEditMode.discard(true);
     clearTimeout(_dgaBuilderHideTimer);
+    _dgaBuilderHideGrid();
     panel.classList.remove('hidden');
     page.classList.remove('dga-builder-collapsed');
     // Next frame so the 0 → --dga-builder-w width change actually transitions.
@@ -203,6 +263,7 @@ function openDeckBuilder() {
     dgaBuilderOpen = true;
     _dgaSyncBuilderToggleBtn();
     dgaBuilderRefresh();
+    _dgaBuilderGridFadeTimer = setTimeout(() => _dgaBuilderGateReady('width'), 260);
 }
 
 function closeDeckBuilder() {
@@ -225,10 +286,13 @@ function closeDeckBuilder() {
     // Collapse the width first (row layout stays put so the grid slides back),
     // then drop the row-mode classes once the transition ends — flipping to
     // column while the panel is still wide would reflow the page for a frame.
+    _dgaBuilderHideGrid();
+    _dgaBuilderGateReady('badges'); // closing has no badges to wait on
     page.classList.add('dga-builder-collapsed');
     _dgaBuilderHideTimer = setTimeout(() => {
         page.classList.remove('dga-builder-open', 'dga-builder-collapsed');
         panel.classList.add('hidden');
+        _dgaBuilderGateReady('width');
     }, 260);
 }
 
@@ -262,6 +326,10 @@ async function dgaBuilderRefresh() {
         dgaRenderBuilder(await res.json());
     } catch {
         body.innerHTML = '<div class="dga-builder-empty">Couldn’t load the inventory comparison.</div>';
+        // No badges are coming this time around — satisfy that half of the open
+        // reveal gate anyway (_dgaBuilderGateReady) so a failed fetch doesn't
+        // leave the deck grid permanently hidden.
+        _dgaBuilderGateReady('badges');
     }
 }
 
@@ -500,15 +568,12 @@ function dgaApplyDeckOverlays(cardsData, {fadeIn = false} = {}) {
         if (fadeIn && wasEmpty) ind.classList.add('dga-overlay-armed');
         tile.title = `${c.name} — own ${c.owned} of ${c.needed} · ${_dgaBuilderBinTitle(c)}`;
     });
-    if (fadeIn) {
-        // Release on the next frames so the armed (opacity 0) state paints once
-        // before the transition to opacity 1 runs; the timer is a fallback so
-        // the badges can't get stranded invisible if rAF is throttled.
-        const release = () => grid.querySelectorAll('.inv-tile-qty-indicator.dga-overlay-armed')
-            .forEach(ind => ind.classList.remove('dga-overlay-armed'));
-        requestAnimationFrame(() => requestAnimationFrame(release));
-        setTimeout(release, 80);
-    }
+    // The badges' half of the open reveal gate (see _dgaBuilderGateReady) — the
+    // grid stays hidden until this AND the width transition timer both clear,
+    // so cards and badges always pop in on the same beat. If the width timer
+    // already fired (a slow fetch, past the transition), this reveals right
+    // away; _dgaBuilderRevealGrid's own badge-release covers the armed ones.
+    if (fadeIn) _dgaBuilderGateReady('badges');
 }
 
 function dgaClearDeckOverlays({fadeOut = false} = {}) {
