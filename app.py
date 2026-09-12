@@ -1353,12 +1353,17 @@ async def api_admin_import_set_group_ids(request: Request):
 
 # Second store: the edition-level TCGPlayer product IDs (editions.tcg_product_id
 # / the "~" no-listings sentinel) plus the per-Curio-Foil overrides
-# (foil_tcg_overrides.product_id). This is the hand-curated + tcgcsv-imported
-# "which TCGPlayer product is this?" mapping — deliberately NOT the scrape
-# clocks (last_sales / last_listings), which regenerate on the next scrape and
+# (foil_tcg_overrides.product_id), plus the rare foil-kind-swap flag
+# (editions.tcg_foil_kind_swapped — see api_tcgplayer.get_foil_kind_swapped)
+# for editions whose TCGPlayer page labels rows backwards. This is the
+# hand-curated + tcgcsv-imported "which TCGPlayer product is this, and how do
+# its rows map to our foils?" mapping — deliberately NOT the scrape clocks
+# (last_sales / last_listings), which regenerate on the next scrape and
 # aren't product identity. Same skip-existing merge and is_db_mode() branching
 # as the set-Group-ID pair above; "~" already on file counts as set (a
-# deliberate no-listings marker) and is never overwritten.
+# deliberate no-listings marker) and is never overwritten. The swap flag is
+# sparse in the export — only the handful of editions actually flagged are
+# listed, not every edition with a value of false.
 
 EDITION_PRODUCT_IDS_FORMAT = "grand-archive-library/edition-product-ids"
 
@@ -1368,13 +1373,16 @@ def _valid_product_id(value: str) -> bool:
 
 
 def _persist_edition_product_ids(
-    main_ids: dict[str, str], foil_ids: dict[str, dict[str, str]]
+    main_ids: dict[str, str], foil_ids: dict[str, dict[str, str]], swap_edition_ids: list[str] | None = None
 ) -> None:
-    """Write a validated batch of edition + Curio-Foil product IDs. JSON mode
+    """Write a validated batch of edition + Curio-Foil product IDs, plus any
+    edition IDs newly flagged for the foil-kind-swap override. JSON mode
     rewrites ID_TCGPLAYER.json once; DB mode goes through the per-edition
     api_tcgplayer setters (which upsert editions.tcg_* / foil_tcg_overrides,
     bust db_cache, and no-op on an edition/foil the catalog doesn't have)."""
-    if not main_ids and not foil_ids:
+    swap_edition_ids = swap_edition_ids or []
+
+    if not main_ids and not foil_ids and not swap_edition_ids:
         return
 
     if is_db_mode():
@@ -1383,6 +1391,8 @@ def _persist_edition_product_ids(
         for edition_id, foils in foil_ids.items():
             for foil_id, value in foils.items():
                 set_foil_product_id(edition_id, foil_id, value)
+        for edition_id in swap_edition_ids:
+            set_foil_kind_swapped(edition_id, True)
         return
 
     ids_file = new_json(JSON_IDS)
@@ -1394,6 +1404,8 @@ def _persist_edition_product_ids(
     for edition_id, foils in foil_ids.items():
         for foil_id, value in foils.items():
             ids_data.setdefault(edition_id, {}).setdefault("foils", {}).setdefault(foil_id, {})["product_id"] = value
+    for edition_id in swap_edition_ids:
+        ids_data.setdefault(edition_id, {})["foil_kind_swapped"] = True
 
     with ids_file.open("w", encoding="utf-8") as f:
         json.dump(ids_data, f, indent=4)
@@ -1405,10 +1417,13 @@ async def api_admin_export_edition_product_ids(request: Request):
 
     product_ids: dict[str, str] = {}
     foil_product_ids: dict[str, dict[str, str]] = {}
+    foil_kind_swapped: list[str] = []
 
     for edition_id, entry in get_all_ids().items():
         if entry.get("product_id"):
             product_ids[edition_id] = entry["product_id"]
+        if entry.get("foil_kind_swapped"):
+            foil_kind_swapped.append(edition_id)
         for foil_id, foil_entry in (entry.get("foils") or {}).items():
             if foil_entry.get("product_id"):
                 foil_product_ids.setdefault(edition_id, {})[foil_id] = foil_entry["product_id"]
@@ -1419,6 +1434,10 @@ async def api_admin_export_edition_product_ids(request: Request):
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "product_ids": dict(sorted(product_ids.items())),
         "foil_product_ids": {eid: foil_product_ids[eid] for eid in sorted(foil_product_ids)},
+        # Sparse — only the handful of editions actually flagged (see
+        # api_tcgplayer.get_foil_kind_swapped), not every edition with a
+        # value of false.
+        "foil_kind_swapped": sorted(foil_kind_swapped),
     }
 
     return Response(
@@ -1442,17 +1461,21 @@ async def api_admin_import_edition_product_ids(request: Request):
 
     product_ids = body.get("product_ids") or {}
     foil_product_ids = body.get("foil_product_ids") or {}
+    foil_kind_swapped = body.get("foil_kind_swapped") or []
     if not isinstance(product_ids, dict) or not isinstance(foil_product_ids, dict):
         raise HTTPException(
             status_code=400,
             detail='"product_ids" and "foil_product_ids" must be objects keyed by edition_id.',
         )
+    if not isinstance(foil_kind_swapped, list):
+        raise HTTPException(status_code=400, detail='"foil_kind_swapped" must be a list of edition IDs.')
 
     existing = get_all_ids()
     known_editions = set(load_editions_data())
 
     imported_main: dict[str, str] = {}
     imported_foil: dict[str, dict[str, str]] = {}
+    imported_swap: list[str] = []
     skipped_existing = 0
     skipped_unknown_edition = 0
     invalid: list[str] = []
@@ -1483,13 +1506,24 @@ async def api_admin_import_edition_product_ids(request: Request):
             else:
                 imported_foil.setdefault(edition_id, {})[foil_id] = value
 
-    _persist_edition_product_ids(imported_main, imported_foil)
+    for edition_id in foil_kind_swapped:
+        if not isinstance(edition_id, str):
+            invalid.append(str(edition_id))
+        elif edition_id not in known_editions:
+            skipped_unknown_edition += 1
+        elif existing.get(edition_id, {}).get("foil_kind_swapped"):
+            skipped_existing += 1
+        else:
+            imported_swap.append(edition_id)
+
+    _persist_edition_product_ids(imported_main, imported_foil, imported_swap)
 
     imported_foil_count = sum(len(v) for v in imported_foil.values())
     return JSONResponse({
         "imported_main": len(imported_main),
         "imported_foil": imported_foil_count,
-        "imported_count": len(imported_main) + imported_foil_count,
+        "imported_swap": len(imported_swap),
+        "imported_count": len(imported_main) + imported_foil_count + len(imported_swap),
         "skipped_existing": skipped_existing,
         "skipped_unknown_edition": skipped_unknown_edition,
         "invalid": invalid[:50],

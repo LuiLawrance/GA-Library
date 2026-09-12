@@ -1226,7 +1226,8 @@ function _adminSystemIoExportCount(store, doc) {
         const main = Object.keys(doc.product_ids || {}).length;
         const foil = Object.values(doc.foil_product_ids || {})
             .reduce((n, o) => n + Object.keys(o || {}).length, 0);
-        return main + foil;
+        const swapped = (doc.foil_kind_swapped || []).length;
+        return main + foil + swapped;
     }
     if (store === 'users') {
         return Object.keys(doc.users || {}).length;
@@ -1252,7 +1253,7 @@ function _adminSystemIoImportSummary(store, data) {
     if (store === 'edition-product-ids') {
         const lines = [
             `Imported ${data.imported_count} new ${label} ` +
-            `(${data.imported_main} edition, ${data.imported_foil} Curio Foil).`,
+            `(${data.imported_main} edition, ${data.imported_foil} Curio Foil, ${data.imported_swap} label-swap).`,
         ];
         if (data.skipped_existing) lines.push(`Skipped ${data.skipped_existing} already set.`);
         if (data.skipped_unknown_edition) {
