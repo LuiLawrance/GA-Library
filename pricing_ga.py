@@ -113,6 +113,30 @@ def _edition_foil_kind_map(edition_id: str) -> tuple[str, dict[str, str]]:
     return card_id, {foil_info["kind"]: foil_id for foil_id, foil_info in foils.items()}
 
 
+_SWAPPED_FOIL_KIND = {"FOIL": "NONFOIL", "NONFOIL": "FOIL"}
+
+
+def _swap_foil_kind(kind: str | None) -> str | None:
+    """Flips FOIL<->NONFOIL for an edition flagged via
+    api_tcgplayer.get_foil_kind_swapped — TCGPlayer's own page sometimes
+    labels a card's rows the opposite of what its real foil data expects
+    (see that function's docstring). Anything else (an unclassified
+    condition) passes through unchanged."""
+    return _SWAPPED_FOIL_KIND.get(kind, kind)
+
+
+def _swap_condition_label(condition: str, swapped_kind: str) -> str:
+    """Relabels a scraped row's own condition text (e.g. "Near Mint") to
+    match its swapped kind, so stored/displayed data reads consistently with
+    the corrected classification instead of showing e.g. a foil-bucketed row
+    still labeled "Near Mint" with no "Foil" suffix."""
+    if swapped_kind == "FOIL":
+        return condition if condition.endswith(" Foil") else f"{condition} Foil"
+    if swapped_kind == "NONFOIL":
+        return condition.removesuffix(" Foil")
+    return condition
+
+
 def _existing_price_dates(json_path: str, card_id: str, edition_id: str, foil_id: str) -> set[str]:
     """ISO date strings already stored for one foil — the scrape's
     settled-date dedup set."""
@@ -924,6 +948,10 @@ def _select_foil(card_name: str) -> tuple[str, str] | None:
 def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = False,
                          foil_id_override: str | None = None) -> tuple[int, int]:
     card_id, foil_ids_by_kind = _edition_foil_kind_map(edition_id)
+    # foil_id_override (a foil-specific product page, e.g. a Curio Foil's own
+    # separate TCGPlayer listing) already has a fixed foil_id regardless of
+    # kind — the swap only matters for the shared kind-based lookup below.
+    swapped = foil_id_override is None and api_tcgplayer.get_foil_kind_swapped(edition_id)
 
     to_store: list[tuple[str, dict]] = []
     skipped_unrecognized = 0
@@ -934,7 +962,14 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
         # that page belongs to that one foil, so the kind-based lookup below
         # (meant for the edition's shared nonfoil+foil product page) doesn't
         # apply.
-        foil_id = foil_id_override or (foil_ids_by_kind.get(listing["foil_kind"]) if listing["foil_kind"] else None)
+        kind = listing["foil_kind"]
+        condition = listing["condition"]
+
+        if swapped and kind:
+            kind = _swap_foil_kind(kind)
+            condition = _swap_condition_label(condition, kind)
+
+        foil_id = foil_id_override or (foil_ids_by_kind.get(kind) if kind else None)
 
         if not foil_id:
             skipped_unrecognized += 1
@@ -945,7 +980,7 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
             "marketplace": "TCGPlayer",
             "price": listing["price"],
             "quantity": listing["quantity"],
-            "condition": listing["condition"],
+            "condition": condition,
         }))
 
     _persist_scraped_entries(JSON_LISTINGS, card_id, edition_id, to_store)
@@ -966,6 +1001,8 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
 def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
                       foil_id_override: str | None = None) -> tuple[int, int, int, int]:
     card_id, foil_ids_by_kind = _edition_foil_kind_map(edition_id)
+    # See the matching comment in _store_listings_tcg.
+    swapped = foil_id_override is None and api_tcgplayer.get_foil_kind_swapped(edition_id)
 
     today = date.today().isoformat()
     stored = 0
@@ -982,7 +1019,14 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
     for sale in sales:
         # See the matching comment in _store_listings_tcg — a foil_id_override
         # means every row belongs to that one foil-specific product page.
-        foil_id = foil_id_override or (foil_ids_by_kind.get(sale["foil_kind"]) if sale["foil_kind"] else None)
+        kind = sale["foil_kind"]
+        condition = sale["condition"]
+
+        if swapped and kind:
+            kind = _swap_foil_kind(kind)
+            condition = _swap_condition_label(condition, kind)
+
+        foil_id = foil_id_override or (foil_ids_by_kind.get(kind) if kind else None)
 
         if not foil_id:
             skipped_unrecognized += 1
@@ -1008,7 +1052,7 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
             "marketplace": "TCGPlayer",
             "price": sale["price"],
             "quantity": sale["quantity"],
-            "condition": sale["condition"],
+            "condition": condition,
         }))
         stored += 1
 

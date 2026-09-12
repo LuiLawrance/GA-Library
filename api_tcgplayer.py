@@ -63,7 +63,7 @@ def _build_url(product_id: str, page: int = 1) -> str:
 # getters below stay current between scripts/migrate_json_to_pg.py runs. In JSON
 # mode everything reads and writes ID_TCGPLAYER.json as before.
 
-def _get_ids_field(edition_id: str, field: str) -> str | None:
+def _get_ids_field(edition_id: str, field: str) -> str | bool | None:
     if is_db_mode():
         with get_session() as session:
             edition = session.get(Edition, edition_id)
@@ -73,6 +73,9 @@ def _get_ids_field(edition_id: str, field: str) -> str | None:
 
             if field == "product_id":
                 return NO_LISTINGS_SENTINEL if edition.tcg_is_no_listings else edition.tcg_product_id
+
+            if field == "foil_kind_swapped":
+                return edition.tcg_foil_kind_swapped
 
             return None
 
@@ -130,6 +133,7 @@ def get_all_ids() -> dict:
             editions = session.execute(
                 select(Edition).where(or_(
                     Edition.tcg_product_id.isnot(None), Edition.tcg_is_no_listings,
+                    Edition.tcg_foil_kind_swapped,
                 ))
             ).scalars().all()
             overrides = session.execute(select(FoilTcgOverride)).scalars().all()
@@ -140,6 +144,7 @@ def get_all_ids() -> dict:
         for edition in editions:
             result[edition.edition_id] = {
                 "product_id": NO_LISTINGS_SENTINEL if edition.tcg_is_no_listings else edition.tcg_product_id,
+                "foil_kind_swapped": edition.tcg_foil_kind_swapped,
             }
 
         for override in overrides:
@@ -163,7 +168,7 @@ def get_all_ids() -> dict:
         return _normalize_ids_clocks(json.load(f))
 
 
-def _set_ids_field(edition_id: str, field: str, value: str | None, debug: bool = False) -> None:
+def _set_ids_field(edition_id: str, field: str, value: str | bool | None, debug: bool = False) -> None:
     if is_db_mode():
         with get_session() as session:
             edition = session.get(Edition, edition_id)
@@ -179,6 +184,9 @@ def _set_ids_field(edition_id: str, field: str, value: str | None, debug: bool =
             if field == "product_id":
                 edition.tcg_is_no_listings = value == NO_LISTINGS_SENTINEL
                 edition.tcg_product_id = None if value in (None, NO_LISTINGS_SENTINEL) else value
+
+            if field == "foil_kind_swapped":
+                edition.tcg_foil_kind_swapped = bool(value)
 
         db_cache.bust()
 
@@ -369,6 +377,23 @@ def clear_product_id(edition_id: str, debug: bool = False) -> None:
     clear_last_listings leave product_id untouched — they're independent
     clocks, not tied to each other."""
     _set_ids_field(edition_id, "product_id", None, debug)
+
+
+# Rare admin override: some editions' TCGPlayer product page labels its rows'
+# conditions the opposite of what our own foil data expects — e.g. a
+# foil-only print TCGPlayer nonetheless sells as a single unlabeled ("Near
+# Mint", no " Foil" suffix) product, because TCGPlayer itself only has the
+# one listing/sales page for it. There's no way to detect this from the page
+# itself (nothing distinguishes it from an ordinary nonfoil-only card), so an
+# admin flags it here after noticing the mismatch. Flips FOIL<->NONFOIL
+# classification when storing scraped rows — see pricing_ga._store_sales_tcg /
+# _store_listings_tcg — not the scrape itself.
+def get_foil_kind_swapped(edition_id: str) -> bool:
+    return bool(_get_ids_field(edition_id, "foil_kind_swapped"))
+
+
+def set_foil_kind_swapped(edition_id: str, swapped: bool, debug: bool = False) -> None:
+    _set_ids_field(edition_id, "foil_kind_swapped", swapped, debug)
 
 
 # ── Foil-scoped overrides ──

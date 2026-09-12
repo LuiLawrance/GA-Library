@@ -160,6 +160,16 @@ class Edition(Base):
     # per-marketplace, not TCGPlayer-only.
     tcg_product_id: Mapped[str | None] = mapped_column(Text)
     tcg_is_no_listings: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True when this edition's TCGPlayer product page labels its rows'
+    # conditions the opposite of what its actual foil data expects — e.g. a
+    # foil-only print TCGPlayer nonetheless sells as a single unlabeled ("Near
+    # Mint", no " Foil" suffix) product. Admin-set per edition (see
+    # api_tcgplayer.get_foil_kind_swapped) — there's no way to autodetect it,
+    # since TCGPlayer gives no separate signal beyond the label itself.
+    # Flips FOIL<->NONFOIL classification when storing scraped rows (see
+    # pricing_ga._store_sales_tcg / _store_listings_tcg) rather than affecting
+    # the scrape itself.
+    tcg_foil_kind_swapped: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Foil(Base):

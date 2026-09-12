@@ -3608,6 +3608,52 @@ async function saveAdminProductId(input) {
     }
 }
 
+// Rare per-edition override, shown next to the (non-curio) Product ID field
+// in the detail panel only — not on every row in the list, since a
+// TCGPlayer mislabel like this is the exception, not something admins need
+// to scan for card by card. TCGPlayer occasionally sells a card's ONLY
+// printing without the usual " Foil" suffix (or, in principle, the reverse)
+// even when our own foil data says otherwise — e.g. a foil-only card listed
+// as plain "Near Mint" because TCGPlayer itself has no separate foil/nonfoil
+// split for that product. Toggling this flips how the next scrape
+// classifies that product's rows (see pricing_ga._store_sales_tcg /
+// _store_listings_tcg) — it doesn't retroactively fix rows already stored.
+function adminPidFoilSwapToggleHtml(record) {
+    const swapped = !!record.foil_kind_swapped;
+    const title = swapped
+        ? 'TCGPlayer’s Foil/Nonfoil labels are being swapped for this card when scraping — click to turn off'
+        : 'Click if TCGPlayer mislabels this card’s printing (e.g. a foil-only card sold as plain "Near Mint") — swaps how the next scrape classifies its rows';
+
+    return `
+        <button type="button" class="admin-pid-swap-toggle ${swapped ? 'active' : ''}"
+                title="${escapeHtml(title)}"
+                onclick="toggleAdminPidFoilSwap('${escapeHtml(record.edition_id)}', this)">🔀</button>
+    `;
+}
+
+async function toggleAdminPidFoilSwap(editionId, btn) {
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record) return;
+
+    const next = !record.foil_kind_swapped;
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch('/api/admin/pricing/foil-kind-swap', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({edition_id: editionId, swapped: next}),
+        });
+
+        if (!res.ok) return;
+
+        record.foil_kind_swapped = next;
+        if (adminPidDetailSelected === editionId) renderAdminPricingImageCol();
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 // Resets one clock — the SELECTED marketplace's Last Sales/Last Listings —
 // back to never-scraped. Mainly for forcing past the 7-day listings-refresh
 // gate (TCGPlayer only) or correcting a badge. Clears whichever clock the
@@ -4058,6 +4104,7 @@ function renderAdminPricingImageCol() {
             <div class="admin-pid-detail-pid-row${adminPidMarketplaceConfig().automated ? '' : ' admin-pid-detail-pid-row-collapsed'}">
                 <label class="admin-pid-detail-label label label--muted">${(curioView || record.curio_only) ? 'Curio Foil' : 'Product ID'}</label>
                 ${adminPidProductIdFieldHtml(record)}
+                ${curioView ? '' : adminPidFoilSwapToggleHtml(record)}
             </div>
         `;
     }

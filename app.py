@@ -6,7 +6,7 @@ from api_ga import _api_search, _build_collector_map, _download_card_image, _dow
     sync_featured_sets, UPDATE_THRESHOLD
 from api_tcgplayer import clear_foil_last_scraped, clear_last_scraped, JSON_IDS, MARKETPLACES, \
     NO_LISTINGS_SENTINEL, get_all_ids, get_foil_last_scraped_map, get_foil_overrides, get_last_scraped_map, \
-    set_foil_product_id, set_product_id
+    set_foil_kind_swapped, set_foil_product_id, set_product_id
 from datetime import date, datetime, timedelta, timezone
 from db.connection_url import compose as compose_database_url, parse as parse_database_url
 from db.models import (
@@ -2384,6 +2384,10 @@ async def api_admin_pricing_product_ids(request: Request):
             "set_name": edition_info.get("set_name"),
             "collector_number": collector_map.get(edition_id),
             "product_id": edition_ids.get("product_id"),
+            # Admin override for editions whose TCGPlayer product page labels
+            # rows' conditions the opposite of what our foil data expects —
+            # see api_tcgplayer.get_foil_kind_swapped's docstring.
+            "foil_kind_swapped": bool(edition_ids.get("foil_kind_swapped")),
             "clocks": _scrape_clocks(edition_ids),
             # The edition's own release/last-synced dates (from the Grand
             # Archive API, cached in JSON_INFO — see the sync logic in
@@ -2574,6 +2578,34 @@ async def api_admin_set_product_id(request: Request):
         set_product_id(edition_id, product_id)
 
     return JSONResponse({"edition_id": edition_id, "foil_id": foil_id, "product_id": product_id})
+
+
+# Rare per-edition override for a TCGPlayer product page that labels its
+# rows' conditions the opposite of what our own foil data expects — e.g. a
+# foil-only print TCGPlayer nonetheless sells as a single unlabeled ("Near
+# Mint", no " Foil" suffix) product. See api_tcgplayer.get_foil_kind_swapped's
+# docstring and its use in pricing_ga._store_sales_tcg / _store_listings_tcg;
+# only takes effect on the NEXT scrape, doesn't retroactively fix rows
+# already stored under the wrong foil.
+@app.post("/api/admin/pricing/foil-kind-swap")
+async def api_admin_set_foil_kind_swap(request: Request):
+    require_cards_admin(request)
+
+    body = await request.json()
+    edition_id = body.get("edition_id", "").strip()
+    swapped = bool(body.get("swapped"))
+
+    if not edition_id:
+        raise HTTPException(status_code=400, detail="edition_id is required")
+
+    editions_data = load_editions_data()
+
+    if edition_id not in editions_data:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    set_foil_kind_swapped(edition_id, swapped)
+
+    return JSONResponse({"edition_id": edition_id, "foil_kind_swapped": swapped})
 
 
 @app.post("/api/admin/pricing/clear-last-updated")
