@@ -286,19 +286,21 @@
     color: var(--text-muted);
 }
 
-/* Sits in .inv-detail-controls (inventory.css) immediately left of the "+"
-   add-card button — toggling it flips the deck's edition_locked flag
-   (app.py), which decides whether adding a card asks for a specific
-   printing (Locked) or gets a random one collapsed into one tile
-   (Unlocked). Compact sizing to match the 32px icon-button row it sits in
-   — see the shared .pill-toggle comment (components.css) for the base look. */
+/* "Card Editions" field in the Deck Settings modal — toggling it flips the
+   deck's edition_locked flag (app.py), which decides whether adding a card
+   asks for a specific printing (Locked) or gets a random one collapsed into
+   one tile (Unlocked). Same full-width segmented-control sizing as the
+   Visibility pill just below it (.dga-public-toggle) — see the shared
+   .pill-toggle comment (components.css) for the base look. */
 .dga-edition-lock-toggle .pill-toggle-btn {
-    font-size: 0.72rem;
-    padding: 5px 10px;
+    flex: 1;
+    text-align: center;
+    font-size: 0.78rem;
+    padding: 5px 14px;
 }
 
 /* Deck Builder toggle — shares .inv-settings-btn (inventory.css) with the ⚙
-   button, sitting immediately left of the edition pill. .active is the
+   button, sitting immediately left of the "+" add-card button. .active is the
    panel-open state (kept in sync by _dgaSyncBuilderToggleBtn), lit with the
    accent so it reads as a pressed toggle rather than a one-shot action. */
 .dga-builder-toggle-btn.active {

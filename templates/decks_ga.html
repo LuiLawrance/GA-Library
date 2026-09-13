@@ -195,21 +195,46 @@
                     </div>
                     <div class="inv-detail-controls">
                         <!-- Deck Builder toggle — same icon-button treatment as the ⚙ settings
-                             button, sitting just left of the Unlocked/Locked pill. Opens/closes
+                             button, sitting just left of the "+" add-card button. Opens/closes
                              the left-side Deck Builder panel (also reachable by right-click in
                              the detail view). Its pressed state is kept in sync with the panel
                              by _dgaSyncBuilderToggleBtn in decks_ga.js. -->
                         <button class="inv-settings-btn btn btn--icon dga-builder-toggle-btn" id="dga-builder-toggle-btn"
                                 onclick="toggleDeckBuilder()" title="Deck Builder" aria-pressed="false">🔧</button>
-                        <div class="pill-toggle dga-edition-lock-toggle" id="dga-edition-locked-toggle"
-                             title="Locked: pick a specific printing when adding cards, and list every printing separately. Unlocked: printings are assigned randomly and collapsed into one card.">
-                            <span class="pill-indicator"></span>
-                            <button type="button" class="pill-toggle-btn active" data-value="false"
-                                    onclick="setDgaEditionLocked(false)">Unlocked</button>
-                            <button type="button" class="pill-toggle-btn" data-value="true"
-                                    onclick="setDgaEditionLocked(true)">Locked</button>
-                        </div>
                         <button class="inv-detail-add-btn btn btn--ghost" onclick="openDeckAddModal()" title="Add card">+</button>
+                        <input type="text" id="dga-card-filter" class="inv-detail-search"
+                               placeholder="Search cards..." autocomplete="off"
+                               oninput="filterDeckCards(this.value)">
+                        <div class="inv-filter-dropdown-wrap">
+                            <button class="inv-filter-dropdown-btn btn btn--ghost btn--mono" id="dga-filter-btn"
+                                    onclick="toggleDeckFilterDropdown()">
+                                <span id="dga-filter-label">Filter &amp; Sort</span>
+                                <span class="inv-filter-arrow dropdown-arrow">&#8249;</span>
+                            </button>
+                            <div id="dga-filter-menu" class="inv-filter-menu menu hidden">
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label label label--muted label--sm">Sort</div>
+                                    <div id="dga-filter-sort-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label label label--muted label--sm">Set</div>
+                                    <div id="dga-filter-set-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label label label--muted label--sm">Element</div>
+                                    <div id="dga-filter-element-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label label label--muted label--sm">Rarity</div>
+                                    <div id="dga-filter-rarity-options" class="inv-filter-options"></div>
+                                </div>
+                                <div class="inv-filter-section">
+                                    <div class="inv-filter-section-label label label--muted label--sm">Foil</div>
+                                    <div id="dga-filter-foil-options" class="inv-filter-options"></div>
+                                </div>
+                                <button class="inv-filter-clear-btn btn btn--subtle btn--mono" onclick="clearDeckFilters()">Clear all</button>
+                            </div>
+                        </div>
                         <button class="inv-settings-btn btn btn--icon" id="dga-share-btn" onclick="openDeckShareDialog()" title="Share deck" style="display:none">🔗</button>
                         <button class="inv-settings-btn btn btn--icon" onclick="openDeckSettingsModal()" title="Deck settings">⚙
                         </button>
@@ -310,6 +335,17 @@
                 <div class="inv-field-group">
                     <label class="inv-field-label label label--muted">Description</label>
                     <input class="inv-text-input" id="dga-settings-desc" maxlength="100" placeholder="..." type="text">
+                </div>
+                <div class="inv-field-group">
+                    <label class="inv-field-label label label--muted">Card Editions</label>
+                    <div class="pill-toggle dga-edition-lock-toggle" id="dga-edition-locked-toggle"
+                         title="Locked: pick a specific printing when adding cards, and list every printing separately. Unlocked: printings are assigned randomly and collapsed into one card.">
+                        <span class="pill-indicator"></span>
+                        <button type="button" class="pill-toggle-btn active" data-value="false"
+                                onclick="setDgaEditionLocked(false)">Unlocked</button>
+                        <button type="button" class="pill-toggle-btn" data-value="true"
+                                onclick="setDgaEditionLocked(true)">Locked</button>
+                    </div>
                 </div>
                 <div class="inv-field-group dga-public-field">
                     <label class="inv-field-label label label--muted">Visibility</label>

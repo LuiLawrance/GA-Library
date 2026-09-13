@@ -3,6 +3,15 @@ let gaDecks = {};
 let activeDeck = null;
 let activeDeckData = null;
 
+// Card search/filter data — /api/inv/info and /api/inv/collector are generic
+// full-catalog endpoints (not bin- or deck-scoped), fetched once and cached;
+// mirrors Inventory's enrichAndRenderBinCards (inventory.js), but a deck row
+// only carries edition_id/foil_id when it's pinned (Edition Locked), so
+// dgaCardDescriptor falls back to edition_map's representative printing.
+let dgaInfoData = null;
+let dgaCollectorData = null;
+let dgaInfoLoadPromise = null;
+
 // Collaborative access — mirrors inventory.js. dgaShared: decks shared with me;
 // when one is open dgaActiveOwner is its owner's Omnidex ID, dgaActiveRole my
 // role, dgaSharedEntry the index-entry stub (has pub_id). For my own decks:
@@ -1090,6 +1099,13 @@ document.addEventListener('click', e => {
     selectDgaFormat(scope, opt.dataset.value, opt.textContent);
 }, true);
 
+// Guarded to the decks page only, same pattern as inventory.js's equivalent
+// listener for #inv-add-modal.
+document.addEventListener('click', e => {
+    if (!document.getElementById('dga-add-modal')) return;
+    if (!e.target.closest('.inv-filter-dropdown-wrap')) closeDeckFilterDropdown();
+}, true);
+
 // ═══════════════════════════════════════
 // LOAD & RENDER DECK LIST
 // ═══════════════════════════════════════
@@ -1465,6 +1481,10 @@ async function _openDeckDetail(deckName, entry, pushUrl, url, fetchUrl) {
 
     document.getElementById('dga-list-view').classList.add('hidden');
     document.getElementById('dga-detail-view').classList.remove('hidden');
+    resetDeckFilterUI();
+    dgaEnsureInfoLoaded().then(() => {
+        if (activeDeck === deckName && activeDeckData) renderDeckSections(activeDeckData, false);
+    });
 
     document.getElementById('dga-detail-format').textContent = entry.format ? `[${entry.format}]` : '';
     dgaRenderDetailName(deckName);
@@ -1584,6 +1604,216 @@ function closeDeckDetail() {
 // ═══════════════════════════════════════
 
 const rarityMapDga = {1: 'C', 2: 'U', 3: 'R', 4: 'SR', 5: 'UR', 6: 'PR', 7: 'CSR', 8: 'CUR', 9: 'CPR'};
+
+// ── Card search/filter (mirrors Inventory's binFilters — inventory.js) ──
+// sort '' means "manual" — the deck's own card order (drag-reordering only
+// works against that true order, so an explicit sort/search/filter disables
+// dragging on tiles; see dgaOrderingIsManual).
+const dgaFilters = {sort: '', set: '', element: '', rarity: '', foil: ''};
+
+function dgaEnsureInfoLoaded() {
+    if (dgaInfoData && dgaCollectorData) return Promise.resolve();
+    if (dgaInfoLoadPromise) return dgaInfoLoadPromise;
+    dgaInfoLoadPromise = Promise.all([
+        fetch('/api/inv/info').then(r => r.ok ? r.json() : {}),
+        fetch('/api/inv/collector').then(r => r.ok ? r.json() : {}),
+    ]).then(([info, collector]) => {
+        dgaInfoData = info;
+        dgaCollectorData = collector;
+    }).catch(() => {
+        dgaInfoData = {};
+        dgaCollectorData = {};
+    });
+    return dgaInfoLoadPromise;
+}
+
+// Descriptor (set/rarity/element/foil/collector) for one card row. Locked
+// rows carry their own edition_id/foil_id; Unlocked rows have neither, so the
+// deck's picked representative printing (edition_map) stands in — same
+// printing already used for that card's tile thumbnail.
+function dgaCardDescriptor(cardId, rowEditionId, editionMap, rowFoilId) {
+    const info = dgaInfoData || {};
+    const cardInfo = info[cardId] || {};
+    const editionId = rowEditionId || editionMap[cardId] || null;
+    const einfo = (cardInfo.editions || {})[editionId] || {};
+    let foilKindRaw = '';
+    if (rowFoilId) {
+        const foilsData = einfo.foils || {};
+        if (foilsData[rowFoilId]) foilKindRaw = (foilsData[rowFoilId].kind || '').toLowerCase();
+    }
+    return {
+        setPrefix: einfo.set_prefix || '',
+        rarity: einfo.rarity,
+        element: cardInfo.element || '',
+        foilKindRaw,
+        collectorNumber: (dgaCollectorData || {})[editionId] || '',
+    };
+}
+
+// Flattens every section's cards into one list of searchable/sortable
+// entries — one per row (Edition Locked) or per card_id group (Unlocked),
+// same shape either way. Used both to populate the filter menu's chip
+// options and, in renderDeckSections, to decide what actually renders.
+function dgaFlattenEntries(deckData) {
+    const sections = deckData.sections || {};
+    const nameMap = deckData.name_map || {};
+    const editionMap = deckData.edition_map || {};
+    const editionLocked = !!deckData.edition_locked;
+    const out = [];
+    for (const [sectionName, cards] of Object.entries(sections)) {
+        if (editionLocked) {
+            cards.forEach(row => {
+                out.push({
+                    cardId: row.card_id,
+                    cardName: nameMap[row.card_id] || row.card_id,
+                    rowEditionId: row.edition_id || null,
+                    rowFoilId: row.foil_id || null,
+                    displayEditionId: row.edition_id || editionMap[row.card_id] || null,
+                    quantity: row.quantity,
+                    section: sectionName,
+                    ...dgaCardDescriptor(row.card_id, row.edition_id || null, editionMap, row.foil_id || null),
+                });
+            });
+        } else {
+            _dgaGroupCardsByCardId(cards).forEach(rows => {
+                const cardId = rows[0].card_id;
+                out.push({
+                    cardId,
+                    cardName: nameMap[cardId] || cardId,
+                    rowEditionId: null,
+                    rowFoilId: null,
+                    displayEditionId: editionMap[cardId] || null,
+                    quantity: rows.reduce((s, r) => s + r.quantity, 0),
+                    section: sectionName,
+                    ...dgaCardDescriptor(cardId, null, editionMap, null),
+                });
+            });
+        }
+    }
+    return out;
+}
+
+// True only when no search/filter/sort would reorder or hide anything —
+// i.e. the rendered tiles are in the deck's real, draggable order.
+function dgaOrderingIsManual() {
+    const searchVal = document.getElementById('dga-card-filter')?.value || '';
+    return !searchVal && !dgaFilters.set && !dgaFilters.element && !dgaFilters.rarity && !dgaFilters.foil
+        && !dgaFilters.sort;
+}
+
+function toggleDeckFilterDropdown() {
+    const menu = document.getElementById('dga-filter-menu');
+    const btn = document.getElementById('dga-filter-btn');
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) {
+        menu.classList.add('hidden');
+        btn.classList.remove('open');
+    } else {
+        populateDeckFilterMenus();
+        menu.classList.remove('hidden');
+        btn.classList.add('open');
+    }
+}
+
+function closeDeckFilterDropdown() {
+    const menu = document.getElementById('dga-filter-menu');
+    const btn = document.getElementById('dga-filter-btn');
+    if (menu) menu.classList.add('hidden');
+    if (btn) btn.classList.remove('open');
+}
+
+function populateDeckFilterMenus() {
+    const entries = activeDeckData ? dgaFlattenEntries(activeDeckData) : [];
+    const sets = [...new Set(entries.map(e => e.setPrefix).filter(Boolean))].sort();
+    const elements = [...new Set(entries.map(e => e.element).filter(Boolean))].sort();
+    const rarityNums = [...new Set(entries.map(e => e.rarity).filter(r => r != null))].sort((a, b) => a - b);
+    const rarities = rarityNums.map(r => rarityMapDga[r] || String(r));
+    const foils = [...new Set(entries.map(e => e.foilKindRaw).filter(Boolean))].sort();
+    const sortOptions = ['manual', 'name', 'set', 'rarity', 'quantity', 'collector'];
+
+    renderDeckFilterChips('dga-filter-sort-options', sortOptions, 'sort');
+    renderDeckFilterChips('dga-filter-set-options', sets, 'set');
+    renderDeckFilterChips('dga-filter-element-options', elements, 'element');
+    renderDeckFilterChips('dga-filter-rarity-options', rarities, 'rarity');
+    renderDeckFilterChips('dga-filter-foil-options', foils, 'foil');
+}
+
+function renderDeckFilterChips(containerId, values, filterKey) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    if (!values.length) {
+        container.innerHTML = '<span style="font-size:0.7rem;color:var(--text-muted);opacity:0.5;">None</span>';
+        return;
+    }
+    values.forEach(val => {
+        const chip = document.createElement('button');
+        const selected = filterKey === 'sort' ? (dgaFilters.sort || 'manual') === val : dgaFilters[filterKey] === val;
+        chip.className = 'inv-filter-chip' + (selected ? ' selected' : '');
+        chip.textContent = val;
+        chip.onclick = (e) => {
+            e.stopPropagation();
+            toggleDeckFilterChip(filterKey, val, chip);
+        };
+        container.appendChild(chip);
+    });
+}
+
+function toggleDeckFilterChip(filterKey, val, chip) {
+    if (filterKey === 'sort') {
+        // Sort always has a value — just switch ('manual' clears it)
+        chip.parentElement.querySelectorAll('.inv-filter-chip').forEach(c => c.classList.remove('selected'));
+        dgaFilters.sort = val === 'manual' ? '' : val;
+        chip.classList.add('selected');
+    } else if (dgaFilters[filterKey] === val) {
+        dgaFilters[filterKey] = '';
+        chip.classList.remove('selected');
+    } else {
+        chip.parentElement.querySelectorAll('.inv-filter-chip').forEach(c => c.classList.remove('selected'));
+        dgaFilters[filterKey] = val;
+        chip.classList.add('selected');
+    }
+    updateDeckFilterButtonState();
+    if (activeDeckData) renderDeckSections(activeDeckData, false);
+}
+
+function updateDeckFilterButtonState() {
+    const btn = document.getElementById('dga-filter-btn');
+    const label = document.getElementById('dga-filter-label');
+    if (!btn || !label) return;
+    const activeCount = Object.entries(dgaFilters).filter(([k, v]) => k !== 'sort' && v).length;
+    btn.classList.toggle('active', activeCount > 0);
+    label.textContent = activeCount > 0 ? `Filter (${activeCount})` : 'Filter';
+}
+
+function clearDeckFilters() {
+    dgaFilters.sort = '';
+    dgaFilters.set = '';
+    dgaFilters.element = '';
+    dgaFilters.rarity = '';
+    dgaFilters.foil = '';
+    updateDeckFilterButtonState();
+    populateDeckFilterMenus();
+    if (activeDeckData) renderDeckSections(activeDeckData, false);
+}
+
+function filterDeckCards(value) {
+    if (activeDeckData) renderDeckSections(activeDeckData, false);
+}
+
+// Called when opening a deck (fresh or switching from another) — clears the
+// search box and dropdown filters so a prior deck's filter state doesn't
+// carry over (sort persists, matching Inventory's clearBinFilters convention).
+function resetDeckFilterUI() {
+    const search = document.getElementById('dga-card-filter');
+    if (search) search.value = '';
+    dgaFilters.set = '';
+    dgaFilters.element = '';
+    dgaFilters.rarity = '';
+    dgaFilters.foil = '';
+    updateDeckFilterButtonState();
+    closeDeckFilterDropdown();
+}
 
 // ── Card drag & drop state ──
 
@@ -1789,12 +2019,56 @@ function renderDeckSections(deckData, animate = true) {
         empty.innerHTML = `<span class="inv-empty-icon">⬡</span><p>No sections yet.</p><p class="inv-empty-sub">Add a section to get started.</p>`;
         grid.appendChild(empty);
     } else {
-        for (const [sectionName, cards] of Object.entries(sections)) {
+        // ── Search + filter + sort (mirrors Inventory's renderBinCards —
+        // inventory.js): flatten every section's cards, filter/sort the
+        // whole list, then split back out per section below. ──
+        const searchVal = (document.getElementById('dga-card-filter')?.value || '').toLowerCase();
+        let entries = dgaFlattenEntries(deckData);
+
+        if (searchVal) entries = entries.filter(e => e.cardName.toLowerCase().includes(searchVal));
+        if (dgaFilters.set) entries = entries.filter(e => e.setPrefix === dgaFilters.set);
+        if (dgaFilters.element) entries = entries.filter(e => e.element === dgaFilters.element);
+        if (dgaFilters.rarity) entries = entries.filter(e => (rarityMapDga[e.rarity] || '') === dgaFilters.rarity);
+        if (dgaFilters.foil) entries = entries.filter(e => e.foilKindRaw === dgaFilters.foil);
+
+        if (dgaFilters.sort) {
+            entries.sort((a, b) => {
+                switch (dgaFilters.sort) {
+                    case 'name':
+                        return a.cardName.localeCompare(b.cardName);
+                    case 'set':
+                        return a.setPrefix.localeCompare(b.setPrefix);
+                    case 'rarity':
+                        return (b.rarity || 0) - (a.rarity || 0);
+                    case 'quantity':
+                        return b.quantity - a.quantity;
+                    case 'collector': {
+                        const parseCol = s => {
+                            const m = (s || '').match(/^(\d+)([A-Z]*)$/i);
+                            return m ? [parseInt(m[1]), m[2] || ''] : [Infinity, s || ''];
+                        };
+                        const [nA, sA] = parseCol(a.collectorNumber);
+                        const [nB, sB] = parseCol(b.collectorNumber);
+                        if (a.setPrefix !== b.setPrefix) return a.setPrefix.localeCompare(b.setPrefix);
+                        return nA !== nB ? nA - nB : sA.localeCompare(sB);
+                    }
+                    default:
+                        return 0;
+                }
+            });
+        }
+
+        const anyFilterActive = !!(searchVal || dgaFilters.set || dgaFilters.element || dgaFilters.rarity || dgaFilters.foil);
+
+        for (const sectionName of Object.keys(sections)) {
+            const sectionEntries = entries.filter(e => e.section === sectionName);
+            if (anyFilterActive && sectionEntries.length === 0) continue;
+
             const block = document.createElement('div');
             block.className = 'dga-section-block';
 
             // Header
-            const sectionQty = cards.reduce((s, row) => s + row.quantity, 0);
+            const sectionQty = sectionEntries.reduce((s, e) => s + e.quantity, 0);
             const header = document.createElement('div');
             header.className = 'dga-section-header';
             header.innerHTML = `
@@ -1836,36 +2110,15 @@ function renderDeckSections(deckData, animate = true) {
             // several, split across printings). Unlocked: one tile per
             // card_id, collapsing its rows together (summed quantity, a
             // random printing among them for the thumbnail, no foil badge).
-            let tileCount;
-            if (editionLocked) {
-                tileCount = cards.length;
-                cards.forEach((row, i) => {
-                    const cardName = nameMap[row.card_id] || row.card_id;
-                    const displayEditionId = row.edition_id || editionMap[row.card_id] || null;
-                    sectionGrid.appendChild(buildDeckCardTile(
-                        row.card_id, cardName, displayEditionId, row.quantity, sectionName, i, tileCount,
-                        row.edition_id || null, row.foil_id || null, editionsInfo, foilsInfo, cardPrices,
-                    ));
-                });
-            } else {
-                const groups = _dgaGroupCardsByCardId(cards);
-                tileCount = groups.length;
-                groups.forEach((rows, i) => {
-                    const cardId = rows[0].card_id;
-                    const cardName = nameMap[cardId] || cardId;
-                    const qty = rows.reduce((s, r) => s + r.quantity, 0);
-                    // Unlocked means editions don't matter for display either —
-                    // always a random printing from the card's full catalog
-                    // (edition_map, server-side _pick_edition), regardless of
-                    // which printing(s) got randomly assigned to the row(s)
-                    // themselves when they were added.
-                    const displayEditionId = editionMap[cardId] || null;
-                    sectionGrid.appendChild(buildDeckCardTile(
-                        cardId, cardName, displayEditionId, qty, sectionName, i, tileCount,
-                        null, null, editionsInfo, foilsInfo, cardPrices,
-                    ));
-                });
-            }
+            // sectionEntries is already one entry per tile either way (see
+            // dgaFlattenEntries), in search/filter/sort order.
+            const tileCount = sectionEntries.length;
+            sectionEntries.forEach((entry, i) => {
+                sectionGrid.appendChild(buildDeckCardTile(
+                    entry.cardId, entry.cardName, entry.displayEditionId, entry.quantity, sectionName, i, tileCount,
+                    entry.rowEditionId, entry.rowFoilId, editionsInfo, foilsInfo, cardPrices,
+                ));
+            });
 
             // Add tile inside this section's grid
             const addTile = document.createElement('div');
@@ -2130,7 +2383,11 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
     });
 
     // ── Drag & drop: reorder within / move across sections ──
-    tile.draggable = true;
+    // Disabled while a search/filter/sort is active — the rendered order
+    // isn't the deck's true section-array order then, so a drop's computed
+    // index (dgaCommitFromPlaceholder) wouldn't land where it visually looks
+    // like it should. See dgaOrderingIsManual.
+    tile.draggable = dgaOrderingIsManual();
     tile.dataset.cardId = card_id;
     tile.dataset.section = sectionName;
     tile.dataset.editionId = rowEditionId || '';
@@ -2145,7 +2402,7 @@ function buildDeckCardTile(card_id, cardName, editionId, qty, sectionName, index
             if (e.target.closest('button, input')) tile.draggable = false;
         });
         document.addEventListener('mouseup', () => {
-            tile.draggable = true;
+            tile.draggable = dgaOrderingIsManual();
         });
     }
 
@@ -2371,6 +2628,7 @@ function openDeckSettingsModal() {
     // After the modal is unhidden so the pill track has real layout for
     // positionPillIndicator to measure — offsetWidth is 0 while display:none.
     setDgaPublicValue(!!entry.public);
+    _setEditionLockedPillUI(!!(activeDeckData?.edition_locked ?? entry.edition_locked));
 }
 
 function setDgaPublicValue(value) {

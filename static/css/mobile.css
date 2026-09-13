@@ -269,24 +269,6 @@
         justify-content: flex-start;
     }
 
-    /* Unlocked/Locked edition toggle in the deck-detail headers. On desktop
-       it's a compact inline pill in an icon-button row; on mobile stretch it
-       to a full-width segmented control (its own row when it sits in the
-       wrapping .inv-detail-controls). Without this the pill track already
-       spans the header — align-items:stretch above — but the two buttons
-       stay bunched at the left, leaving a large dead zone on the right.
-       app.js re-runs positionPillIndicator when the strip expands / on
-       resize so the sliding highlight matches the new button widths. */
-    .dga-edition-lock-toggle {
-        display: flex;
-        width: 100%;
-        flex: 1 1 100%;
-    }
-
-    .dga-edition-lock-toggle .pill-toggle-btn {
-        flex: 1;
-    }
-
     /* Deck Builder is a desktop-only side-by-side panel (opened by right-click,
        which phones don't have) — there's no room to sit it beside the deck view
        here. Force it hidden and keep the page in its normal single column even
