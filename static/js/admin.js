@@ -154,10 +154,22 @@ function computeAdminPidDuplicateProductIds() {
 // the toggle off, only the regular product ID (the one actually in the DOM)
 // gets checked, so a unique regular ID never turns red just because a hidden,
 // untoggled Curio Foil ID happens to collide with something.
-function applyAdminPidDuplicateHighlights() {
-    const counts = computeAdminPidDuplicateProductIds();
+//
+// The product-ID tally is cached (adminPidDupCounts) so mounting rows as the
+// virtualized list scrolls (see adminPidUpdateWindow) can flag just the new
+// inputs without re-tallying every edition; anything that changes a product ID
+// calls this full version, which refreshes the cache.
+let adminPidDupCounts = null;
 
-    document.querySelectorAll('.admin-pid-input').forEach(input => {
+function applyAdminPidDuplicateHighlights() {
+    adminPidDupCounts = computeAdminPidDuplicateProductIds();
+    flagAdminPidDuplicates(document);
+}
+
+function flagAdminPidDuplicates(scope) {
+    const counts = adminPidDupCounts || (adminPidDupCounts = computeAdminPidDuplicateProductIds());
+
+    scope.querySelectorAll('.admin-pid-input').forEach(input => {
         const value = input.value.trim();
         const isDuplicate = adminPidIsScrapable(value) && (counts.get(value) || 0) > 1;
         input.classList.toggle('admin-pid-input-duplicate', isDuplicate);
@@ -319,15 +331,7 @@ async function switchAdminCardsView(view) {
         // scroll and landing the selected row just past the real (shorter)
         // viewport. transitionend catches the real finish; the timeout is
         // just a safety net (e.g. transitions disabled/reduced motion).
-        const scrollToSelectedRow = () => {
-            const scroll = section.querySelector('.admin-pid-table-scroll');
-            const selectedRow = adminPidDetailSelected
-                && table.querySelector(`.admin-pid-row[data-edition-id="${CSS.escape(adminPidDetailSelected)}"]`);
-            if (!scroll || !selectedRow) return;
-
-            const target = (selectedRow.offsetTop - scroll.offsetTop) - (scroll.clientHeight - selectedRow.offsetHeight) / 2;
-            scroll.scrollTop = Math.max(0, target);
-        };
+        const scrollToSelectedRow = () => adminPidScrollToEdition(adminPidDetailSelected);
 
         const controls = section.querySelector('.admin-pid-controls');
         if (controls) {
@@ -2898,9 +2902,64 @@ function renderAdminPidRows() {
     const infoMode = adminCardsView === 'info';
     reconcileAdminPidSelection();
     const filtered = adminPidFilteredEditions();
+    adminPidVisibleRows = filtered;
     updateAdminPidSummaryText();
 
-    const rows = filtered.map(e => infoMode ? `
+    const scroll = table.closest('.admin-pid-table-scroll');
+    // Read before the DOM below is swapped so a re-render (a filter, sort, or
+    // refresh poll) keeps the list where it was instead of jumping to the top.
+    const prevScrollTop = scroll ? scroll.scrollTop : 0;
+
+    table.classList.remove('admin-pid-virtual');
+    adminPidWin = {start: 0, end: 0};
+
+    if (filtered.length === 0) {
+        table.innerHTML = '<div class="admin-pid-empty">No editions match.</div>';
+    } else {
+        adminPidMeasureRowPitch(table, filtered, infoMode);
+
+        if (adminPidRowPitch) {
+            table.classList.add('admin-pid-virtual');
+            table.style.setProperty('--admin-pid-row-h', `${adminPidRowPitch}px`);
+            // The bottom spacer starts at the full list height so the scroll
+            // box is tall enough to take the restored scrollTop below (it
+            // would clamp to 0 against two empty spacers).
+            table.innerHTML = '<div class="admin-pid-spacer" id="admin-pid-spacer-top"></div>'
+                + `<div class="admin-pid-spacer" id="admin-pid-spacer-bottom" style="height:${filtered.length * adminPidRowPitch}px"></div>`;
+
+            if (scroll) {
+                scroll.scrollTop = prevScrollTop;
+                adminPidBindListScroll(scroll);
+            }
+            adminPidUpdateWindow(true);
+        } else {
+            // The list can't be measured yet (its section is hidden, so rows
+            // have no layout) — show a plain run of rows so the DOM is valid,
+            // and re-render properly once the scroll box gets a size (see
+            // adminPidBindListScroll's ResizeObserver).
+            table.innerHTML = filtered.slice(0, 40).map(e => adminPidRowHtml(e, infoMode)).join('');
+            adminPidPitchPending = true;
+            if (scroll) adminPidBindListScroll(scroll);
+        }
+    }
+
+    // Select-all/refresh state only exists in Pricing mode's markup — Info
+    // mode has no checkboxes at all, so there's nothing for these to sync.
+    if (!infoMode) {
+        syncAdminPidSelectAllBox();
+        updateAdminPidRefreshButton();
+        updateAdminPidCurioSelectAllState();
+    }
+
+    applyAdminPidDuplicateHighlights();
+    syncAdminPidHeaderScrollbarOffset();
+}
+
+// One list row's markup. Pulled out of renderAdminPidRows because the list is
+// virtualized now: rows are built on demand as they scroll into range, not all
+// up front.
+function adminPidRowHtml(e, infoMode) {
+    return infoMode ? `
         <div class="admin-pid-row admin-pid-row-info ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
              data-edition-id="${escapeHtml(e.edition_id)}"
              onclick="selectAdminPricingDetail('${escapeHtml(e.edition_id)}')">
@@ -2926,20 +2985,141 @@ function renderAdminPidRows() {
             <span class="admin-pid-col-sales">${adminPidLastUpdatedFieldMarkup(e, 'sales')}</span>
             <span class="admin-pid-col-listings">${adminPidLastUpdatedFieldMarkup(e, 'listings')}</span>
         </div>
-    `).join('');
+    `;
+}
 
-    table.innerHTML = rows || '<div class="admin-pid-empty">No editions match.</div>';
+// ── Row-list virtualization ──
+// The Card list can hold ~5,000 editions; mounting a row (with its checkbox,
+// product-ID input and badge spans) for every one made the page ~65k DOM nodes
+// and scrolling sluggish. Instead only the rows in (and just beyond) the
+// viewport exist in #admin-pid-table, between two spacer divs sized to stand in
+// for the rest. Everything a row shows is derived from state (adminPidData,
+// adminPidSelected, adminPidCurioViewSelected, adminPidRefreshStatus, ...), so a
+// row is simply rebuilt from that when it scrolls back in.
+//
+// Every row is forced to one fixed height (adminPidRowPitch → --admin-pid-row-h)
+// so a row's position is just index × pitch with no measuring of rows that
+// aren't mounted.
+const ADMIN_PID_OVERSCAN = 12;       // rows mounted beyond each edge of the viewport
+const ADMIN_PID_REMOUNT_MARGIN = 4;  // re-window once fewer than this many remain on an edge
 
-    // Select-all/refresh state only exists in Pricing mode's markup — Info
-    // mode has no checkboxes at all, so there's nothing for these to sync.
-    if (!infoMode) {
-        syncAdminPidSelectAllBox();
-        updateAdminPidRefreshButton();
-        updateAdminPidCurioSelectAllState();
+let adminPidVisibleRows = [];   // every edition the list is currently showing (filtered + sorted), mounted or not
+let adminPidRowPitch = 0;       // px height of one row
+let adminPidPitchPending = false;
+let adminPidWin = {start: 0, end: 0};  // [start, end) indices of the mounted rows
+
+// The tallest natural row height among a few representative rows (the first,
+// and the first with a Curio toggle / a product ID / neither — their cells
+// differ), in layout px (computed style, so it's unaffected by the page's
+// `zoom`), rounded UP to a whole px: an integer pitch means n spacer rows add up
+// to exactly what n real rows would, with no sub-pixel drift over thousands of
+// rows. 0 when it can't be measured (list not laid out).
+function adminPidMeasureRowPitch(table, rows, infoMode) {
+    const samples = new Set([rows[0]]);
+    for (const pick of [e => e.curio, e => e.product_id, e => !e.product_id]) {
+        const match = rows.find(pick);
+        if (match) samples.add(match);
     }
 
-    applyAdminPidDuplicateHighlights();
-    syncAdminPidHeaderScrollbarOffset();
+    table.innerHTML = [...samples].map(e => adminPidRowHtml(e, infoMode)).join('');
+
+    let tallest = 0;
+    for (const row of table.children) {
+        const cs = getComputedStyle(row);
+        let height = parseFloat(cs.height);
+        if (Number.isFinite(height) && cs.boxSizing === 'content-box') {
+            height += parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+                + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+        }
+        if (!Number.isFinite(height)) { tallest = 0; break; }
+        tallest = Math.max(tallest, height);
+    }
+
+    adminPidRowPitch = tallest > 0 ? Math.ceil(tallest - 0.01) : 0;
+    adminPidPitchPending = false;
+}
+
+// Binds the list's scroll + size handlers once per scroll container (initAdmin
+// re-fetches the admin fragment, so each visit has a fresh element).
+function adminPidBindListScroll(scroll) {
+    if (scroll._adminPidVirtualBound) return;
+    scroll._adminPidVirtualBound = true;
+
+    let frame = 0;
+    scroll.addEventListener('scroll', () => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+            frame = 0;
+            adminPidUpdateWindow();
+        });
+    }, {passive: true});
+
+    // The viewport's height changes with the window and with the controls row
+    // collapsing/expanding — more or fewer rows then need mounting. It also
+    // fires the first time a list that was rendered while hidden gets a size,
+    // which is when a pending (unmeasured) list can finally be laid out.
+    new ResizeObserver(() => {
+        if (!scroll.clientHeight) return;
+        if (adminPidPitchPending) renderAdminPidRows();
+        else adminPidUpdateWindow();
+    }).observe(scroll);
+}
+
+// Mounts whichever rows the scroll position calls for. `force` rebuilds the
+// whole window (after a full render); otherwise rows are added/removed only at
+// the edges so existing rows — and e.g. a product-ID input being typed in —
+// are left alone as the list scrolls.
+function adminPidUpdateWindow(force = false) {
+    const table = document.getElementById('admin-pid-table');
+    const scroll = table?.closest('.admin-pid-table-scroll');
+    const topSpacer = document.getElementById('admin-pid-spacer-top');
+    const bottomSpacer = document.getElementById('admin-pid-spacer-bottom');
+    const total = adminPidVisibleRows.length;
+    const pitch = adminPidRowPitch;
+
+    if (!scroll || !topSpacer || !bottomSpacer || !pitch || !total
+        || !table.classList.contains('admin-pid-virtual')) return;
+
+    const first = Math.max(0, Math.floor(scroll.scrollTop / pitch));
+    const last = Math.min(total, first + Math.ceil(scroll.clientHeight / pitch) + 1);
+    const {start: oldStart, end: oldEnd} = adminPidWin;
+
+    if (!force
+        && oldStart <= Math.max(0, first - ADMIN_PID_REMOUNT_MARGIN)
+        && oldEnd >= Math.min(total, last + ADMIN_PID_REMOUNT_MARGIN)) return;
+
+    const start = Math.max(0, first - ADMIN_PID_OVERSCAN);
+    const end = Math.min(total, last + ADMIN_PID_OVERSCAN);
+    const infoMode = adminCardsView === 'info';
+    const rowsHtml = (from, to) => adminPidVisibleRows.slice(from, to).map(e => adminPidRowHtml(e, infoMode)).join('');
+
+    if (force || oldEnd <= oldStart || end <= oldStart || start >= oldEnd) {
+        while (topSpacer.nextElementSibling !== bottomSpacer) topSpacer.nextElementSibling.remove();
+        bottomSpacer.insertAdjacentHTML('beforebegin', rowsHtml(start, end));
+    } else {
+        for (let i = oldStart; i < start; i++) topSpacer.nextElementSibling.remove();
+        for (let i = end; i < oldEnd; i++) bottomSpacer.previousElementSibling.remove();
+
+        if (start < oldStart) topSpacer.insertAdjacentHTML('afterend', rowsHtml(start, oldStart));
+        if (end > oldEnd) bottomSpacer.insertAdjacentHTML('beforebegin', rowsHtml(oldEnd, end));
+    }
+
+    adminPidWin = {start, end};
+    topSpacer.style.height = `${start * pitch}px`;
+    bottomSpacer.style.height = `${(total - end) * pitch}px`;
+
+    flagAdminPidDuplicates(table);
+}
+
+// Scrolls the list so a card's row sits in the middle of the viewport — by
+// index, since its row may not be mounted.
+function adminPidScrollToEdition(editionId) {
+    const scroll = document.querySelector('.admin-pid-table-scroll');
+    const index = editionId ? adminPidVisibleRows.findIndex(e => e.edition_id === editionId) : -1;
+    if (!scroll || index < 0 || !adminPidRowPitch) return;
+
+    scroll.scrollTop = Math.max(0, index * adminPidRowPitch - (scroll.clientHeight - adminPidRowPitch) / 2);
+    adminPidUpdateWindow();
 }
 
 // The header row lives outside .admin-pid-table-scroll, but the data rows
@@ -3391,21 +3571,23 @@ function reconcileAdminPidSelection() {
     }
 }
 
-// Sync the header select-all box to the row checkboxes currently on screen.
-// "On screen" = rendered rows only — filtered-out rows have no checkbox and
-// don't count toward all/none, matching toggleSelectAllAdminPricing's scope.
+// Sync the header select-all box to the rows currently listed.
+// "Listed" = the filtered rows — filtered-out rows don't count toward
+// all/none, matching toggleSelectAllAdminPricing's scope.
 // Shared by renderAdminPidRows() (rows just rebuilt from adminPidSelected) and
 // onAdminPidRowCheckToggle() so the two can't compute it differently.
 function syncAdminPidSelectAllBox() {
     const selectAllBox = document.getElementById('admin-pid-select-all');
     if (!selectAllBox) return;
 
-    const boxes = document.querySelectorAll('.admin-pid-row-check');
+    // Counted from the data, not the DOM: only the rows near the viewport are
+    // mounted (see adminPidUpdateWindow), but all of the listed rows count.
+    const total = adminPidVisibleRows.length;
     let checked = 0;
-    boxes.forEach(cb => { if (cb.checked) checked++; });
+    adminPidVisibleRows.forEach(e => { if (adminPidSelected.has(e.edition_id)) checked++; });
 
-    selectAllBox.checked = boxes.length > 0 && checked === boxes.length;
-    selectAllBox.indeterminate = checked > 0 && checked < boxes.length;
+    selectAllBox.checked = total > 0 && checked === total;
+    selectAllBox.indeterminate = checked > 0 && checked < total;
 }
 
 function onAdminPidRowCheckToggle(checkbox) {
@@ -3422,15 +3604,16 @@ function onAdminPidRowCheckToggle(checkbox) {
 }
 
 function toggleSelectAllAdminPricing(headerCheckbox) {
-    document.querySelectorAll('.admin-pid-row-check').forEach(cb => {
-        cb.checked = headerCheckbox.checked;
-
-        if (cb.checked) {
-            adminPidSelected.add(cb.dataset.editionId);
+    // Every listed row, mounted or not.
+    adminPidVisibleRows.forEach(e => {
+        if (headerCheckbox.checked) {
+            adminPidSelected.add(e.edition_id);
         } else {
-            adminPidSelected.delete(cb.dataset.editionId);
+            adminPidSelected.delete(e.edition_id);
         }
     });
+
+    document.querySelectorAll('.admin-pid-row-check').forEach(cb => { cb.checked = headerCheckbox.checked; });
 
     headerCheckbox.indeterminate = false;
     updateAdminPidRefreshButton();
@@ -5321,6 +5504,12 @@ function initAdmin() {
     adminUserDetailDecks = null;
     adminPidLoaded = false;
     adminPidData = [];
+    // The list's DOM is brand new (see switchAdminSection), so drop the old
+    // virtualized-list bookkeeping that described the previous one.
+    adminPidVisibleRows = [];
+    adminPidWin = {start: 0, end: 0};
+    adminPidPitchPending = false;
+    adminPidDupCounts = null;
     // adminDbModeOn / adminLocalDbOn are deliberately NOT reset — a sub-nav
     // click is a soft re-render (see switchAdminSection), so the last value
     // read from the System page or a prior pricing load is still accurate and

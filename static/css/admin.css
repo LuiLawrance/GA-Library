@@ -1078,6 +1078,10 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* The row list is virtualized (adminPidUpdateWindow in admin.js) — rows are
+       swapped in/out at the edges as it scrolls, which the browser's own scroll
+       anchoring would otherwise try to compensate for. */
+    overflow-anchor: none;
 }
 
 .admin-pricing-image-col {
@@ -1533,6 +1537,18 @@
 
 .admin-pid-row:not(.admin-pid-row-header) {
     cursor: pointer;
+}
+
+/* Virtualized list: every row is exactly --admin-pid-row-h tall (measured from a
+   real row in adminPidMeasureRowPitch), so a row's offset is just index × that
+   and the spacers can stand in for the unmounted ones. */
+.admin-pid-table.admin-pid-virtual .admin-pid-row {
+    box-sizing: border-box;
+    height: var(--admin-pid-row-h);
+}
+
+.admin-pid-spacer {
+    flex: none;
 }
 
 .admin-pid-col-check {
