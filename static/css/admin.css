@@ -1524,7 +1524,7 @@
 
 .admin-pid-row {
     display: grid;
-    grid-template-columns: 28px 2fr 0.6fr 0.8fr 130px 100px 100px;
+    grid-template-columns: 28px 2fr 0.6fr 0.8fr 130px 124px 124px;
     align-items: center;
     gap: 16px;
     padding: 10px 16px;
@@ -1847,7 +1847,7 @@
    The compound-class specificity ((0,3,x)) also clears
    .admin-pid-row.admin-pid-row-info's grid-template-columns for free. */
 .admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-row {
-    grid-template-columns: 28px 2fr 0.6fr 0.8fr 34px 100px 100px;
+    grid-template-columns: 28px 2fr 0.6fr 0.8fr 34px 124px 124px;
 }
 
 .admin-pid-hide-pid:not(.admin-cards-mode-info) .admin-pid-col-status .admin-pid-input,

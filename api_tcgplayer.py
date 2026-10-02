@@ -31,7 +31,7 @@ JSON_IDS = "DATA_GA/PRICING_GA/ID_TCGPLAYER.json"
 
 # The marketplaces the admin Pricing pill offers. "Last Sales" / "Last Listings"
 # clocks are tracked per marketplace (see the *_last_scraped functions below);
-# the TCGPlayer scraper and its 7-day listings gate only ever touch "TCGPlayer".
+# the TCGPlayer scraper and its once-a-day listings gate only ever touch "TCGPlayer".
 MARKETPLACES = ("TCGPlayer", "CoreTCG", "Manual")
 
 # Admins enter this as the product ID for cards confirmed to have no
@@ -329,7 +329,7 @@ def clear_last_scraped(edition_id: str, field: str, marketplace: str, foil_id: s
 
 # ── Back-compat wrappers ──
 # The TCGPlayer scraper (_process_sales_result / _process_listings_result /
-# import_pasted_sales_tcg_by_edition in pricing_ga.py) and its 7-day listings
+# import_pasted_sales_tcg_by_edition in pricing_ga.py) and its once-a-day listings
 # gate (_listings_gate_result) are inherently TCGPlayer — they keep calling
 # these, which are hardwired to the "TCGPlayer" marketplace.
 
@@ -356,7 +356,7 @@ def clear_last_sales(edition_id: str, debug: bool = False) -> None:
 
 
 def clear_last_listings(edition_id: str, debug: bool = False) -> None:
-    """Listings counterpart to clear_last_sales() — also lifts the 7-day
+    """Listings counterpart to clear_last_sales() — also lifts the once-a-day
     listings-refresh gate (_listings_gate_result), keyed off this same clock."""
     clear_last_scraped(edition_id, "listings", "TCGPlayer", debug=debug)
 

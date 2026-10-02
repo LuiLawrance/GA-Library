@@ -222,7 +222,7 @@ class MarketplaceScrapeClock(Base):
     "" (not NULL — keeps the composite PK and ON CONFLICT upserts clean) for the
     edition-level / main-product clock, or a variant foil_id for a Curio Foil's
     own separate clock. marketplace is one of api_tcgplayer.MARKETPLACES; the
-    TCGPlayer scraper and its 7-day listings gate only ever touch the
+    TCGPlayer scraper and its once-a-day listings gate only ever touch the
     "TCGPlayer" rows (via the back-compat wrappers in api_tcgplayer.py)."""
     __tablename__ = "marketplace_scrape_clocks"
     __table_args__ = (

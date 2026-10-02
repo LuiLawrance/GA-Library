@@ -2046,6 +2046,38 @@ def _scrape_clocks(ids_entry: dict) -> dict:
     return out
 
 
+_MARKETPLACE_BY_LOWER = {m.lower(): m for m in MARKETPLACES}
+
+
+def _latest_entry_dates(by_foil: dict, curio_foil_id: str | None) -> tuple[dict, dict]:
+    """({marketplace: iso}, {marketplace: iso}) — the date of the most recent
+    recorded sale (or listing) per marketplace, for an edition's main foils and
+    (second map) its Curio Foil. `by_foil` is one edition's {foil_id: [entry,
+    ...]} slice of load_sales_data() / load_listings_data(). Mirrors the admin
+    detail panel's scoping: the Curio Foil's entries are kept apart from the
+    rest, and with no Curio Foil (incl. a curio_only card) everything lands in
+    the first map. An entry with no marketplace counts as "Manual", the same as
+    when it's displayed."""
+    main: dict[str, str] = {}
+    curio: dict[str, str] = {}
+
+    for foil_id, records in by_foil.items():
+        target = curio if curio_foil_id and foil_id == curio_foil_id else main
+
+        for record in records:
+            iso = record.get("date")
+            if not iso:
+                continue
+
+            raw = (record.get("marketplace") or "Manual").strip()
+            marketplace = _MARKETPLACE_BY_LOWER.get(raw.lower(), raw)
+
+            if iso > target.get(marketplace, ""):
+                target[marketplace] = iso
+
+    return main, curio
+
+
 def _curio_foil_id_for_edition(edition_info: dict) -> str | None:
     # A "Curio Foil" (TCGPlayer's umbrella term — Aurora/Interference/
     # Fractured Curio Foil, Quicksilver Foil, etc.) has its own separate
@@ -2375,6 +2407,8 @@ async def api_admin_pricing_product_ids(request: Request):
     name_by_card_id = {entry["card_id"]: entry["name"] for entry in slugs_data.values()}
     collector_map = _build_collector_map()
     ids_data = get_all_ids()
+    sales_data = load_sales_data()
+    listings_data = load_listings_data()
 
     results = []
 
@@ -2384,6 +2418,12 @@ async def api_admin_pricing_product_ids(request: Request):
         edition_ids = ids_data.get(edition_id, {})
 
         curio_foil_id = _curio_foil_id_for_edition(edition_info)
+        latest_sale, curio_latest_sale = _latest_entry_dates(
+            sales_data.get(card_id, {}).get(edition_id, {}), curio_foil_id
+        )
+        latest_listing, curio_latest_listing = _latest_entry_dates(
+            listings_data.get(card_id, {}).get(edition_id, {}), curio_foil_id
+        )
         # A card printed ONLY as its special foil (e.g. "Lunar Conduit",
         # RDOA — see _curio_foil_id_for_edition's comment) has no toggle
         # (curio above stays None, same as an ordinary edition), but its one
@@ -2407,6 +2447,8 @@ async def api_admin_pricing_product_ids(request: Request):
                 # per-marketplace clocks — sourced from the same get_all_ids()
                 # read already loaded above, no extra I/O.
                 "clocks": _scrape_clocks(curio_override),
+                "latest_sale": curio_latest_sale,
+                "latest_listing": curio_latest_listing,
             }
 
         results.append({
@@ -2423,6 +2465,11 @@ async def api_admin_pricing_product_ids(request: Request):
             # see api_tcgplayer.get_foil_kind_swapped's docstring.
             "foil_kind_swapped": bool(edition_ids.get("foil_kind_swapped")),
             "clocks": _scrape_clocks(edition_ids),
+            # {marketplace: iso} date of the most recent recorded sale / listing
+            # — what the list's Sales and Listings columns show (the scrape
+            # clocks above still drive the Card Info badges).
+            "latest_sale": latest_sale,
+            "latest_listing": latest_listing,
             # The edition's own release/last-synced dates (from the Grand
             # Archive API, cached in JSON_INFO — see the sync logic in
             # api_ga.py) — shown in the Cards section's Info sub-view instead

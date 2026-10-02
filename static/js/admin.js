@@ -2813,10 +2813,20 @@ function adminPidFilteredEditions() {
 function adminPidSortValue(e, field) {
     if (field === 'name') return e.name || '';
 
-    const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
-    const clocks = (curioView ? e.curio.clocks : e.clocks) || {};
-    const days = adminPidDaysSince(adminPidActiveClock(clocks[field]));
+    const days = adminPidListFieldDays(e, field);
     return days == null ? Infinity : days;
+}
+
+// Days behind a card-list column's badge, for the marketplace the pill is on
+// and the row's own Curio Foil toggle state. Each column shows the age of the
+// LATEST sale / listing recorded (latest_sale / latest_listing). The Card Info
+// panel's "Last Sales"/"Last Listings" badges are unaffected — those stay
+// clock-based (when the data was last updated).
+function adminPidListFieldDays(e, field) {
+    const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
+    const target = curioView ? e.curio : e;
+    const map = field === 'sales' ? target.latest_sale : target.latest_listing;
+    return adminPidDaysSince(adminPidActiveClock(map));
 }
 
 function adminPidCompareEditions(a, b) {
@@ -3339,7 +3349,7 @@ function adminPidLastUpdatedFieldMarkup(e, field) {
         return `<span class="admin-pid-updated-error" title="${escapeHtml(status.message)}">${escapeHtml(status.message)}</span>`;
     }
 
-    // Shows what a just-finished refresh actually changed (e.g. "+1") instead
+    // Shows what a just-finished refresh actually changed (e.g. "29d → 4d (+1)") instead
     // of immediately collapsing back to a day count — sticks around until the
     // admin leaves the pricing screen and comes back, which resets
     // adminPidRefreshStatus (see initAdmin()) and re-fetches real day counts.
@@ -3348,14 +3358,12 @@ function adminPidLastUpdatedFieldMarkup(e, field) {
     }
 
     // The Curio Foil's own product page has its own separate per-marketplace
-    // clocks — show those instead of the edition's when toggled on. The day
-    // count is for whichever marketplace the scope pill is on (see
+    // data — show that instead of the edition's when toggled on. The day count
+    // is for whichever marketplace the scope pill is on (see
     // adminPidActiveClock / switchAdminPidMarketplace, which re-renders these).
-    const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
-    const clocks = (curioView ? e.curio.clocks : e.clocks) || {};
-    const days = adminPidDaysSince(adminPidActiveClock(clocks[field]));
+    const days = adminPidListFieldDays(e, field);
     const mktLabel = adminPidMarketplaceConfig().label;
-    const title = `${mktLabel} ${field === 'sales' ? 'Sales' : 'Listings'}: ${adminPidDaysSinceLabel(days, true)}`;
+    const title = `${mktLabel} ${field === 'sales' ? 'Latest sale' : 'Latest listing'}: ${adminPidDaysSinceLabel(days, true)}`;
 
     return `<span class="admin-pid-updated-idle" title="${escapeHtml(title)}">`
         + `${escapeHtml(adminPidDaysSinceLabel(days))}</span>`;
@@ -3656,7 +3664,7 @@ async function toggleAdminPidFoilSwap(editionId, btn) {
 }
 
 // Resets one clock — the SELECTED marketplace's Last Sales/Last Listings —
-// back to never-scraped. Mainly for forcing past the 7-day listings-refresh
+// back to never-scraped. Mainly for forcing past the once-a-day listings-refresh
 // gate (TCGPlayer only) or correcting a badge. Clears whichever clock the
 // detail panel is showing: the Curio Foil's own separate one if toggled on,
 // the edition's main one otherwise.
@@ -3751,6 +3759,18 @@ async function refreshSelectedAdminPricing(target) {
     adminPidRefreshing = true;
     updateAdminPidRefreshButton();
 
+    // Each edition's TCGPlayer latest-sale / latest-listing age BEFORE the
+    // refresh, so the finished indicator can read "29d → 4d (+3)".
+    const prevDays = {};
+    editionIds.forEach(id => {
+        const record = adminPidData.find(e => e.edition_id === id);
+        const scoped = foilScopes[id] === 'main' ? record : record?.curio;
+        prevDays[id] = {
+            sales: adminPidDaysSince(scoped?.latest_sale?.TCGPlayer),
+            listings: adminPidDaysSince(scoped?.latest_listing?.TCGPlayer),
+        };
+    });
+
     editionIds.forEach(id => {
         adminPidRefreshStatus[id] = {
             sales: target !== 'listings' ? {state: 'running', message: ''} : null,
@@ -3821,11 +3841,26 @@ async function refreshSelectedAdminPricing(target) {
                         }
                     }
 
-                    adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings);
-
+                    // Re-read the edition's history for its new latest sale /
+                    // listing — the selected card via the normal detail
+                    // reload, any other via a one-off fetch.
                     if (adminPidDetailSelected === editionId) {
                         await loadAdminPricingDetailHistory();
+                    } else if (record) {
+                        try {
+                            const histRes = await fetch(`/api/admin/pricing/${editionId}/history`);
+                            if (histRes.ok) adminPidApplyLatestFromHistory(record, await histRes.json());
+                        } catch (err) { /* keep the old latest; indicator falls back to it */ }
                     }
+
+                    const scoped = scopedFoilScopes[editionId] === 'main' ? record : record?.curio;
+                    adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings, {
+                        prev: prevDays[editionId],
+                        next: {
+                            sales: adminPidDaysSince(scoped?.latest_sale?.TCGPlayer),
+                            listings: adminPidDaysSince(scoped?.latest_listing?.TCGPlayer),
+                        },
+                    });
                 }
 
                 renderAdminPricingIds();
@@ -3867,15 +3902,25 @@ async function refreshSelectedAdminPricing(target) {
 // sales/listings are each either null (not targeted by this refresh), an
 // {ok: false, error} failure, or an {ok: true, stored, ...} success — mirrors
 // the shape scrape_sales_and_listings_tcg_by_edition() returns per side.
-function summarizeAdminPricingRefresh(sales, listings) {
+//
+// A finished side reads "<days before> → <days now> (+<entries added>)", e.g.
+// "29d → 4d (+3)" — `ages` carries the latest sale/listing age before and after
+// the refresh ({prev, next}, each {sales, listings} in days or null for none).
+function summarizeAdminPricingRefresh(sales, listings, ages) {
+    const doneMessage = (field, stored) => {
+        const before = adminPidDaysSinceLabel(ages?.prev?.[field]);
+        const after = adminPidDaysSinceLabel(ages?.next?.[field]);
+        return `${before} → ${after} (+${stored ?? 0})`;
+    };
+
     return {
         sales: !sales ? null
             : !sales.ok ? {state: 'error', message: sales.error}
-            : {state: 'done', message: `+${sales.stored ?? 0}`},
+            : {state: 'done', message: doneMessage('sales', sales.stored)},
         listings: !listings ? null
             : !listings.ok ? {state: 'error', message: listings.error}
             : listings.gated ? {state: 'done', message: 'gated'}
-            : {state: 'done', message: `+${listings.stored ?? 0}`},
+            : {state: 'done', message: doneMessage('listings', listings.stored)},
     };
 }
 
@@ -3989,6 +4034,7 @@ async function loadAdminPricingDetailHistory() {
 
         if (adminPidDetailSelected !== editionId) return;
         adminPidDetailHistory = data;
+        adminPidSyncLatestFromHistory(editionId);
     } catch (err) {
         if (adminPidDetailSelected !== editionId) return;
         adminPidDetailHistory = {sales: [], listings: [], last_sales: {}, last_listings: {},
@@ -3996,6 +4042,54 @@ async function loadAdminPricingDetailHistory() {
     }
 
     renderAdminPricingDetailAll();
+}
+
+// The list's Sales and Listings columns show the age of each card's latest
+// sale / listing (record.latest_sale / latest_listing, {marketplace: iso} maps
+// from the product-ids endpoint). The history just loaded holds that edition's
+// full sales and listings, so re-derive the maps from it — keeps the row's
+// badges current after a manual add / import / paste / refresh / delete without
+// re-fetching the whole list. Same scoping as the server: the Curio Foil's
+// entries are kept apart from the rest.
+function adminPidSyncLatestFromHistory(editionId) {
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record || !adminPidDetailHistory) return;
+
+    adminPidApplyLatestFromHistory(record, adminPidDetailHistory);
+    refreshVisibleAdminPidClockBadges();
+}
+
+// Writes record.latest_sale / latest_listing (and the Curio Foil's) from one
+// edition's /history payload — no rendering.
+function adminPidApplyLatestFromHistory(record, history) {
+    const curioFoilId = record.curio?.foil_id;
+
+    const latestDates = entries => {
+        const main = {};
+        const curio = {};
+
+        for (const entry of entries || []) {
+            if (!entry.date) continue;
+            const target = curioFoilId && entry.foil_id === curioFoilId ? curio : main;
+            const raw = (entry.marketplace || 'Manual').trim();
+            const marketplace = Object.values(ADMIN_PID_MARKETPLACES)
+                .find(mp => mp.marketplace.toLowerCase() === raw.toLowerCase())?.marketplace || raw;
+
+            if (entry.date > (target[marketplace] || '')) target[marketplace] = entry.date;
+        }
+
+        return {main, curio};
+    };
+
+    const sales = latestDates(history.sales);
+    const listings = latestDates(history.listings);
+
+    record.latest_sale = sales.main;
+    record.latest_listing = listings.main;
+    if (record.curio) {
+        record.curio.latest_sale = sales.curio;
+        record.curio.latest_listing = listings.curio;
+    }
 }
 
 function renderAdminPricingDetailAll() {

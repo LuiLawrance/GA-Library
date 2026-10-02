@@ -1254,7 +1254,7 @@ def add_manual_entry(edition_id: str, foil_id: str, entry_type: str, price: floa
     # pasted import is — stamp the "last updated" clock for THIS entry's
     # marketplace (the pill the admin was on), so the console's Last Sales/
     # Listings badge for that marketplace (and, for TCGPlayer listings, the
-    # 7-day refresh gate) reflect it.
+    # once-a-day refresh gate) reflect it.
     clock_field = "sales" if entry_type == "sales" else "listings"
     if is_variant:
         api_tcgplayer.set_foil_last_scraped(edition_id, foil_id, clock_field, marketplace, debug=debug)
@@ -1407,8 +1407,10 @@ def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bo
 
 def _listings_gate_result(edition_id: str, foil_id: str | None = None) -> dict | None:
     """None if listings are safe to refresh, otherwise the gated result dict
-    to return as-is. Pass foil_id to check a foil override's own gate
-    (independent clock from the edition's main listings) instead."""
+    to return as-is. Listings are refreshed at most once per calendar day — a
+    clock already stamped with today's date gates the refresh. Pass foil_id to
+    check a foil override's own gate (independent clock from the edition's
+    main listings) instead."""
     last_listings = (
         api_tcgplayer.get_foil_last_listings(edition_id, foil_id)
         if foil_id else api_tcgplayer.get_last_listings(edition_id)
@@ -1417,13 +1419,11 @@ def _listings_gate_result(edition_id: str, foil_id: str | None = None) -> dict |
     if not last_listings:
         return None
 
-    days_since = (date.today() - date.fromisoformat(last_listings)).days
-
-    if days_since <= 7:
+    if date.fromisoformat(last_listings) == date.today():
         return {
             "ok": True,
             "gated": True,
-            "gated_message": f"Listings last updated {days_since} day(s) ago (on {last_listings}) — need more than 7 days between updates.",
+            "gated_message": f"Listings already updated today ({last_listings}).",
             "listings": [],
             "stored": 0,
             "skipped_unrecognized": 0,
@@ -1817,8 +1817,8 @@ def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: boo
     results = {}
     foil_scopes = foil_scopes or {}
 
-    # For a listings-only refresh, an edition already inside its 7-day cooldown
-    # does no scraping at all — check that before opening a browser or queuing
+    # For a listings-only refresh, an edition whose listings were already
+    # updated today does no scraping at all — check that before opening a browser or queuing
     # the edition up for one, rather than after, so a batch that's entirely
     # gated never launches Chromium in the first place.
     pending_edition_ids = edition_ids
