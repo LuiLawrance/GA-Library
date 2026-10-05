@@ -4007,9 +4007,16 @@ async function refreshSelectedAdminPricing(target) {
 
                 const job = await statusRes.json();
 
+                // Everything that finished since the last poll, handled together
+                // so the batch costs one latest-dates request per poll rather than
+                // one per edition (a poll can return hundreds at once — e.g. a
+                // listings refresh where most cards are already updated today).
+                const finished = [];
+
                 for (const [editionId, result] of Object.entries(job.results || {})) {
                     if (seen.has(editionId)) continue;
                     seen.add(editionId);
+                    finished.push([editionId, result]);
 
                     const record = adminPidData.find(r => r.edition_id === editionId);
                     if (record) {
@@ -4023,19 +4030,18 @@ async function refreshSelectedAdminPricing(target) {
                             if (result.listings?.ok && !result.listings.gated) adminPidSetClockKey(target, 'listings', 'TCGPlayer');
                         }
                     }
+                }
 
-                    // Re-read the edition's history for its new latest sale /
-                    // listing — the selected card via the normal detail
-                    // reload, any other via a one-off fetch.
-                    if (adminPidDetailSelected === editionId) {
-                        await loadAdminPricingDetailHistory();
-                    } else if (record) {
-                        try {
-                            const histRes = await fetch(`/api/admin/pricing/${editionId}/history`);
-                            if (histRes.ok) adminPidApplyLatestFromHistory(record, await histRes.json());
-                        } catch (err) { /* keep the old latest; indicator falls back to it */ }
-                    }
+                // Only an edition that actually stored something can have a new
+                // latest sale / listing — the rest keep what the row already has.
+                const changedIds = finished
+                    .filter(([, result]) => (result.sales?.ok && result.sales.stored > 0)
+                        || (result.listings?.ok && !result.listings.gated && result.listings.stored > 0))
+                    .map(([editionId]) => editionId);
+                if (changedIds.length > 0) await adminPidLoadLatestDates(changedIds);
 
+                for (const [editionId, result] of finished) {
+                    const record = adminPidData.find(r => r.edition_id === editionId);
                     const scoped = scopedFoilScopes[editionId] === 'main' ? record : record?.curio;
                     adminPidRefreshStatus[editionId] = summarizeAdminPricingRefresh(result.sales, result.listings, {
                         prev: prevDays[editionId],
@@ -4044,6 +4050,12 @@ async function refreshSelectedAdminPricing(target) {
                             listings: adminPidDaysSince(scoped?.latest_listing?.TCGPlayer),
                         },
                     });
+
+                    // The open card's Sales/Listings tables and badges come from
+                    // its own history, so reload that one (just the one) too.
+                    if (adminPidDetailSelected === editionId) {
+                        await loadAdminPricingDetailHistory();
+                    }
                 }
 
                 renderAdminPricingIds();
@@ -4080,6 +4092,33 @@ async function refreshSelectedAdminPricing(target) {
     }
 
     updateAdminPidRefreshButton();
+}
+
+// Pulls the latest sale / listing dates for a set of editions from the server in
+// ONE request (see /api/admin/pricing/latest-dates) and writes them onto their
+// list records, so the Sales/Listings columns show the post-refresh ages.
+async function adminPidLoadLatestDates(editionIds) {
+    try {
+        const res = await fetch('/api/admin/pricing/latest-dates', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({edition_ids: editionIds}),
+        });
+        if (!res.ok) return;
+
+        const dates = await res.json();
+        for (const [editionId, d] of Object.entries(dates)) {
+            const record = adminPidData.find(r => r.edition_id === editionId);
+            if (!record) continue;
+
+            record.latest_sale = d.latest_sale || {};
+            record.latest_listing = d.latest_listing || {};
+            if (record.curio) {
+                record.curio.latest_sale = d.curio_latest_sale || {};
+                record.curio.latest_listing = d.curio_latest_listing || {};
+            }
+        }
+    } catch (err) { /* keep the old latest dates; the indicator falls back to them */ }
 }
 
 // sales/listings are each either null (not targeted by this refresh), an

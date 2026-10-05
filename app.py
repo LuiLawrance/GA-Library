@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from jose import JWTError, jwt
 from pricing_ga import RARITY_MAP, _foil_kind_for_id, add_manual_entry, \
     clear_product_ids_for_set, delete_entry, import_gal_pricing, \
@@ -1072,13 +1073,28 @@ async def api_pricing_refresh_status(job_id: str, request: Request):
     return JSONResponse(snapshot)
 
 
+def _slim_refresh_result(result: dict) -> dict:
+    """A batch edition result minus the scraped rows themselves (the "sales" /
+    "listings" lists inside each side's outcome). The status endpoint returns
+    EVERY finished edition's result on every poll, so keeping the rows made each
+    poll bigger than the last — quadratic over a large selection — for data the
+    admin UI never reads (it only needs ok / stored / gated / error / skipped_*)."""
+    return {
+        side: (
+            {k: v for k, v in outcome.items() if k not in ("sales", "listings")}
+            if isinstance(outcome, dict) else outcome
+        )
+        for side, outcome in result.items()
+    }
+
+
 def _run_pricing_batch_job(job_id: str, edition_ids: list, target: str, foil_scopes: dict) -> None:
     def on_progress(edition_id, result):
         with _pricing_batch_jobs_lock:
             job = _pricing_batch_jobs.get(job_id)
             if job is None:
                 return
-            job["results"][edition_id] = result
+            job["results"][edition_id] = _slim_refresh_result(result)
             job["done"] += 1
             job["current_edition_id"] = edition_id
 
@@ -2775,6 +2791,60 @@ async def api_admin_pricing_history(edition_id: str, request: Request):
         "curio_last_sales": get_foil_last_scraped_map(edition_id, curio_foil_id, "sales") if curio_foil_id else {},
         "curio_last_listings": get_foil_last_scraped_map(edition_id, curio_foil_id, "listings") if curio_foil_id else {},
     })
+
+
+def _latest_dates_for_editions(edition_ids: list[str]) -> dict:
+    """{edition_id: {latest_sale, latest_listing, curio_latest_sale,
+    curio_latest_listing}} — each a {marketplace: iso} map (see
+    _latest_entry_dates). Reads the (cached) price tables once for the whole
+    list, so a batch refresh can refresh its rows' badges in one request rather
+    than one /history call per edition."""
+    editions_data = load_editions_data()
+    info_data = load_info_data()
+    sales_data = load_sales_data()
+    listings_data = load_listings_data()
+
+    out = {}
+
+    for edition_id in edition_ids:
+        card_id = editions_data.get(edition_id, {}).get("card_id")
+        if not card_id:
+            continue
+
+        edition_info = info_data.get(card_id, {}).get("editions", {}).get(edition_id, {})
+        curio_foil_id = _curio_foil_id_for_edition(edition_info)
+
+        latest_sale, curio_latest_sale = _latest_entry_dates(
+            sales_data.get(card_id, {}).get(edition_id, {}), curio_foil_id
+        )
+        latest_listing, curio_latest_listing = _latest_entry_dates(
+            listings_data.get(card_id, {}).get(edition_id, {}), curio_foil_id
+        )
+
+        out[edition_id] = {
+            "latest_sale": latest_sale,
+            "latest_listing": latest_listing,
+            "curio_latest_sale": curio_latest_sale,
+            "curio_latest_listing": curio_latest_listing,
+        }
+
+    return out
+
+
+@app.post("/api/admin/pricing/latest-dates")
+async def api_admin_pricing_latest_dates(request: Request):
+    require_cards_admin(request)
+
+    body = await request.json()
+    edition_ids = body.get("edition_ids", [])
+
+    if not isinstance(edition_ids, list) or not all(isinstance(e, str) for e in edition_ids):
+        raise HTTPException(status_code=400, detail="edition_ids must be a list of strings")
+
+    # Off the event loop — a cold read of the price tables takes a moment, and
+    # running it inline would stall every other request (including the refresh
+    # job's own status polls) for that long.
+    return JSONResponse(await run_in_threadpool(_latest_dates_for_editions, edition_ids))
 
 
 # Forces a full re-fetch of the card an edition belongs to (see card_reset in

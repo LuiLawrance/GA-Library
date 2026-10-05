@@ -1405,16 +1405,26 @@ def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bo
     }
 
 
-def _listings_gate_result(edition_id: str, foil_id: str | None = None) -> dict | None:
+def _listings_gate_result(edition_id: str, foil_id: str | None = None, ids_data: dict | None = None) -> dict | None:
     """None if listings are safe to refresh, otherwise the gated result dict
     to return as-is. Listings are refreshed at most once per calendar day — a
     clock already stamped with today's date gates the refresh. Pass foil_id to
     check a foil override's own gate (independent clock from the edition's
-    main listings) instead."""
-    last_listings = (
-        api_tcgplayer.get_foil_last_listings(edition_id, foil_id)
-        if foil_id else api_tcgplayer.get_last_listings(edition_id)
-    )
+    main listings) instead.
+
+    `ids_data` is an optional api_tcgplayer.get_all_ids() snapshot to read the
+    clock from instead of querying for it — lets a batch gate hundreds of
+    editions off one read rather than one database round trip each."""
+    if ids_data is not None:
+        entry = ids_data.get(edition_id, {})
+        if foil_id:
+            entry = entry.get("foils", {}).get(foil_id, {})
+        last_listings = (entry.get("last_listings") or {}).get("TCGPlayer")
+    else:
+        last_listings = (
+            api_tcgplayer.get_foil_last_listings(edition_id, foil_id)
+            if foil_id else api_tcgplayer.get_last_listings(edition_id)
+        )
 
     if not last_listings:
         return None
@@ -1432,7 +1442,8 @@ def _listings_gate_result(edition_id: str, foil_id: str | None = None) -> dict |
     return None
 
 
-def _edition_listings_gate_result(edition_id: str, foil_scope: str | None) -> dict | None:
+def _edition_listings_gate_result(edition_id: str, foil_scope: str | None,
+                                  ids_data: dict | None = None) -> dict | None:
     """Batch-level counterpart to _listings_gate_result() — None if a listings
     refresh for this edition (respecting foil_scope the same way
     scrape_listings_tcg_by_edition() does) would touch at least one ungated
@@ -1441,19 +1452,22 @@ def _edition_listings_gate_result(edition_id: str, foil_scope: str | None) -> di
     opened for it, rather than only gating once already inside a shared
     browser session."""
     if foil_scope == "main":
-        return _listings_gate_result(edition_id, None)
+        return _listings_gate_result(edition_id, None, ids_data)
 
     if foil_scope is not None:
-        return _listings_gate_result(edition_id, foil_scope)
+        return _listings_gate_result(edition_id, foil_scope, ids_data)
 
-    main_gated = _listings_gate_result(edition_id, None)
+    main_gated = _listings_gate_result(edition_id, None, ids_data)
     if main_gated is None:
         return None
 
-    overrides = api_tcgplayer.get_foil_overrides(edition_id)
+    overrides = (
+        ids_data.get(edition_id, {}).get("foils", {}) if ids_data is not None
+        else api_tcgplayer.get_foil_overrides(edition_id)
+    )
     override_foil_ids = [foil_id for foil_id, entry in overrides.items() if entry.get("product_id")]
 
-    if any(_listings_gate_result(edition_id, foil_id) is None for foil_id in override_foil_ids):
+    if any(_listings_gate_result(edition_id, foil_id, ids_data) is None for foil_id in override_foil_ids):
         return None
 
     return main_gated
@@ -1824,8 +1838,14 @@ def scrape_batch_tcg_by_editions(edition_ids: list[str], target: str, debug: boo
     pending_edition_ids = edition_ids
     if target == "listings":
         pending_edition_ids = []
+        # One read of every edition's product IDs + clocks, rather than a
+        # database round trip per edition per check (~85 ms each against a
+        # remote Postgres — minutes of dead time before the browser even opens
+        # on a few-hundred-card selection). Nothing is written until the
+        # scraping below starts, so the snapshot can't go stale.
+        ids_snapshot = api_tcgplayer.get_all_ids()
         for edition_id in edition_ids:
-            gated = _edition_listings_gate_result(edition_id, foil_scopes.get(edition_id))
+            gated = _edition_listings_gate_result(edition_id, foil_scopes.get(edition_id), ids_snapshot)
             if gated is None:
                 pending_edition_ids.append(edition_id)
                 continue
