@@ -2266,12 +2266,26 @@ def _require_manageable_target(request: Request, username: str, verb: str) -> No
 ADMIN_NOTE_MAX = 4000
 
 
+def _can_note(caller: str, target_username: str) -> bool:
+    """Whether `caller` may read/write `target_username`'s admin note: a rank
+    strictly above the target (same rule as reset omni/password), or the owner
+    on their own account — nobody outranks the owner, so that's the only way
+    the owner's own note can ever be written."""
+    if caller == target_username:
+        return user_get_auth_type(caller) == "owner"
+    return _outranks(caller, target_username)
+
+
 @app.post("/api/admin/users/{username}/note")
 async def api_admin_user_note(username: str, request: Request):
-    # Notes are readable/writable only by a rank strictly above the target
-    # (same rule as reset omni/password) — a moderator can note a regular
-    # user, an admin can note moderators and below, and so on.
-    _require_manageable_target(request, username, "edit notes for")
+    # Notes are readable/writable only by a rank strictly above the target —
+    # a moderator can note a regular user, an admin can note moderators and
+    # below, and so on — plus the owner on themselves (see _can_note).
+    caller = require_admin(request)
+    _require_existing_user(username)
+
+    if not _can_note(caller, username):
+        raise HTTPException(status_code=400, detail="Cannot edit notes for a user at or above your own rank")
 
     body = await request.json()
     note = (body.get("note") or "")
@@ -2382,9 +2396,10 @@ async def api_admin_user(username: str, request: Request):
     if profile is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # The admin note is only visible to a rank strictly above the target
-    # (mirrors api_admin_user_note's write guard and the UI's canManage check).
-    if not _outranks(caller, username):
+    # The admin note is only visible to a rank strictly above the target, or
+    # to the owner on themselves (mirrors api_admin_user_note's write guard
+    # and the UI's canNote check — see _can_note).
+    if not _can_note(caller, username):
         profile = {**profile, "admin_note": ""}
 
     return JSONResponse(profile)

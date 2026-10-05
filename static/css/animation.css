@@ -46,9 +46,12 @@
     }
 }
 
-/* revealDown's mirror — for a menu that opens upward (see
-   .admin-pid-menu-flip-up in admin.css). */
-@keyframes revealUp {
+/* revealDown's mirror — fade in while rising from 8px below, for a menu that
+   opens upward. Distinct name from the tiles' revealUp above (@keyframes are
+   global, so a second revealUp would silently override that one everywhere).
+   Used by: .admin-pid-menu-flip-up (admin.css), .select-dropdown--up
+   (components.css). */
+@keyframes revealUpMenu {
     from {
         opacity: 0;
         transform: translateY(8px);

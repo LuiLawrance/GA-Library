@@ -51,6 +51,17 @@
     min-height: 0;
 }
 
+/* System has no inner list to scroll (unlike Cards/Users), so the section
+   itself scrolls once every card + the Database Connection panel are open.
+   The negative margin / matching padding pulls the scroll box out over
+   .admin-content's padding so the bar sits at the content edge rather than
+   32px in, while the content keeps its usual inset. */
+#admin-section-system {
+    overflow-y: auto;
+    margin: 0 -32px -32px;
+    padding: 0 32px 32px;
+}
+
 .admin-section-title {
     display: block;
     font-family: var(--font-mono);
@@ -69,16 +80,16 @@
 
 /* Centered like a standalone options menu, rather than left-anchored like
    the Cards/Users sections' full-width working areas — System has no list
-   or grid to fill the space, just the settings-cards column (.admin-system-
-   options-col) and, once Use JSON is off, the Sync panel beside it — see
-   .admin-system-sync-panel below. justify-content:center keeps the pair
-   centered as a unit the same way the settings card alone used to center
-   itself via margin:auto; align-items:flex-start so the shorter panel
-   doesn't stretch to match the taller one's height. admin.js's
+   or grid to fill the space, just two card columns (.admin-system-options-
+   col: settings on the left, Import/Export on the right) and, once Use JSON
+   is off, the Sync panel between them — see .admin-system-sync-panel below.
+   justify-content:center keeps the row centered as a unit;
+   align-items:flex-start so the shorter columns don't stretch to match the
+   tallest one's height. admin.js's
    animateSystemPanelsForUseJson (via flipSlide / animateHeightWipe in
    animation.js) animates the re-centre and the Sync panel's reveal.
 
-   No overflow clip here: flipSlide only ever moves the settings card between
+   No overflow clip here: flipSlide only ever moves the side columns between
    two in-bounds positions, and animateHeightWipe clips the Sync panel on the
    panel itself — so nothing escapes this row. Clipping here instead cut off
    the SSL field's dropdown where it extended past the Sync panel's bottom. */
@@ -91,8 +102,9 @@
     margin-top: 32px;
 }
 
-/* The left stack in .admin-system-panels — the main settings card plus the
-   separate Local DB card below it, kept the same width so they line up. */
+/* A card stack in .admin-system-panels — the left one holds the main settings
+   card plus the separate Local DB card below it (kept the same width so they
+   line up); the right one (#admin-system-io-col) holds the Import/Export card. */
 .admin-system-options-col {
     display: flex;
     flex-direction: column;
@@ -192,7 +204,7 @@
     flex-shrink: 0;
 }
 
-/* Appears beside .admin-system-options-col once Use JSON is off (see
+/* Appears between the two .admin-system-options-col columns once Use JSON is off (see
    renderSyncPanelVisibility / animateSystemPanelsForUseJson in admin.js),
    and also while a switch is being staged so the connection can be set up
    first. Holds the Database Connection editor plus the Sync / Wipe actions.
@@ -1897,12 +1909,6 @@
     flex-shrink: 0;
 }
 
-.admin-user-role-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
 .admin-user-summary {
     font-size: 0.85rem;
     color: var(--text-muted);
@@ -2166,6 +2172,33 @@
     padding: 8px 10px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
+}
+
+/* Role items are tinted at rest (unlike Delete, which only reddens on hover)
+   so promote vs demote reads at a glance. */
+#admin-user-row-menu-promote {
+    color: var(--success);
+}
+
+#admin-user-row-menu-promote:hover {
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    color: var(--success);
+}
+
+#admin-user-row-menu-demote {
+    color: var(--error);
+}
+
+#admin-user-row-menu-demote:hover {
+    background: color-mix(in srgb, var(--error) 14%, transparent);
+    color: var(--error);
+}
+
+.admin-user-row-menu-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+    flex-shrink: 0;
 }
 
 .admin-user-row-menu-item:hover {
@@ -2683,7 +2716,7 @@
 .admin-pid-add-entry-menu.admin-pid-menu-flip-up {
     top: auto;
     bottom: calc(100% + 6px);
-    animation-name: revealUp;
+    animation-name: revealUpMenu;
 }
 
 /* Temporarily lifts the panel's own scroll-clipping while a section-action

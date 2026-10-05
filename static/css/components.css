@@ -205,7 +205,7 @@ input::placeholder,
 .select-dropdown--up .select-dropdown-menu {
     top: auto;
     bottom: calc(100% + 6px);
-    animation-name: revealUp;
+    animation-name: revealUpMenu;
 }
 .select-dropdown-option {
     padding: 8px 10px;

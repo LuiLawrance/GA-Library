@@ -445,16 +445,23 @@ function _showAdminSystemTip(trigger) {
 
     const anchor = trigger.getBoundingClientRect();
     const bubble = tip.getBoundingClientRect();
-    const margin = 8;
+    const margin = 8; // min distance from the viewport edges
+    const gap = 4;    // distance between the bubble and the icon
 
     let left = anchor.left + anchor.width / 2 - bubble.width / 2;
     left = Math.max(margin, Math.min(left, window.innerWidth - bubble.width - margin));
 
-    let top = anchor.top - bubble.height - margin;
-    if (top < margin) top = anchor.bottom + margin; // flip below when clipped at the top
+    let top = anchor.top - bubble.height - gap;
+    if (top < margin) top = anchor.bottom + gap; // flip below when clipped at the top
 
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
+    // The rects above are already zoom-scaled (main.css sets html{zoom} under
+    // 2100px), but left/top are applied in pre-zoom px and scaled again — so
+    // divide it back out, or the bubble drifts up/left by ~10% of its distance
+    // from the viewport's top-left (same issue flipCapture's compensateZoom
+    // handles in animation.js).
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    tip.style.left = `${left / zoom}px`;
+    tip.style.top = `${top / zoom}px`;
     void tip.offsetWidth; // reflow at opacity:0 so the fade-in transition runs
     tip.classList.add('visible');
 }
@@ -482,16 +489,19 @@ document.addEventListener('focusout', e => {
 // Phase 2 of animateSystemPanelsForUseJson vertically wipes the sync panel
 // open/shut via animateHeightWipe (animation.js) — same 300ms technique as
 // the staging confirm bar's own wipe, so bar and panel move in lockstep when a
-// switch is being staged. Phase 1 slides the settings card via flipSlide: the
-// card's horizontal position shifts only as a side effect of
-// #admin-system-panels' justify-content:center re-centering around however many
-// flex items are visible (card alone vs. card + sync panel), which no CSS
-// property directly drives — FLIP inverts the resulting jump into a slide.
+// switch is being staged. Phase 1 slides the two outer columns (settings on
+// the left, Import/Export on the right) via flipSlide: they move apart / back
+// together only as a side effect of #admin-system-panels' justify-content:
+// center re-centering around however many flex items are visible (two columns
+// alone vs. with the sync panel between them), which no CSS property directly
+// drives — FLIP inverts the resulting jump into a slide.
 const ADMIN_SYNC_PANEL_WIPE_MS = 300;
 
-function _settingsCardEl() {
-    return document.getElementById('admin-system-options-col')
-        || document.getElementById('admin-system-settings');
+function _systemSideColumnEls() {
+    return [
+        document.getElementById('admin-system-options-col'),
+        document.getElementById('admin-system-io-col'),
+    ];
 }
 
 // Bumped once per animateSystemPanelsForUseJson call. Each phase re-checks
@@ -501,18 +511,19 @@ function _settingsCardEl() {
 let _adminSystemPanelsGen = 0;
 
 // Click-triggered reveal/hide of the Database Connection / Sync / Wipe panel
-// beside the settings card, which only applies once Use JSON is off. Two
+// between the settings and Import/Export columns, which only applies once Use
+// JSON is off. Two
 // distinct phases, not everything at once — the menus settle their HORIZONTAL
 // positions first, then the panel wipes in VERTICALLY:
 //
 //   Showing:  1) un-hide the sync panel but pin it to zero height, so it
-//             claims only its width; the settings card slides across to its
-//             paired position around that (flipSlide).
+//             claims only its width; the two side columns slide apart to
+//             make room for it (flipSlide).
 //             2) THEN the sync panel wipes open downward (animateHeightWipe).
 //
 //   Hiding:   the exact reverse — 1) the panel collapses its height to zero,
-//             2) THEN it's dropped (releasing its width) and the settings
-//             card slides back to centered.
+//             2) THEN it's dropped (releasing its width) and the side
+//             columns slide back together.
 async function animateSystemPanelsForUseJson(useJson) {
     const syncPanel = document.getElementById('admin-system-sync-panel');
     if (!syncPanel) return;
@@ -520,7 +531,7 @@ async function animateSystemPanelsForUseJson(useJson) {
     const gen = ++_adminSystemPanelsGen;
 
     if (!useJson) {
-        await flipSlide(_settingsCardEl(), () => {
+        await flipSlide(_systemSideColumnEls(), () => {
             syncPanel.classList.remove('hidden');
             syncPanel.style.height = '0px';
             syncPanel.style.paddingTop = '0px';
@@ -532,7 +543,7 @@ async function animateSystemPanelsForUseJson(useJson) {
     } else {
         await animateHeightWipe(syncPanel, false, {duration: ADMIN_SYNC_PANEL_WIPE_MS, collapsePadding: true});
         if (gen !== _adminSystemPanelsGen) return; // a newer toggle took over
-        await flipSlide(_settingsCardEl(), () => {
+        await flipSlide(_systemSideColumnEls(), () => {
             syncPanel.classList.add('hidden');
         }, {axis: 'x', duration: 280});
         if (gen !== _adminSystemPanelsGen) return;
@@ -1542,11 +1553,33 @@ function _openAdminUserRowMenu(username, right, top, btn) {
     menu.dataset.username = username;
     menu.classList.remove('hidden');
 
-    // Deleting users is admin-and-up; moderators keep Reset Omni / Reset
-    // Password only. Toggled before the size is measured below so the menu is
-    // positioned at its actual height.
-    menu.querySelector('.admin-user-row-menu-item-danger')
-        ?.classList.toggle('hidden', !ADMIN_CARDS_RANKS.has(authType));
+    // Deleting users and changing roles are admin-and-up; moderators keep
+    // Reset Omni / Reset Password only. Toggled before the size is measured
+    // below so the menu is positioned at its actual height.
+    const canAdmin = ADMIN_CARDS_RANKS.has(authType);
+    menu.querySelector('.admin-user-row-menu-item-danger')?.classList.toggle('hidden', !canAdmin);
+
+    // Promote / Demote step one rank up/down RANK_ORDER from the target's
+    // current rank. Mirrors api_admin_set_user_role(): the menu only opens on
+    // users strictly below the viewer, and you can't promote someone up to
+    // (or past) your own rank, or demote anyone already at the bottom tier.
+    const viewerIdx = RANK_ORDER.indexOf(adminUsersData.find(u => u.username === currentUser)?.auth_type);
+    const targetIdx = RANK_ORDER.indexOf(adminUsersData.find(u => u.username === username)?.auth_type);
+    const promoteTo = targetIdx - 1 > viewerIdx ? RANK_ORDER[targetIdx - 1] : null;
+    const demoteTo = targetIdx >= 0 && targetIdx < RANK_ORDER.length - 1 ? RANK_ORDER[targetIdx + 1] : null;
+    const promoteItem = document.getElementById('admin-user-row-menu-promote');
+    const demoteItem = document.getElementById('admin-user-row-menu-demote');
+    if (promoteItem) {
+        promoteItem.classList.toggle('hidden', !canAdmin || viewerIdx < 0 || !promoteTo);
+        if (promoteTo) promoteItem.textContent = `Promote to ${formatRole(promoteTo)}`;
+    }
+    if (demoteItem) {
+        demoteItem.classList.toggle('hidden', !canAdmin || viewerIdx < 0 || !demoteTo);
+        if (demoteTo) demoteItem.textContent = `Demote to ${formatRole(demoteTo)}`;
+    }
+    // The divider under the role items only shows when at least one of them does.
+    document.getElementById('admin-user-row-menu-role-divider')?.classList.toggle('hidden',
+        !!promoteItem?.classList.contains('hidden') && !!demoteItem?.classList.contains('hidden'));
 
     const z = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
     const vw = (window.innerWidth || 99999) / z;
@@ -1602,7 +1635,9 @@ function adminUserRowMenuAction(action) {
     const username = document.getElementById('admin-user-row-menu')?.dataset.username;
     closeAdminUserRowMenu();
     if (!username) return;
-    if (action === 'reset-omnidex') resetAdminUserOmnidex(username);
+    if (action === 'promote') promoteAdminUser(username);
+    else if (action === 'demote') demoteAdminUser(username);
+    else if (action === 'reset-omnidex') resetAdminUserOmnidex(username);
     else if (action === 'reset-password') resetAdminUserPassword(username);
     else if (action === 'delete') deleteAdminUser(username);
 }
@@ -1695,7 +1730,6 @@ async function deleteAdminUser(username) {
             adminUserDetailDecks = null;
             renderAdminUserProfileCol();
             renderAdminUserDetail();
-            updateAdminUserRoleButtons();
         }
 
         renderAdminUserRows();
@@ -1704,33 +1738,27 @@ async function deleteAdminUser(username) {
     }
 }
 
-// Promote/demote move the selected user one step up/down RANK_ORDER from
-// their CURRENT rank — there's no fixed target rank anymore now that there
-// are 4 tiers instead of a binary admin/local toggle.
-function promoteAdminUser() {
-    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+// Promote/demote move a user one step up/down RANK_ORDER from their CURRENT
+// rank — triggered from the per-user row menu, which only offers each one
+// when the step is allowed (see _openAdminUserRowMenu).
+function promoteAdminUser(username) {
+    const record = adminUsersData.find(u => u.username === username);
     if (!record) return;
     const idx = RANK_ORDER.indexOf(record.auth_type);
     if (idx <= 0) return;
-    setAdminUserRole(RANK_ORDER[idx - 1]);
+    setAdminUserRole(username, RANK_ORDER[idx - 1]);
 }
 
-function demoteAdminUser() {
-    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
+function demoteAdminUser(username) {
+    const record = adminUsersData.find(u => u.username === username);
     if (!record) return;
     const idx = RANK_ORDER.indexOf(record.auth_type);
     if (idx < 0 || idx >= RANK_ORDER.length - 1) return;
-    setAdminUserRole(RANK_ORDER[idx + 1]);
+    setAdminUserRole(username, RANK_ORDER[idx + 1]);
 }
 
-async function setAdminUserRole(newRole) {
-    const username = adminUserDetailSelected;
+async function setAdminUserRole(username, newRole) {
     if (!username) return;
-
-    const promoteBtn = document.getElementById('admin-user-promote-btn');
-    const demoteBtn = document.getElementById('admin-user-demote-btn');
-    if (promoteBtn) promoteBtn.disabled = true;
-    if (demoteBtn) demoteBtn.disabled = true;
 
     try {
         const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/role`, {
@@ -1742,7 +1770,6 @@ async function setAdminUserRole(newRole) {
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             alert(data.detail || 'Failed to update role.');
-            updateAdminUserRoleButtons();
             return;
         }
 
@@ -1750,58 +1777,10 @@ async function setAdminUserRole(newRole) {
         if (record) record.auth_type = newRole;
 
         renderAdminUserRows();
-        renderAdminUserProfileCol();
-        updateAdminUserRoleButtons();
+        if (adminUserDetailSelected === username) renderAdminUserProfileCol();
     } catch (err) {
         alert('Request failed.');
-        updateAdminUserRoleButtons();
     }
-}
-
-// Buttons "light up" (become enabled) only when a user is selected and the
-// action would actually do something. Mirrors the backend's checks in
-// api_admin_set_user_role(): the viewer can't touch anyone at or above their
-// own rank at all, can't promote someone up to (or past) their own rank, and
-// can't demote anyone already at the bottom "user" tier. Also blocks acting
-// on yourself, same as before (avoids an admin accidentally locking
-// themselves out mid-session).
-function updateAdminUserRoleButtons() {
-    const promoteBtn = document.getElementById('admin-user-promote-btn');
-    const demoteBtn = document.getElementById('admin-user-demote-btn');
-    if (!promoteBtn || !demoteBtn) return;
-
-    // Changing roles is an admin-and-up action — moderators can view users and
-    // reset Omni/password but never promote or demote. Hide the controls
-    // outright for them (the backend also 403s POST /role).
-    const canManageRoles = ADMIN_CARDS_RANKS.has(authType);
-    document.querySelector('.admin-user-role-actions')?.classList.toggle('hidden', !canManageRoles);
-    if (!canManageRoles) {
-        promoteBtn.disabled = true;
-        demoteBtn.disabled = true;
-        return;
-    }
-
-    const record = adminUsersData.find(u => u.username === adminUserDetailSelected);
-    const viewerRecord = adminUsersData.find(u => u.username === currentUser);
-    const isSelf = adminUserDetailSelected === currentUser;
-
-    if (!record || !viewerRecord || isSelf) {
-        promoteBtn.disabled = true;
-        demoteBtn.disabled = true;
-        return;
-    }
-
-    const viewerIndex = RANK_ORDER.indexOf(viewerRecord.auth_type);
-    const targetIndex = RANK_ORDER.indexOf(record.auth_type);
-
-    if (targetIndex <= viewerIndex) {
-        promoteBtn.disabled = true;
-        demoteBtn.disabled = true;
-        return;
-    }
-
-    promoteBtn.disabled = (targetIndex - 1) <= viewerIndex;
-    demoteBtn.disabled = targetIndex >= RANK_ORDER.length - 1;
 }
 
 async function selectAdminUserDetail(username) {
@@ -1822,7 +1801,6 @@ async function selectAdminUserDetail(username) {
     renderAdminUserRows();
     renderAdminUserProfileCol();
     renderAdminUserDetail();
-    updateAdminUserRoleButtons();
 
     profileCol?.classList.remove('fade-out');
     detail?.classList.remove('fade-out');
@@ -1973,13 +1951,16 @@ function renderAdminUserProfileCol() {
         : '…';
 
     // Admin notes are visible only for a user who ranks strictly below the
-    // viewer (matches the backend: api_admin_user blanks admin_note otherwise,
-    // and api_admin_user_note 403s the save). Same rule as the row action menu.
+    // viewer, or to the owner on their own profile (matches the backend's
+    // _can_note: api_admin_user blanks admin_note otherwise, and
+    // api_admin_user_note rejects the save).
     const viewerRec = adminUsersData.find(u => u.username === currentUser);
-    const canManageTarget = !!viewerRec && record.username !== currentUser
-        && RANK_ORDER.indexOf(record.auth_type) > RANK_ORDER.indexOf(viewerRec.auth_type);
+    const isSelf = record.username === currentUser;
+    const canNote = !!viewerRec && (isSelf
+        ? viewerRec.auth_type === 'owner'
+        : RANK_ORDER.indexOf(record.auth_type) > RANK_ORDER.indexOf(viewerRec.auth_type));
 
-    const noteBlock = profileLoaded && canManageTarget
+    const noteBlock = profileLoaded && canNote
         ? `<div class="admin-user-meta admin-user-note-block">
             <span class="admin-user-meta-label label label--muted label--sm">Notes</span>
             <textarea class="admin-user-note-input scroll-thin" id="admin-user-note" rows="3"
@@ -5614,7 +5595,6 @@ function initAdmin() {
     // Hide/show the Refresh group up front from the retained adminLocalDbOn
     // (see the reset block above) so it doesn't flash on the way in.
     updateAdminPidRefreshButton();
-    updateAdminUserRoleButtons();
     positionPillIndicator(document.querySelector('.admin-cards-subnav'));
     positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
     positionPillIndicator(document.getElementById('admin-pid-marketplace-toggle'));
