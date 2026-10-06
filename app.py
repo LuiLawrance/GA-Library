@@ -61,6 +61,7 @@ import contextlib
 import db_cache
 import io
 import json
+import needs_action
 import os
 import random
 import re
@@ -2720,6 +2721,33 @@ async def api_admin_set_foil_kind_swap(request: Request):
     return JSONResponse({"edition_id": edition_id, "foil_kind_swapped": swapped})
 
 
+# The "Needs Action" log (admin Cards -> Needs Action) — product pages a scrape
+# flagged for a manual look; see needs_action.py for what gets flagged and why.
+@app.get("/api/admin/pricing/needs-action")
+async def api_admin_needs_action(request: Request):
+    require_cards_admin(request)
+
+    include_resolved = request.query_params.get("resolved") in ("1", "true")
+    return JSONResponse({"flags": needs_action.list_flags(include_resolved)})
+
+
+@app.post("/api/admin/pricing/needs-action/{flag_id}/resolve")
+async def api_admin_needs_action_resolve(flag_id: int, request: Request):
+    username = require_cards_admin(request)
+
+    body = await request.json()
+    resolved = bool(body.get("resolved", True))
+
+    flag = needs_action.set_resolved(flag_id, resolved, username)
+    if flag is None:
+        raise HTTPException(
+            status_code=404 if resolved else 409,
+            detail="Flag not found" if resolved else "Flag not found, or this card already has an open flag",
+        )
+
+    return JSONResponse({"flag": flag})
+
+
 @app.post("/api/admin/pricing/clear-last-updated")
 async def api_admin_clear_last_updated(request: Request):
     require_cards_admin(request)
@@ -3296,6 +3324,11 @@ async def admin_cards_info_page():
 
 @app.get("/admin/cards/pricing", response_class=HTMLResponse)
 async def admin_cards_pricing_page():
+    return serve_index()
+
+
+@app.get("/admin/cards/needs-action", response_class=HTMLResponse)
+async def admin_cards_needs_action_page():
     return serve_index()
 
 

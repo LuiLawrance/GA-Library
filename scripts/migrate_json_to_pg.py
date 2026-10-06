@@ -570,12 +570,10 @@ def migrate_pricing(known_foil_pairs: set[tuple[str, str]], force: bool = False)
 
         session.execute(delete(PriceSale))
         for batch in _chunked(sales_rows):
-            # ON CONFLICT DO NOTHING dedups on the full row tuple
-            # (date, marketplace, price, quantity, condition) per foil.
-            stmt = pg_insert(PriceSale).values(batch).on_conflict_do_nothing(
-                index_elements=["edition_id", "foil_id", "date", "marketplace", "price", "quantity", "condition"]
-            )
-            session.execute(stmt)
+            # Inserted as-is, same as listings: identical same-day sales in the
+            # JSON are genuinely separate rows (price_sales' unique constraint
+            # that used to collapse them was dropped in c9d0e1f2a3b4).
+            session.execute(PriceSale.__table__.insert(), batch)
 
     print(f"price_listings: {len(listings_rows)}" + (f" ({listings_skipped} skipped, unknown foil_id)" if listings_skipped else ""))
     print(f"price_sales: {len(sales_rows)}" + (f" ({sales_skipped} skipped, unknown foil_id)" if sales_skipped else ""))
@@ -788,7 +786,7 @@ def main(force: bool = False) -> None:
 # that are — it won't silently miss one, but it also won't silently add one
 # outside this list that isn't actually FK-connected to it.
 _WIPE_TABLE_NAMES = [
-    "price_listings", "price_sales", "foil_tcg_overrides", "thema_scores", "card_errors",
+    "price_listings", "price_sales", "foil_tcg_overrides", "thema_scores", "card_errors", "pricing_flags",
     "inventory_cards", "inventory_sections", "inventory_bins",
     "deck_cards", "deck_sections", "decks",
     "watchlist_entries", "wishlist_entries",

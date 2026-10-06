@@ -46,6 +46,7 @@ const routes = {
     '/admin/cards': '/fragments/admin',
     '/admin/cards/info': '/fragments/admin',
     '/admin/cards/pricing': '/fragments/admin',
+    '/admin/cards/needs-action': '/fragments/admin',
     '/admin/users': '/fragments/admin',
     '/admin/system': '/fragments/admin',
     '/profile': '/fragments/profile',

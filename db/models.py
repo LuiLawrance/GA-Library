@@ -32,7 +32,7 @@ import datetime as dt
 
 from sqlalchemy import (
     Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Numeric, Text,
-    UniqueConstraint,
+    UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -237,6 +237,43 @@ class MarketplaceScrapeClock(Base):
     last_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
 
 
+class PricingFlag(Base):
+    """The admin "Needs Action" log — one row per product page a scrape flagged
+    for a manual look (see needs_action.py). Today the only reason is
+    "sales_window": the logged-out TCGPlayer sales popup only ever shows the
+    five most recent sales, so a scrape that stores 3+ new ones may have missed
+    older sales that scrolled out of that window.
+
+    At most one OPEN row per (edition_id, foil_id, marketplace, reason) — a
+    re-flag while still open adds onto it (new_sales / scrape_count /
+    last_flagged_at) instead of stacking duplicates. Resolved rows are kept as
+    the log's history. foil_id is "" for the edition's main product, or a Curio
+    Foil's id for its own separate product page — same convention as
+    marketplace_scrape_clocks."""
+    __tablename__ = "pricing_flags"
+    __table_args__ = (
+        Index("ix_pricing_flags_open", "edition_id", "foil_id", "marketplace", "reason",
+              unique=True, postgresql_where=text("resolved_at IS NULL")),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    edition_id: Mapped[str] = mapped_column(
+        ForeignKey("editions.edition_id", ondelete="CASCADE"), nullable=False, index=True)
+    foil_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    marketplace: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    new_sales: Mapped[int] = mapped_column(nullable=False, default=0)
+    scrape_count: Mapped[int] = mapped_column(nullable=False, default=1)
+    # One entry per flagged scrape: {"previous_latest": iso | None,
+    # "earliest_new": iso, "new_sales": int, "flagged_at": iso} — the window
+    # missed sales would fall in (see needs_action.flag_sales_window).
+    gaps: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    first_flagged_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_flagged_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[str | None] = mapped_column(Text)
+
+
 class ThemaScore(Base):
     __tablename__ = "thema_scores"
     __table_args__ = (CheckConstraint("foil_type IN ('nonfoil', 'foil')", name="thema_scores_foil_type_check"),)
@@ -282,10 +319,15 @@ class PriceListing(Base):
 
 
 class PriceSale(Base):
+    """No uniqueness on the row's values: two separate sales of the same
+    printing on the same day at the same price/condition are both real (the
+    unique constraint that used to collapse them was dropped in migration
+    c9d0e1f2a3b4). Duplicate protection lives in the writers — see
+    pricing_ga's settled-date scrape rule and count-aware import dedup."""
     __tablename__ = "price_sales"
     __table_args__ = (
         ForeignKeyConstraint(["edition_id", "foil_id"], ["foils.edition_id", "foils.foil_id"]),
-        UniqueConstraint("edition_id", "foil_id", "date", "marketplace", "price", "quantity", "condition"),
+        Index("ix_price_sales_edition_id_foil_id", "edition_id", "foil_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -1,5 +1,13 @@
 let adminActiveSection = 'pricing';
-let adminCardsView = 'pricing';
+let adminCardsView = 'pricing'; // 'info' | 'pricing' | 'needs-action'
+// The Needs Action log (see needs_action.py) — every flag the last load
+// returned (open, plus resolved ones once the Resolved filter has been
+// opened), and the open ones indexed by edition for the list's ⚠ markers and
+// the Card Info panel's banner.
+let adminNaFlags = [];
+let adminNaOpenByEdition = new Map();
+let adminNaFilter = 'open'; // 'open' | 'resolved'
+let adminNaResolvedLoaded = false;
 let adminPidDetailMode = 'regular';
 // Which marketplace the Pricing view is scoped to (pill above the list, next
 // to the TCGPlayer link button). State only for now — the Sales/Listings
@@ -265,6 +273,13 @@ async function switchAdminCardsView(view) {
     const section = document.getElementById('admin-section-pricing');
     if (!section || adminCardsView === view) return;
 
+    // Needs Action is TCGPlayer-only (it's TCGPlayer's 5-sale window it's
+    // about), so its Sales/Listings panel always shows that marketplace — its
+    // scope pill swaps out for the Open/Resolved one (see admin.css).
+    if (view === 'needs-action' && adminPidMarketplace !== 'tcgplayer') {
+        await switchAdminPidMarketplace('tcgplayer');
+    }
+
     section.querySelectorAll('.admin-cards-subnav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
     });
@@ -274,6 +289,7 @@ async function switchAdminCardsView(view) {
     const header = document.getElementById('admin-pid-table-header');
     const table = document.getElementById('admin-pid-table');
     const enteringInfo = view === 'info';
+    const leavingNa = adminCardsView === 'needs-action';
 
     await fadeSwap([header, table], async () => {
         // The selected card (adminPidDetailSelected) and its already-loaded
@@ -309,7 +325,15 @@ async function switchAdminCardsView(view) {
 
         await animateGridColumns(layout, () => {
             section.classList.toggle('admin-cards-mode-info', enteringInfo);
+            section.classList.toggle('admin-cards-mode-na', view === 'needs-action');
         });
+
+        // Each mode's pill sat display:none while the other mode was showing
+        // (see .admin-na-filter in admin.css), so its indicator has to be
+        // measured again now that it's visible.
+        positionPillIndicator(document.getElementById(
+            view === 'needs-action' ? 'admin-na-filter' : 'admin-pid-marketplace-toggle'
+        ));
 
         renderAdminPricingIds();
 
@@ -350,11 +374,361 @@ async function switchAdminCardsView(view) {
         }
     });
 
+    // Nothing open any more? The option wipes away now that you've left it.
+    if (leavingNa) updateAdminNaPillVisibility();
+
     // The list itself is shared, so either sub-view being opened first needs
     // it loaded — not just 'pricing' like before.
     if (!adminPidLoaded) {
         loadAdminPricingIds();
     }
+}
+
+// ── Needs Action log ──
+// Product pages a scrape flagged for a manual look (needs_action.py): the
+// logged-out TCGPlayer sales popup only shows the 5 most recent sales, so 3+
+// new ones in one scrape means older sales may have scrolled out unseen.
+//
+// Needs Action is a third mode of the shared list + card info grid (like Info
+// and Pricing — see switchAdminCardsView): the list narrows to flagged cards,
+// and the Card Info window shows the flag's gap — the newest sale on file
+// before the scrape and the earliest one it added — in place of the Last
+// Sales/Listings clocks. Missed sales, if any, fall between those two dates.
+// The Sales/Listings panel is Pricing's own, so they can be added right there.
+
+async function loadAdminNeedsAction() {
+    try {
+        const res = await fetch(`/api/admin/pricing/needs-action${adminNaResolvedLoaded ? '?resolved=1' : ''}`);
+        if (!res.ok) throw new Error('Failed to load Needs Action flags');
+        const data = await res.json();
+        adminNaFlags = data.flags || [];
+    } catch (err) {
+        // Keep whatever was last shown — the log is advisory, not worth an error state.
+        return;
+    }
+
+    adminNaApplyFlags();
+}
+
+// Re-derives everything that shows flags from adminNaFlags — the pill option
+// and its count badge, the Pricing list's ⚠ markers, the Needs Action list
+// itself, and the Card Info window's flag block.
+function adminNaApplyFlags() {
+    adminNaOpenByEdition = new Map();
+    adminNaFlags.forEach(flag => {
+        if (flag.resolved_at) return;
+        if (!adminNaOpenByEdition.has(flag.edition_id)) adminNaOpenByEdition.set(flag.edition_id, []);
+        adminNaOpenByEdition.get(flag.edition_id).push(flag);
+    });
+
+    updateAdminNaPillVisibility();
+
+    if (adminCardsView === 'needs-action') {
+        renderAdminPidRows();
+    } else {
+        document.querySelectorAll('#admin-pid-table .admin-pid-row').forEach(row => {
+            const record = adminPidData.find(e => e.edition_id === row.dataset.editionId);
+            const nameCell = row.querySelector('.admin-pid-col-name');
+            if (record && nameCell) nameCell.innerHTML = adminPidRowNameHtml(record, adminCardsView === 'info');
+        });
+    }
+
+    syncAdminNaBanner();
+}
+
+// The Needs Action pill option (and its count badge) only shows while there's
+// an open flag — or while it's the view you're on, so resolving the last flag
+// doesn't yank the view (or the Resolved history) out from under you; it
+// collapses once you switch away. Show/hide is a fade+wipe (.admin-na-collapsed
+// in admin.css). `instant` skips the wipe — for the page's first paint, where
+// positionPillIndicator needs the option's settled width straight away.
+function updateAdminNaPillVisibility({instant = false} = {}) {
+    const btn = document.querySelector('.admin-na-subnav-btn');
+    const badge = document.getElementById('admin-na-count');
+    if (!btn) return;
+
+    const count = adminNaFlags.filter(f => !f.resolved_at).length;
+    const shown = count > 0 || adminCardsView === 'needs-action';
+
+    // While collapsing, the badge keeps its last number rather than vanishing
+    // mid-wipe (which would reflow the label as it fades).
+    if (badge) {
+        if (count > 0) badge.textContent = count;
+        if (count > 0 || shown) badge.classList.toggle('hidden', count === 0);
+    }
+
+    if (instant) {
+        btn.style.transition = 'none';
+        btn.classList.toggle('admin-na-collapsed', !shown);
+        void btn.offsetWidth;
+        btn.style.transition = '';
+    } else {
+        btn.classList.toggle('admin-na-collapsed', !shown);
+    }
+
+    // The badge can change the option's width; keep the indicator under it
+    // when it's the active one (a no-op for Info/Pricing, which sit before it).
+    positionPillIndicator(btn.closest('.admin-cards-subnav'));
+}
+
+// Flags for one edition under the Open/Resolved filter currently showing.
+function adminNaFlagsForEdition(editionId) {
+    const resolved = adminNaFilter === 'resolved';
+    return adminNaFlags.filter(f => f.edition_id === editionId && !!f.resolved_at === resolved);
+}
+
+// Edition ids the Needs Action list shows under the current filter.
+function adminNaListedEditionIds() {
+    const resolved = adminNaFilter === 'resolved';
+    return new Set(adminNaFlags.filter(f => !!f.resolved_at === resolved).map(f => f.edition_id));
+}
+
+// Which product (main or Curio Foil) a record is currently showing — '' for
+// the main page, same convention as the flags' foil_id.
+function adminNaScopeFoilId(record) {
+    const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
+    return curioView ? record.curio.foil_id : '';
+}
+
+// The flag (under the current filter) for whichever product the record is
+// showing, falling back to its other product's flag if only that one has one.
+function adminNaPrimaryFlag(record) {
+    const flags = adminNaFlagsForEdition(record.edition_id);
+    const scope = adminNaScopeFoilId(record);
+    return flags.find(f => (f.foil_id || '') === scope) || flags[0] || null;
+}
+
+// The open flag for whichever product a record is currently showing — its
+// Curio Foil's own page when that row is toggled to it, the main page
+// otherwise (same scoping the Refresh buttons use).
+function adminNaOpenFlagForScope(record) {
+    const flags = adminNaOpenByEdition.get(record.edition_id);
+    if (!flags) return null;
+    const scope = adminNaScopeFoilId(record);
+    return flags.find(f => (f.foil_id || '') === scope) || null;
+}
+
+function adminNaProductLabel(flag, record) {
+    if (!flag.foil_id) return '';
+    return record?.curio?.foil_id === flag.foil_id ? (record.curio.kind || 'Curio Foil') : 'Curio Foil';
+}
+
+function adminNaSalesText(flag) {
+    const sales = `${flag.new_sales} new sale${flag.new_sales === 1 ? '' : 's'}`;
+    return flag.scrape_count > 1 ? `${sales} over ${flag.scrape_count} scrapes` : sales;
+}
+
+function adminNaDateText(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
+// A sale date ("YYYY-MM-DD", no time) for the compact Gap column — parsed as a
+// local date so it doesn't shift a day across time zones.
+function adminNaShortDate(isoDate) {
+    if (!isoDate) return '—';
+    const [y, m, d] = isoDate.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+}
+
+// Pricing list rows get a ⚠ ahead of the name while the edition has an open
+// flag (either product). Info rows stay plain.
+function adminPidRowNameHtml(e, infoMode) {
+    const flags = !infoMode && adminNaOpenByEdition.get(e.edition_id);
+    if (!flags) return escapeHtml(e.name);
+
+    const title = flags.map(f => {
+        const product = adminNaProductLabel(f, e);
+        return `${product ? `${product}: ` : ''}${adminNaSalesText(f)} — check for missed sales`;
+    }).join('\n');
+
+    return `<span class="admin-na-marker" title="${escapeHtml(title)}">⚠</span>${escapeHtml(e.name)}`;
+}
+
+// One Needs Action list row: Card / Rarity / Set / New (sales across the
+// edition's flags). Where the gap sits is drawn in the Sales table itself
+// (see adminNaGapDividerHtml), not listed here.
+function adminNaRowHtml(e) {
+    const flags = adminNaFlagsForEdition(e.edition_id);
+    const newSales = flags.reduce((sum, f) => sum + (f.new_sales || 0), 0);
+    const curioFlagged = flags.some(f => f.foil_id);
+
+    return `
+        <div class="admin-pid-row admin-pid-row-na ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
+             data-edition-id="${escapeHtml(e.edition_id)}"
+             onclick="selectAdminNaEdition('${escapeHtml(e.edition_id)}')">
+            <span class="admin-pid-col-name">${escapeHtml(e.name)}${curioFlagged ? ' <span class="admin-na-curio-mark" title="Curio Foil flagged">✨</span>' : ''}</span>
+            <span class="admin-pid-col-rarity">${escapeHtml(e.rarity || '—')}</span>
+            <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
+            <span class="admin-na-col-new">${newSales}</span>
+        </div>
+    `;
+}
+
+// Selecting a Needs Action row points the Card Info window at the flagged
+// product — flips the row's Curio Foil toggle to whichever side is flagged if
+// the side it's on isn't — then selects the card as usual.
+async function selectAdminNaEdition(editionId) {
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record) return;
+
+    const flags = adminNaFlagsForEdition(editionId);
+    const scope = adminNaScopeFoilId(record);
+    if (record.curio && flags.length > 0 && !flags.some(f => (f.foil_id || '') === scope)) {
+        if (flags[0].foil_id) {
+            adminPidCurioViewSelected.add(editionId);
+        } else {
+            adminPidCurioViewSelected.delete(editionId);
+        }
+        if (adminPidDetailSelected === editionId) renderAdminPricingDetailAll();
+    }
+
+    await selectAdminPricingDetail(editionId);
+}
+
+// Card Info flag block. Pricing mode: a compact banner for an open flag on the
+// product being shown. Needs Action mode: the full gap readout for whichever
+// flag the current filter shows, with Resolve/Reopen.
+function adminNaBannerHtml(record) {
+    if (adminCardsView === 'needs-action') return adminNaDetailHtml(record);
+
+    const flag = adminNaOpenFlagForScope(record);
+    if (!flag) return '';
+
+    return `
+        <div class="admin-na-banner">
+            <span class="admin-na-banner-icon">⚠</span>
+            <span class="admin-na-banner-text">
+                <b>${escapeHtml(adminNaSalesText(flag))}</b> in one scrape — TCGPlayer may have older sales
+                that didn't show while logged out.
+            </span>
+            <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-na-resolve-btn"
+                    onclick="resolveAdminNeedsActionFlag(${flag.id}, true)">Resolve</button>
+        </div>
+    `;
+}
+
+function adminNaGapStatsHtml(gap) {
+    return `
+        <div class="drawer-stats admin-pid-scrape-stats admin-na-gap-stats">
+            <div class="drawer-stat">
+                <span class="drawer-stat-label label label--muted label--sm">Last Known Sale</span>
+                <span class="drawer-stat-value">${escapeHtml(gap.previous_latest || 'None')}</span>
+            </div>
+            <div class="drawer-stat">
+                <span class="drawer-stat-label label label--muted label--sm">Earliest New Sale</span>
+                <span class="drawer-stat-value">${escapeHtml(gap.earliest_new || '—')}</span>
+            </div>
+        </div>
+    `;
+}
+
+function adminNaDetailHtml(record) {
+    const resolvedView = adminNaFilter === 'resolved';
+    const flags = adminNaFlagsForEdition(record.edition_id);
+    const scope = adminNaScopeFoilId(record);
+    const flag = flags.find(f => (f.foil_id || '') === scope);
+
+    if (!flag) {
+        const other = flags[0];
+        const message = other
+            ? `Only the ${other.foil_id ? escapeHtml(adminNaProductLabel(other, record)) : 'regular product'} is flagged — toggle ✨ to view it.`
+            : resolvedView ? 'No resolved flags for this card.' : 'Nothing needs action for this card.';
+        return `<div class="admin-na-detail admin-na-detail-empty">${message}</div>`;
+    }
+
+    const gaps = flag.gaps || [];
+    const [first, ...rest] = gaps;
+    const overlapping = first && first.previous_latest && first.previous_latest >= first.earliest_new;
+    const hint = !first ? ''
+        : !first.previous_latest ? 'First scrape for this product — check TCGPlayer for any sales before the earliest new one.'
+        : overlapping ? 'The new sales overlap what was already on file — a gap is unlikely, but worth a glance.'
+        : 'Check TCGPlayer (logged in) for sales between these two dates.';
+
+    const when = resolvedView
+        ? `Resolved ${adminNaDateText(flag.resolved_at)}${flag.resolved_by ? ` by ${escapeHtml(flag.resolved_by)}` : ''}`
+        : `Flagged ${adminNaDateText(flag.last_flagged_at)}`;
+
+    const extra = rest.map(g => `
+        <li>${escapeHtml(adminNaShortDate(g.previous_latest))} → ${escapeHtml(adminNaShortDate(g.earliest_new))}
+            · ${g.new_sales} new · ${escapeHtml(adminNaDateText(g.flagged_at))}</li>
+    `).join('');
+
+    return `
+        <div class="admin-na-detail ${resolvedView ? 'admin-na-detail-resolved' : ''}">
+            <div class="admin-na-detail-head">
+                <span class="admin-na-banner-icon">${resolvedView ? '✓' : '⚠'}</span>
+                <span class="admin-na-detail-title">${escapeHtml(adminNaSalesText(flag))}</span>
+                <span class="admin-na-detail-when">${when}</span>
+            </div>
+            ${first ? adminNaGapStatsHtml(first) : ''}
+            ${extra ? `<ul class="admin-na-gap-list"><li class="admin-na-gap-list-label">Later scrapes</li>${extra}</ul>` : ''}
+            ${hint ? `<p class="admin-na-hint">${hint}</p>` : ''}
+            <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-na-resolve-btn"
+                    onclick="resolveAdminNeedsActionFlag(${flag.id}, ${resolvedView ? 'false' : 'true'})">${resolvedView ? 'Reopen' : 'Resolve'}</button>
+        </div>
+    `;
+}
+
+// Swaps just the flag block's slot in place — a full renderAdminPricingImageCol()
+// would also reload (and flash) the card image.
+function syncAdminNaBanner() {
+    const slot = document.querySelector('#admin-pricing-image-col .admin-na-banner-slot');
+    if (!slot) return;
+
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    slot.innerHTML = record ? adminNaBannerHtml(record) : '';
+}
+
+async function switchAdminNeedsActionFilter(filter) {
+    if (adminNaFilter === filter) return;
+    adminNaFilter = filter;
+
+    document.querySelectorAll('#admin-na-filter .pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filter);
+    });
+    positionPillIndicator(document.getElementById('admin-na-filter'));
+
+    // Resolved history is only fetched once someone actually asks for it.
+    if (filter === 'resolved' && !adminNaResolvedLoaded) {
+        adminNaResolvedLoaded = true;
+        await loadAdminNeedsAction();
+        return;
+    }
+
+    adminNaApplyFlags();
+}
+
+async function resolveAdminNeedsActionFlag(flagId, resolved) {
+    try {
+        const res = await fetch(`/api/admin/pricing/needs-action/${flagId}/resolve`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({resolved}),
+        });
+        if (!res.ok) {
+            // Reopen refuses when that product already has a newer open flag —
+            // a reload shows it.
+            await loadAdminNeedsAction();
+            return;
+        }
+
+        const {flag} = await res.json();
+        const index = adminNaFlags.findIndex(f => f.id === flagId);
+        if (index >= 0) {
+            // Resolved rows only stay in memory once the Resolved list has
+            // been loaded — otherwise it would show a partial history.
+            if (resolved && !adminNaResolvedLoaded) {
+                adminNaFlags.splice(index, 1);
+            } else {
+                adminNaFlags[index] = flag;
+            }
+        }
+    } catch (err) {
+        return;
+    }
+
+    adminNaApplyFlags();
 }
 
 async function loadAdminSystemSettings() {
@@ -2109,6 +2483,7 @@ async function loadAdminPricingIds() {
         adminLocalDbOn = !!data.local_db;
         adminPidLoaded = true;
         renderAdminPricingIds();
+        loadAdminNeedsAction();
         loadAdminFeaturedSets();
         loadAdminSetSearches();
     } catch (err) {
@@ -2677,7 +3052,17 @@ function renderAdminPidHeader() {
     const selectAllChecked = prevSelectAll ? prevSelectAll.checked : false;
     const selectAllIndeterminate = prevSelectAll ? prevSelectAll.indeterminate : false;
 
-    header.innerHTML = infoMode ? `
+    const naMode = adminCardsView === 'needs-action';
+
+    header.innerHTML = naMode ? `
+        <div class="admin-pid-row admin-pid-row-header admin-pid-row-na">
+            <span class="admin-pid-col-name admin-pid-sort-header" title="Sort by card name (click again to reverse; Sales/Listings sorts order by most recently flagged)"
+                  onclick="setAdminPidSort('name')">CARD${adminPidSortArrowHtml('name')}</span>
+            <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
+            <span class="admin-pid-col-set">${adminPidSetFilterHtml()}</span>
+            <span class="admin-na-col-new" title="New sales the flagged scrape(s) added">New</span>
+        </div>
+    ` : infoMode ? `
         <div class="admin-pid-row admin-pid-row-header admin-pid-row-info">
             <span class="admin-pid-col-name admin-pid-sort-header" title="Sort by card name"
                   onclick="setAdminPidSort('name')">CARD${adminPidSortArrowHtml('name')}</span>
@@ -2769,11 +3154,16 @@ function renderAdminPricingIds() {
 function adminPidFilteredEditions() {
     const query = (document.getElementById('admin-pid-search')?.value || '').trim().toLowerCase();
 
+    const naMode = adminCardsView === 'needs-action';
+    const naIds = naMode ? adminNaListedEditionIds() : null;
+
     return adminPidData.filter(e => {
-        if (adminPidIdFilter === 'missing' && e.product_id) return false;
-        if (adminPidIdFilter === 'has_id' && !adminPidIsScrapable(e.product_id)) return false;
-        if (adminPidIdFilter === 'no_id' && e.product_id !== ADMIN_PID_NO_LISTINGS_SENTINEL) return false;
-        if (adminPidIdFilter === 'curio' && !e.curio) return false;
+        if (naMode && !naIds.has(e.edition_id)) return false;
+
+        if (!naMode && adminPidIdFilter === 'missing' && e.product_id) return false;
+        if (!naMode && adminPidIdFilter === 'has_id' && !adminPidIsScrapable(e.product_id)) return false;
+        if (!naMode && adminPidIdFilter === 'no_id' && e.product_id !== ADMIN_PID_NO_LISTINGS_SENTINEL) return false;
+        if (!naMode && adminPidIdFilter === 'curio' && !e.curio) return false;
 
         if (adminPidSetFilter.size > 0 && !adminPidSetFilter.has(e.set_prefix)) return false;
 
@@ -2815,6 +3205,11 @@ function adminPidListFieldDays(e, field) {
 }
 
 function adminPidCompareEditions(a, b) {
+    if (adminCardsView === 'needs-action' && adminPidSortField !== 'name') {
+        const latest = e => adminNaFlagsForEdition(e.edition_id).reduce((m, f) => f.last_flagged_at > m ? f.last_flagged_at : m, '');
+        return latest(b).localeCompare(latest(a));
+    }
+
     const field = adminPidSortField;
     const dir = adminPidSortDir === 'desc' ? -1 : 1;
     const va = adminPidSortValue(a, field);
@@ -2862,6 +3257,15 @@ function updateAdminPidSummaryText() {
     if (!summary) return;
 
     const filtered = adminPidFilteredEditions();
+
+    if (adminCardsView === 'needs-action') {
+        const n = filtered.length;
+        summary.textContent = adminNaFilter === 'resolved'
+            ? `${n} card${n === 1 ? '' : 's'} resolved`
+            : n === 0 ? 'Nothing needs action' : `${n} card${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} a sales check`;
+        return;
+    }
+
     const withId = filtered.filter(e => {
         const curioView = e.curio && adminPidCurioViewSelected.has(e.edition_id);
         return curioView ? e.curio.product_id : e.product_id;
@@ -2895,7 +3299,11 @@ function renderAdminPidRows() {
     adminPidWin = {start: 0, end: 0};
 
     if (filtered.length === 0) {
-        table.innerHTML = '<div class="admin-pid-empty">No editions match.</div>';
+        const naEmpty = adminCardsView === 'needs-action' && adminNaListedEditionIds().size === 0;
+        table.innerHTML = `<div class="admin-pid-empty">${
+            !naEmpty ? 'No editions match.'
+                : adminNaFilter === 'resolved' ? 'Nothing resolved yet.' : 'Nothing needs action right now.'
+        }</div>`;
     } else {
         adminPidMeasureRowPitch(table, filtered, infoMode);
 
@@ -2926,6 +3334,8 @@ function renderAdminPidRows() {
 
     // Select-all/refresh state only exists in Pricing mode's markup — Info
     // mode has no checkboxes at all, so there's nothing for these to sync.
+    // (Needs Action has none either; the calls no-op on the missing boxes but
+    // keep the Refresh buttons — which act on the open card — current.)
     if (!infoMode) {
         syncAdminPidSelectAllBox();
         updateAdminPidRefreshButton();
@@ -2940,6 +3350,8 @@ function renderAdminPidRows() {
 // virtualized now: rows are built on demand as they scroll into range, not all
 // up front.
 function adminPidRowHtml(e, infoMode) {
+    if (adminCardsView === 'needs-action') return adminNaRowHtml(e);
+
     return infoMode ? `
         <div class="admin-pid-row admin-pid-row-info ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
              data-edition-id="${escapeHtml(e.edition_id)}"
@@ -2957,7 +3369,7 @@ function adminPidRowHtml(e, infoMode) {
                        ${adminPidSelected.has(e.edition_id) ? 'checked' : ''}
                        onchange="onAdminPidRowCheckToggle(this)">
             </span>
-            <span class="admin-pid-col-name">${escapeHtml(e.name)}</span>
+            <span class="admin-pid-col-name">${adminPidRowNameHtml(e, false)}</span>
             <span class="admin-pid-col-rarity">${escapeHtml(e.rarity || '—')}</span>
             <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
             <span class="admin-pid-col-status" onclick="event.stopPropagation()">
@@ -4059,6 +4471,9 @@ async function refreshSelectedAdminPricing(target) {
 
     adminPidRefreshing = false;
 
+    // A sales scrape may have flagged cards for the Needs Action log.
+    if (target !== 'listings') loadAdminNeedsAction();
+
     // The refresh has run — drop the selection so the next one starts from a
     // clean slate rather than silently re-refreshing whatever's still checked
     // (including cards checked under a since-changed filter). Only the row
@@ -4144,6 +4559,19 @@ function setAdminPricingActiveRow(editionId) {
     row?.classList.add('admin-pid-row-active');
 }
 
+// Points the Card Info panel at a new card with nothing of the old one's
+// loaded or open.
+function adminPidResetDetailState(editionId) {
+    adminPidDetailSelected = editionId;
+    adminPidDetailHistory = null;
+    adminPidDetailFoils = null;
+    adminPidAddEntryOpenType = null;
+    adminPidAddEntryFoilId = null;
+    adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
+    adminPidImportOpenType = null;
+    adminPidExportOpenType = null;
+}
+
 async function selectAdminPricingDetail(editionId) {
     if (adminPidDetailSelected === editionId) return;
 
@@ -4151,14 +4579,7 @@ async function selectAdminPricingDetail(editionId) {
     const detail = document.getElementById('admin-pricing-detail');
 
     await fadeSwap([imageCol, detail], () => {
-        adminPidDetailSelected = editionId;
-        adminPidDetailHistory = null;
-        adminPidDetailFoils = null;
-        adminPidAddEntryOpenType = null;
-        adminPidAddEntryFoilId = null;
-        adminPidAddEntryCondition = ADMIN_PID_CONDITIONS[0];
-        adminPidImportOpenType = null;
-        adminPidExportOpenType = null;
+        adminPidResetDetailState(editionId);
 
         setAdminPricingActiveRow(editionId);
         renderAdminPricingDetailAll();
@@ -4393,7 +4814,8 @@ function renderAdminPricingImageCol() {
         pidRowHtml = '';
     } else {
         const curioView = record.curio && adminPidCurioViewSelected.has(record.edition_id);
-        statsHtml = adminPidScrapeStatsHtml(record);
+        statsHtml = `<div class="admin-na-banner-slot">${adminNaBannerHtml(record)}</div>`
+            + (adminCardsView === 'needs-action' ? '' : adminPidScrapeStatsHtml(record));
         // Product ID is a TCGPlayer concept — collapse the whole row (label +
         // field + ✨ toggle) on the other marketplaces. The class drives a CSS
         // wipe; switchAdminPidMarketplace toggles it on the live element so the
@@ -4453,7 +4875,12 @@ function renderAdminPricingDetail() {
         return;
     }
 
-    if (adminPidDetailMode === 'discord') {
+    // Needs Action hides the Regular/Discord pill (see admin.css) and is always
+    // about the regular TCGPlayer sales — it ignores a Discord selection left
+    // over from Pricing rather than resetting it.
+    const naMode = adminCardsView === 'needs-action';
+
+    if (adminPidDetailMode === 'discord' && !naMode) {
         panel.innerHTML = '<div class="admin-pid-detail-empty">Discord listings management is coming soon.</div>';
         panel.classList.remove('admin-pid-popover-open');
         panel.closest('.admin-pricing-layout')?.classList.remove('admin-pid-popover-open');
@@ -4496,7 +4923,7 @@ function renderAdminPricingDetail() {
             </div>
             ${adminPidDetailHistoryTableHtml(salesRows, historyLoaded, 'sales')}
         </div>
-        <div class="admin-pid-detail-section" id="admin-pid-section-listings">
+        ${naMode ? '' : `<div class="admin-pid-detail-section" id="admin-pid-section-listings">
             <div class="admin-pid-detail-section-header">
                 <span class="admin-pid-detail-section-title">Listings${curioTitleSuffix}</span>
                 <div class="admin-pid-section-actions">
@@ -4506,7 +4933,7 @@ function renderAdminPricingDetail() {
                 </div>
             </div>
             ${adminPidDetailHistoryTableHtml(listingsRows, historyLoaded, 'listings')}
-        </div>
+        </div>`}
     `;
 
     // Lifts each ancestor's own overflow clipping while a section-action popup
@@ -5410,11 +5837,51 @@ async function submitAdminPricingManualEntry(type) {
     }
 }
 
+// Needs Action's Sales table marks each flagged scrape's gap with a red
+// divider: just below the oldest sale on/after the gap's earliest_new date.
+// /history returns sales newest-first, so everything above the line is what
+// that scrape added (or newer) and everything below is older — sales added by
+// hand for the missing window land right under the line. Returns
+// {rowIndex: html} — a divider goes before that row (rows.length = after the
+// last row).
+function adminNaGapDividersByRow(rows) {
+    if (adminCardsView !== 'needs-action') return {};
+
+    const record = adminPidData.find(e => e.edition_id === adminPidDetailSelected);
+    if (!record) return {};
+
+    const scope = adminNaScopeFoilId(record);
+    const flag = adminNaFlagsForEdition(record.edition_id).find(f => (f.foil_id || '') === scope);
+    const resolved = !!flag?.resolved_at;
+
+    const byRow = {};
+    for (const gap of flag?.gaps || []) {
+        if (!gap.earliest_new) continue;
+
+        let at = rows.findIndex(r => r.date < gap.earliest_new);
+        if (at < 0) at = rows.length;
+
+        const label = gap.previous_latest
+            ? `Possible missed sales · ${adminNaShortDate(gap.previous_latest)} → ${adminNaShortDate(gap.earliest_new)}`
+            : `No earlier sales on file before ${adminNaShortDate(gap.earliest_new)}`;
+
+        byRow[at] = (byRow[at] || '') + `
+            <div class="admin-na-gap-divider ${resolved ? 'admin-na-gap-divider-resolved' : ''}"
+                 title="Sales above were added by the flagged scrape (or are newer). Any sales TCGPlayer hid while logged out fall below this line.">
+                <span>${escapeHtml(label)}</span>
+            </div>
+        `;
+    }
+    return byRow;
+}
+
 function adminPidDetailHistoryTableHtml(rows, loaded, type) {
     if (!loaded) return '<div class="admin-pid-detail-loading">Loading…</div>';
     if (!rows.length) return '<div class="admin-pid-detail-empty-small">No records.</div>';
 
-    const rowsHtml = rows.map(r => `
+    const dividers = type === 'sales' ? adminNaGapDividersByRow(rows) : {};
+
+    const rowsHtml = rows.map((r, i) => (dividers[i] || '') + `
         <div class="admin-pid-detail-row">
             <span>${escapeHtml(r.date)}</span>
             <span>${escapeHtml(r.condition || '')}</span>
@@ -5423,7 +5890,7 @@ function adminPidDetailHistoryTableHtml(rows, loaded, type) {
             <button type="button" class="admin-pid-detail-delete-btn" title="Delete entry"
                     onclick="deleteAdminPidEntry('${type}', '${escapeHtml(r.foil_id)}', ${r.index}, this)">&times;</button>
         </div>
-    `).join('');
+    `).join('') + (dividers[rows.length] || '');
 
     return `
         <div class="admin-pid-detail-row admin-pid-detail-row-header">
@@ -5468,6 +5935,7 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
 // to whichever one is showing via history.replaceState):
 //   /admin, /admin/cards, /admin/cards/pricing  → Cards section, Pricing
 //   /admin/cards/info                           → Cards section, Info
+//   /admin/cards/needs-action                   → Cards section, Needs Action
 //   /admin/users                                → Users section
 function initAdmin() {
     const path = window.location.pathname;
@@ -5506,7 +5974,8 @@ function initAdmin() {
     // Pricing URL would render Info's reduced list columns (see
     // renderAdminPidHeader/renderAdminPidRows) inside the fresh, unmorphed
     // Pricing-width layout, rather than actually starting on Pricing.
-    adminCardsView = path === '/admin/cards/info' ? 'info' : 'pricing';
+    adminCardsView = path === '/admin/cards/info' ? 'info'
+        : path === '/admin/cards/needs-action' ? 'needs-action' : 'pricing';
 
     // Normalizes the address bar to whichever specific sub-view that just
     // resolved to — e.g. clicking the top-level Admin nav link lands on the
@@ -5560,6 +6029,10 @@ function initAdmin() {
     adminPidImportPending = false;
     adminPidImportMode = 'paste';
     adminPidExportOpenType = null;
+    adminNaFlags = [];
+    adminNaOpenByEdition = new Map();
+    adminNaFilter = 'open';
+    adminNaResolvedLoaded = false;
     _resetAdminDbAutosaveState();
 
     // Renders the deep-linked section/sub-view directly — no fade/resize
@@ -5585,6 +6058,8 @@ function initAdmin() {
         btn.classList.toggle('active', btn.dataset.view === adminCardsView);
     });
     cardsSection?.classList.toggle('admin-cards-mode-info', adminCardsView === 'info');
+    cardsSection?.classList.toggle('admin-cards-mode-na', adminCardsView === 'needs-action');
+    updateAdminNaPillVisibility({instant: true});
     cardsSection?.querySelectorAll('.admin-pid-marketplace-toggle-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.marketplace === adminPidMarketplace);
     });
@@ -5598,6 +6073,7 @@ function initAdmin() {
     positionPillIndicator(document.querySelector('.admin-cards-subnav'));
     positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
     positionPillIndicator(document.getElementById('admin-pid-marketplace-toggle'));
+    positionPillIndicator(document.getElementById('admin-na-filter'));
     document.querySelectorAll('.admin-system-option-toggle').forEach(positionPillIndicator);
 
     if (adminActiveSection === 'system') {

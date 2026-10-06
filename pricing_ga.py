@@ -1,14 +1,15 @@
+from collections import Counter
 from datetime import date, datetime
 from db.models import Edition, Foil, PriceListing, PriceSale
 from db.session import get_session
 from db_mode import is_db_mode
 from sqlalchemy import delete, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from util_file import new_json
 
 import api_tcgplayer
 import db_cache
 import json
+import needs_action
 import re
 
 JSON_LISTINGS = "DATA_GA/PRICING_GA/LISTINGS.json"
@@ -65,16 +66,12 @@ def _price_model(json_path: str):
 
 
 def _add_price_row(session, model, **values) -> None:
-    """INSERT one price row. price_sales carries a unique constraint on the
-    full (edition_id, foil_id, date, marketplace, price, quantity, condition)
-    tuple — an exact re-add there is a no-op (matches migrate_json_to_pg.py's
-    on_conflict_do_nothing), rather than raising and rolling the caller's
-    whole transaction back. price_listings has no such constraint (genuine
-    same-day duplicates are expected), so it inserts straight."""
-    if model is PriceSale:
-        session.execute(pg_insert(PriceSale).values(**values).on_conflict_do_nothing())
-    else:
-        session.add(model(**values))
+    """INSERT one price row, unconditionally. Neither price table dedups on its
+    row values — identical same-day sales/listings are genuinely separate rows
+    — so each caller decides what counts as already stored: the scrape and
+    paste paths skip any date already on file (_store_sales_tcg), the imports
+    add only copies beyond what's stored (_dedup_against_existing)."""
+    session.add(model(**values))
 
 
 def _edition_foil_kind_map(edition_id: str) -> tuple[str, dict[str, str]]:
@@ -385,6 +382,26 @@ def _gal_entry_key(e: dict) -> tuple:
     return (e.get("date"), e.get("marketplace"), e.get("price"), e.get("quantity"), e.get("condition"))
 
 
+def _dedup_against_existing(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], int]:
+    """(entries to add, skipped_duplicate) — count-aware, so genuine identical
+    same-day entries survive while re-importing stays a no-op. Each incoming
+    entry is matched off against one stored copy of the same (date,
+    marketplace, price, quantity, condition); only the copies beyond what's
+    already stored get added. E.g. a file with two identical sales adds both to
+    an empty store, and adds nothing when imported a second time."""
+    remaining = Counter(_gal_entry_key(e) for e in existing if isinstance(e, dict))
+    to_add = []
+    skipped = 0
+    for e in incoming:
+        key = _gal_entry_key(e)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+            skipped += 1
+        else:
+            to_add.append(e)
+    return to_add, skipped
+
+
 def _edition_foil_ids(edition_id: str) -> tuple[str, set[str]]:
     """(card_id, {every foil_id for this edition — top-level AND variants}).
     Raises KeyError if the edition is unknown."""
@@ -419,9 +436,9 @@ def _edition_foil_ids(edition_id: str) -> tuple[str, set[str]]:
 
 def _insert_price_entries_deduped(json_path: str, card_id: str, edition_id: str,
                                   by_foil: dict[str, list[dict]]) -> tuple[int, int]:
-    """(added, skipped_duplicate). Adds an entry only when no exact
-    (date, marketplace, price, quantity, condition) match already exists for
-    that foil."""
+    """(added, skipped_duplicate). Adds only the copies of each exact
+    (date, marketplace, price, quantity, condition) entry beyond what's already
+    stored for that foil — see _dedup_against_existing."""
     added = 0
     skipped_dup = 0
 
@@ -432,18 +449,14 @@ def _insert_price_entries_deduped(json_path: str, card_id: str, edition_id: str,
                 existing = session.execute(
                     select(model).where(model.edition_id == edition_id, model.foil_id == foil_id)
                 ).scalars().all()
-                seen = {_gal_entry_key(_price_entry(r)) for r in existing}
-                for e in entries:
-                    key = _gal_entry_key(e)
-                    if key in seen:
-                        skipped_dup += 1
-                        continue
+                to_add, skipped = _dedup_against_existing([_price_entry(r) for r in existing], entries)
+                skipped_dup += skipped
+                for e in to_add:
                     _add_price_row(
                         session, model, edition_id=edition_id, foil_id=foil_id,
                         date=date.fromisoformat(e["date"]), marketplace=e["marketplace"],
                         price=e["price"], quantity=e["quantity"], condition=e["condition"],
                     )
-                    seen.add(key)
                     added += 1
         db_cache.bust()
         return added, skipped_dup
@@ -454,15 +467,10 @@ def _insert_price_entries_deduped(json_path: str, card_id: str, edition_id: str,
 
     for foil_id, entries in by_foil.items():
         bucket = data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, [])
-        seen = {_gal_entry_key(x) for x in bucket if isinstance(x, dict)}
-        for e in entries:
-            key = _gal_entry_key(e)
-            if key in seen:
-                skipped_dup += 1
-                continue
-            bucket.append(e)
-            seen.add(key)
-            added += 1
+        to_add, skipped = _dedup_against_existing(bucket, entries)
+        skipped_dup += skipped
+        bucket.extend(to_add)
+        added += len(to_add)
 
     with target_file.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
@@ -474,9 +482,10 @@ def import_gal_pricing(edition_id: str, doc: dict) -> dict:
     """Imports a GAL pricing document into SALES.json / LISTINGS.json (or
     price_sales / price_listings in DB mode), scoped to `edition_id`.
 
-    Re-importing the same file is a no-op — an entry is added only when no exact
-    (date, marketplace, price, quantity, condition) match already exists for its
-    foil. Every entry is stamped with the document's own `marketplace`."""
+    Re-importing the same file is a no-op — only copies of an exact
+    (date, marketplace, price, quantity, condition) entry beyond what's already
+    stored for its foil are added (see _dedup_against_existing), so genuine
+    identical same-day entries in the file are kept. Every entry is stamped with the document's own `marketplace`."""
     if not isinstance(doc, dict) or doc.get("gal_format") != GAL_PRICING_FORMAT:
         return {"ok": False, "error": "Not a GAL pricing document (missing gal_format)."}
 
@@ -559,8 +568,7 @@ def _persist_bulk_price(json_path: str, tree: dict) -> None:
     """Append already-vetted, already-deduped entries. `tree` is
     {card_id: {edition_id: {foil_id: [entry, ...]}}}. JSON mode rewrites the
     SALES.json / LISTINGS.json file once; DB mode inserts into price_sales /
-    price_listings in one transaction (price_sales' unique constraint still
-    no-ops any exact row that slipped through; price_listings has none)."""
+    price_listings in one transaction."""
     if not any(editions for editions in tree.values()):
         return
 
@@ -594,10 +602,11 @@ def _persist_bulk_price(json_path: str, tree: dict) -> None:
 
 def _import_price_data_bulk(json_path: str, current: dict, incoming: dict) -> dict:
     """Shared core of import_sales_bulk / import_listings_bulk. `current` is the
-    existing store tree, `incoming` the tree to merge in. Purely additive: an
-    entry is added only when no exact (date, marketplace, price, quantity,
-    condition) match already exists for that foil, so re-importing an
-    overlapping file adds nothing. Entries for an (edition_id, foil_id) the
+    existing store tree, `incoming` the tree to merge in. Purely additive: only
+    copies of an exact (date, marketplace, price, quantity, condition) entry
+    beyond what's already stored for that foil are added (see
+    _dedup_against_existing), so re-importing an overlapping file adds nothing
+    while genuine identical same-day entries are kept. Entries for an (edition_id, foil_id) the
     local catalog doesn't have are skipped and counted; malformed rows count
     as invalid.
 
@@ -623,11 +632,7 @@ def _import_price_data_bulk(json_path: str, current: dict, incoming: dict) -> di
                     skipped_unknown_foil += len(entries)
                     continue
 
-                seen = {
-                    _gal_entry_key(e)
-                    for e in current.get(card_id, {}).get(edition_id, {}).get(foil_id, [])
-                    if isinstance(e, dict)
-                }
+                valid_entries = []
 
                 for raw in entries:
                     if not isinstance(raw, dict):
@@ -646,14 +651,15 @@ def _import_price_data_bulk(json_path: str, current: dict, incoming: dict) -> di
                         "quantity": raw.get("quantity"),
                         "condition": raw.get("condition"),
                     }
-                    key = _gal_entry_key(entry)
-                    if key in seen:
-                        skipped_duplicate += 1
-                        continue
+                    valid_entries.append(entry)
 
-                    seen.add(key)
-                    tree.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).append(entry)
-                    added += 1
+                to_add, skipped = _dedup_against_existing(
+                    current.get(card_id, {}).get(edition_id, {}).get(foil_id, []), valid_entries
+                )
+                skipped_duplicate += skipped
+                if to_add:
+                    tree.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(foil_id, []).extend(to_add)
+                    added += len(to_add)
 
     _persist_bulk_price(json_path, tree)
 
@@ -999,7 +1005,13 @@ def _store_listings_tcg(edition_id: str, listings: list[dict], debug: bool = Fal
 
 
 def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
-                      foil_id_override: str | None = None) -> tuple[int, int, int, int]:
+                      foil_id_override: str | None = None) -> tuple[int, int, int, int, str | None, str | None]:
+    """Returns (stored, skipped_today, skipped_duplicate, skipped_unrecognized,
+    previous_latest, earliest_new) — the last two being the possible gap this
+    run's new sales sit after: the newest sale date already on file for this
+    product page beforehand (any of its foils, any marketplace; None if it had
+    none) and the earliest date this run stored (None if it stored nothing).
+    The Needs Action log records them (see _process_sales_result)."""
     card_id, foil_ids_by_kind = _edition_foil_kind_map(edition_id)
     # See the matching comment in _store_listings_tcg.
     swapped = foil_id_override is None and api_tcgplayer.get_foil_kind_swapped(edition_id)
@@ -1014,7 +1026,14 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
     # Dates already present before this run, per foil_id. A non-today date is
     # treated as settled — once it's been captured once, it never changes, so
     # any further sale reported for that date this run is a re-scraped repeat.
-    existing_dates_by_foil = {}
+    # Loaded up front for every foil this product page covers (not just the ones
+    # this run's rows land on) so previous_latest sees the page's whole history.
+    page_foil_ids = [foil_id_override] if foil_id_override else list(foil_ids_by_kind.values())
+    existing_dates_by_foil = {
+        foil_id: _existing_price_dates(JSON_SALES, card_id, edition_id, foil_id)
+        for foil_id in page_foil_ids
+    }
+    previous_latest = max((d for dates in existing_dates_by_foil.values() for d in dates), default=None)
 
     for sale in sales:
         # See the matching comment in _store_listings_tcg — a foil_id_override
@@ -1058,6 +1077,8 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
 
     _persist_scraped_entries(JSON_SALES, card_id, edition_id, to_store)
 
+    earliest_new = min((entry["date"] for _, entry in to_store), default=None)
+
     if debug:
         print(
             f"Stored TCG sales | "
@@ -1069,7 +1090,7 @@ def _store_sales_tcg(edition_id: str, sales: list[dict], debug: bool = False,
             f"skipped_unrecognized={skipped_unrecognized}"
         )
 
-    return stored, skipped_today, skipped_duplicate, skipped_unrecognized
+    return stored, skipped_today, skipped_duplicate, skipped_unrecognized, previous_latest, earliest_new
 
 
 def _sync_info(card_data: dict, debug: bool = False) -> None:
@@ -1386,7 +1407,7 @@ def import_pasted_sales_tcg_by_edition(edition_id: str, raw_text: str, debug: bo
     if not entries:
         return {"ok": False, "error": "Could not parse any sales entries from the pasted text."}
 
-    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized, _, _ = _store_sales_tcg(
         edition_id, entries, debug, foil_id_override=foil_id
     )
 
@@ -1486,9 +1507,23 @@ def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool
     if not sales:
         return {"ok": True, "sales": [], "stored": 0, "skipped_today": 0, "skipped_duplicate": 0, "skipped_unrecognized": 0}
 
-    stored, skipped_today, skipped_duplicate, skipped_unrecognized = _store_sales_tcg(
+    stored, skipped_today, skipped_duplicate, skipped_unrecognized, previous_latest, earliest_new = _store_sales_tcg(
         edition_id, sales, debug, foil_id_override=foil_id
     )
+
+    # One call here = one product page's sales popup, which logged out only
+    # ever shows the 5 most recent sales — 3+ of them being new means older
+    # ones may have scrolled out unseen. Flag it for a manual look (see
+    # needs_action.py). Advisory only — a failed flag write (e.g. the
+    # pricing_flags migration not applied yet) must never fail a scrape whose
+    # sales are already stored.
+    try:
+        flagged = needs_action.flag_sales_window(
+            edition_id, foil_id, stored, previous_latest, earliest_new, debug=debug
+        )
+    except Exception as e:
+        print(f"Needs Action flag failed | edition_id={edition_id} | foil_id={foil_id or '-'} | {e}")
+        flagged = False
 
     return {
         "ok": True,
@@ -1497,6 +1532,7 @@ def _process_sales_result(edition_id: str, sales: list[dict] | None, debug: bool
         "skipped_today": skipped_today,
         "skipped_duplicate": skipped_duplicate,
         "skipped_unrecognized": skipped_unrecognized,
+        "flagged": flagged,
     }
 
 
@@ -1575,6 +1611,7 @@ def _merge_target_results(main: dict, override_results: list[dict], list_key: st
     if list_key == "sales":
         merged["skipped_today"] = sum(part.get("skipped_today", 0) for part in parts)
         merged["skipped_duplicate"] = sum(part.get("skipped_duplicate", 0) for part in parts)
+        merged["flagged"] = any(part.get("flagged") for part in parts)
     else:
         merged["gated"] = all(part.get("gated", False) for part in parts)
 

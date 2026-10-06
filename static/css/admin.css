@@ -3016,3 +3016,243 @@
     color: var(--text-muted);
     background: var(--bg-hover);
 }
+
+/* ── Needs Action log ──
+   Cards → Needs Action: a third mode of the shared list + card info grid
+   (switchAdminCardsView toggles admin-cards-mode-na on #admin-section-pricing),
+   listing product pages a scrape flagged for a manual look (needs_action.py).
+   Same tracks as Pricing, so switching between the two never resizes the grid. */
+.admin-na-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 4px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--bg);
+    background: var(--warning);
+}
+
+/* The Needs Action pill option only shows while something is open (see
+   updateAdminNaPillVisibility) — fades and wipes horizontally in/out, same
+   motion as .admin-pid-collapsed. It's the pill's last option, so collapsing
+   it never shifts Info/Pricing or the indicator under them. The negative
+   margin swallows the track's 2px gap so it closes up flush. */
+.admin-na-subnav-btn {
+    overflow: hidden;
+    max-width: 240px;
+    transition: color 0.25s, opacity 0.2s ease,
+                max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                padding 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+                margin 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.admin-na-subnav-btn.admin-na-collapsed {
+    max-width: 0;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: -2px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Needs Action is TCGPlayer-only: its Open/Resolved pill takes the marketplace
+   pill's place in the controls bar. */
+.admin-na-filter,
+.admin-cards-mode-na .admin-pid-marketplace-toggle {
+    display: none;
+}
+
+.admin-cards-mode-na .admin-na-filter {
+    display: inline-flex;
+}
+
+/* Needs Action is only about sales already scraped, so the controls bar's
+   Regular/Discord pill and Refresh buttons fade out there — the refresh group
+   with the same fade+wipe as its own .admin-pid-collapsed. */
+.admin-pid-source-toggle {
+    transition: opacity 0.2s ease, visibility 0.2s;
+}
+
+.admin-cards-mode-na .admin-pid-source-toggle {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.admin-cards-mode-na .admin-pid-refresh-group {
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Needs Action rows: Card / Rarity / Set / New. Same selector shape as
+   .admin-pid-row.admin-pid-row-info so it beats .admin-pid-row's own columns. */
+.admin-pid-row.admin-pid-row-na {
+    grid-template-columns: 2fr 0.6fr 0.8fr 56px;
+}
+
+.admin-na-col-new {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--warning);
+}
+
+.admin-pid-row-header .admin-na-col-new {
+    color: inherit;
+}
+
+/* Needs Action's Sales table: a red rule at each flagged scrape's gap (see
+   adminNaGapDividersByRow) — sales above it came in with the scrape, missed
+   ones belong below it. */
+.admin-na-gap-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    color: var(--price-red);
+}
+
+.admin-na-gap-divider::before,
+.admin-na-gap-divider::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--price-red);
+}
+
+.admin-na-gap-divider-resolved {
+    color: var(--text-muted);
+}
+
+.admin-na-gap-divider-resolved::before,
+.admin-na-gap-divider-resolved::after {
+    background: var(--border-focus);
+}
+
+.admin-na-curio-mark {
+    font-size: 0.75rem;
+}
+
+/* ⚠ ahead of a flagged card's name in the Pricing list. */
+.admin-na-marker {
+    margin-right: 6px;
+    color: var(--warning);
+}
+
+/* Pricing mode's Card Info banner for the selected card's open flag. */
+.admin-na-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.admin-na-banner-icon {
+    color: var(--warning);
+    flex-shrink: 0;
+}
+
+.admin-na-banner-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-na-resolve-btn {
+    flex-shrink: 0;
+}
+
+/* Needs Action mode's Card Info block — the flag's gap (last known sale →
+   earliest new sale) in place of the Last Sales/Listings clocks. */
+.admin-na-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.admin-na-detail-resolved {
+    border-color: var(--border);
+    background: transparent;
+}
+
+.admin-na-detail-resolved .admin-na-banner-icon {
+    color: var(--success);
+}
+
+.admin-na-detail-empty {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    border-color: var(--border);
+    background: transparent;
+}
+
+.admin-na-detail-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+
+.admin-na-detail-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-na-detail-when {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.admin-na-gap-stats {
+    margin: 0;
+}
+
+.admin-na-gap-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.admin-na-gap-list-label {
+    font-family: var(--font-sans);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.68rem;
+}
+
+.admin-na-hint {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+.admin-na-detail .admin-na-resolve-btn {
+    align-self: flex-end;
+}

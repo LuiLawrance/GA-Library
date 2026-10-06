@@ -386,6 +386,11 @@
                     <span class="pill-indicator"></span>
                     <button class="admin-cards-subnav-btn pill-toggle-btn" data-view="info" onclick="switchAdminCardsView('info')">Info</button>
                     <button class="admin-cards-subnav-btn pill-toggle-btn active" data-view="pricing" onclick="switchAdminCardsView('pricing')">Pricing</button>
+                    <!-- Collapsed until there's an open flag — see updateAdminNaPillVisibility. -->
+                    <button class="admin-cards-subnav-btn pill-toggle-btn admin-na-subnav-btn admin-na-collapsed" data-view="needs-action"
+                            onclick="switchAdminCardsView('needs-action')">
+                        Needs Action <span class="admin-na-count hidden" id="admin-na-count"></span>
+                    </button>
                 </div>
                 <input type="text" class="admin-pid-search" id="admin-pid-search"
                        placeholder="Search cards or sets..." oninput="renderAdminPidRows()">
@@ -419,6 +424,15 @@
                                             data-marketplace="coretcg" onclick="switchAdminPidMarketplace('coretcg')">CoreTCG</button>
                                     <button type="button" class="admin-pid-marketplace-toggle-btn pill-toggle-btn"
                                             data-marketplace="manual" onclick="switchAdminPidMarketplace('manual')">Manual</button>
+                                </div>
+                                <!-- Needs Action mode only, in the marketplace pill's place (that view is
+                                     TCGPlayer-only) — switchAdminNeedsActionFilter in admin.js. -->
+                                <div class="admin-na-filter pill-toggle" id="admin-na-filter">
+                                    <span class="pill-indicator"></span>
+                                    <button type="button" class="pill-toggle-btn active" data-filter="open"
+                                            onclick="switchAdminNeedsActionFilter('open')">Open</button>
+                                    <button type="button" class="pill-toggle-btn" data-filter="resolved"
+                                            onclick="switchAdminNeedsActionFilter('resolved')">Resolved</button>
                                 </div>
                             </div>
                         </div>
