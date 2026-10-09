@@ -1,0 +1,82 @@
+/* ═══════════════════════════════════════
+   REPORT AN ISSUE
+   Topbar ❓ button + its pop-up (index.html, report.js).
+═══════════════════════════════════════ */
+
+.topbar-report-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    font-size: 1rem;
+    line-height: 1;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.topbar-report-btn:hover {
+    opacity: 1;
+    border-color: var(--border);
+    background: var(--bg-hover);
+}
+
+/* .report-modal is the shared .inv-modal, widened for the four category pills. */
+.report-modal {
+    width: 460px;
+    max-width: calc(100vw - 32px);
+}
+
+.report-form,
+.report-done {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.report-category {
+    align-self: flex-start;
+    max-width: 100%;
+}
+
+/* Phone width: the four pills share the full row instead of wrapping. */
+@media (max-width: 520px) {
+    .report-modal {
+        padding: 20px 16px;
+    }
+
+    .report-category {
+        align-self: stretch;
+        display: flex;
+    }
+
+    .report-category .pill-toggle-btn {
+        flex: 1;
+        padding: 6px 4px;
+        font-size: 0.72rem;
+    }
+}
+
+.report-message {
+    resize: vertical;
+    min-height: 120px;
+    font-size: 0.88rem;
+    line-height: 1.5;
+}
+
+.report-page {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.report-done p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text);
+}

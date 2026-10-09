@@ -15,6 +15,9 @@ let adminPidDetailMode = 'regular';
 let adminPidMarketplace = 'tcgplayer';
 let adminSystemLoaded = false;
 let adminUsersLoaded = false;
+// User-submitted issue reports (Admin -> Reports, see reports.py).
+let adminReportsData = [];
+let adminReportsFilter = 'open'; // 'open' | 'resolved'
 let adminUsersData = [];
 let adminUserDetailSelected = null;
 let adminUserDetailProfile = null;
@@ -202,6 +205,8 @@ function syncAdminUrl() {
         path = '/admin/system';
     } else if (adminActiveSection === 'users') {
         path = '/admin/users';
+    } else if (adminActiveSection === 'reports') {
+        path = '/admin/reports';
     } else {
         path = `/admin/cards/${adminCardsView}`;
     }
@@ -237,6 +242,8 @@ function switchAdminSection(section) {
         path = '/admin/system';
     } else if (section === 'users') {
         path = '/admin/users';
+    } else if (section === 'reports') {
+        path = '/admin/reports';
     } else {
         path = `/admin/cards/${adminCardsView}`;
     }
@@ -5937,6 +5944,179 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
 //   /admin/cards/info                           → Cards section, Info
 //   /admin/cards/needs-action                   → Cards section, Needs Action
 //   /admin/users                                → Users section
+// ── Reports ──────────────────────────────────────────────────────────────
+// User-submitted "Report an issue" tickets (topbar ❓, report.js). Every
+// console rank can see and resolve them. Open/Resolved filter + text search
+// are client-side over the one full list /api/admin/reports returns.
+
+const ADMIN_REPORT_CATEGORY_LABELS = {
+    bug: 'Bug',
+    card_data: 'Card data',
+    suggestion: 'Suggestion',
+    other: 'Other',
+};
+
+const ADMIN_REPORT_CATEGORY_TAGS = {
+    bug: 'tag--accent',
+    card_data: 'tag--gold',
+    suggestion: 'tag--mint',
+    other: 'tag--slate',
+};
+
+async function loadAdminReports() {
+    const summary = document.getElementById('admin-reports-summary');
+    if (!summary) return;
+    if (adminActiveSection === 'reports') summary.textContent = 'Loading...';
+
+    try {
+        const res = await fetch('/api/admin/reports');
+        if (!res.ok) throw new Error('Failed to load reports');
+        const data = await res.json();
+        adminReportsData = data.reports || [];
+        renderAdminReports();
+    } catch (err) {
+        summary.textContent = 'Failed to load reports.';
+    }
+}
+
+function updateAdminReportsBadge() {
+    const badge = document.getElementById('admin-reports-count');
+    if (!badge) return;
+    const open = adminReportsData.filter(r => !r.resolved_at).length;
+    badge.textContent = open;
+    badge.classList.toggle('hidden', open === 0);
+}
+
+function switchAdminReportsFilter(filter) {
+    if (adminReportsFilter === filter) return;
+    adminReportsFilter = filter;
+    const track = document.getElementById('admin-reports-filter');
+    track?.querySelectorAll('.pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filter);
+    });
+    positionPillIndicator(track);
+    renderAdminReports();
+}
+
+function adminReportDateText(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+}
+
+function adminReportCardHtml(r) {
+    const resolved = !!r.resolved_at;
+    const category = ADMIN_REPORT_CATEGORY_LABELS[r.category] || r.category;
+    const tag = ADMIN_REPORT_CATEGORY_TAGS[r.category] || '';
+    const reporter = r.reporter
+        ? `<span class="admin-report-reporter">${escapeHtml(r.reporter)}</span>`
+        : '<span class="admin-report-reporter is-guest">Guest</span>';
+    // page_url is a same-site path captured by report.js — only ever linked
+    // when it actually starts with "/", never as an arbitrary href.
+    const page = r.page_url
+        ? (r.page_url.startsWith('/') && !r.page_url.startsWith('//')
+            ? `<a class="admin-report-page" href="${escapeHtml(r.page_url)}" target="_blank" rel="noopener">${escapeHtml(r.page_url)}</a>`
+            : `<span class="admin-report-page">${escapeHtml(r.page_url)}</span>`)
+        : '';
+    const resolvedLine = resolved
+        ? `<div class="admin-report-resolved">Resolved by ${escapeHtml(r.resolved_by || 'unknown')} · ${escapeHtml(adminReportDateText(r.resolved_at))}</div>`
+        : '';
+
+    return `
+        <div class="admin-report-card ${resolved ? 'is-resolved' : ''}" data-report-id="${r.id}">
+            <div class="admin-report-head">
+                <span class="tag ${tag}">${escapeHtml(category)}</span>
+                <span class="admin-report-id">#${r.id}</span>
+                ${reporter}
+                <span class="admin-report-date">${escapeHtml(adminReportDateText(r.created_at))}</span>
+                ${page}
+            </div>
+            <div class="admin-report-message">${escapeHtml(r.message)}</div>
+            ${r.user_agent ? `<div class="admin-report-ua" title="${escapeHtml(r.user_agent)}">${escapeHtml(r.user_agent)}</div>` : ''}
+            <textarea class="textarea admin-report-note" id="admin-report-note-${r.id}" rows="2" maxlength="1000"
+                      placeholder="Admin note (optional)">${escapeHtml(r.admin_note || '')}</textarea>
+            ${resolvedLine}
+            <div class="admin-report-actions">
+                <button type="button" class="admin-pid-refresh-btn ${resolved ? 'admin-pid-refresh-btn-secondary' : ''}"
+                        onclick="setAdminReportResolved(${r.id}, ${!resolved})">${resolved ? 'Reopen' : 'Resolve'}</button>
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                        onclick="saveAdminReportNote(${r.id})">Save note</button>
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-report-delete"
+                        onclick="deleteAdminReport(${r.id})">Delete</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderAdminReports() {
+    const summary = document.getElementById('admin-reports-summary');
+    const list = document.getElementById('admin-reports-list');
+    if (!summary || !list) return;
+
+    updateAdminReportsBadge();
+
+    const query = (document.getElementById('admin-reports-search')?.value || '').trim().toLowerCase();
+    const wantResolved = adminReportsFilter === 'resolved';
+    const inFilter = adminReportsData.filter(r => !!r.resolved_at === wantResolved);
+    const shown = inFilter.filter(r => !query || [r.message, r.reporter, r.page_url, r.admin_note, `#${r.id}`]
+        .some(v => (v || '').toLowerCase().includes(query)));
+
+    summary.textContent = `${inFilter.length} ${wantResolved ? 'resolved' : 'open'}`
+        + (shown.length !== inFilter.length ? ` — showing ${shown.length}` : '');
+
+    list.innerHTML = shown.length
+        ? shown.map(adminReportCardHtml).join('')
+        : `<div class="admin-pid-detail-empty">${wantResolved ? 'No resolved reports.' : 'No open reports.'}</div>`;
+}
+
+function _replaceAdminReport(report) {
+    adminReportsData = adminReportsData.map(r => r.id === report.id ? report : r);
+    renderAdminReports();
+}
+
+async function _postAdminReportUpdate(id, body) {
+    const res = await fetch(`/api/admin/reports/${id}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Could not update report');
+    _replaceAdminReport(data.report);
+}
+
+async function setAdminReportResolved(id, resolved) {
+    const note = document.getElementById(`admin-report-note-${id}`)?.value;
+    try {
+        await _postAdminReportUpdate(id, {resolved, admin_note: note ?? null});
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function saveAdminReportNote(id) {
+    const note = document.getElementById(`admin-report-note-${id}`)?.value ?? '';
+    try {
+        await _postAdminReportUpdate(id, {admin_note: note});
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function deleteAdminReport(id) {
+    if (!await appConfirm(`Permanently delete report #${id}?`, {title: 'Delete Report'})) return;
+    try {
+        const res = await fetch(`/api/admin/reports/${id}`, {method: 'DELETE'});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Could not delete report');
+        adminReportsData = adminReportsData.filter(r => r.id !== id);
+        renderAdminReports();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
 function initAdmin() {
     const path = window.location.pathname;
 
@@ -5955,6 +6135,8 @@ function initAdmin() {
         adminActiveSection = 'system';
     } else if (path.startsWith('/admin/users')) {
         adminActiveSection = 'users';
+    } else if (path.startsWith('/admin/reports')) {
+        adminActiveSection = 'reports';
     } else {
         adminActiveSection = 'pricing';
     }
@@ -6033,6 +6215,8 @@ function initAdmin() {
     adminNaOpenByEdition = new Map();
     adminNaFilter = 'open';
     adminNaResolvedLoaded = false;
+    adminReportsData = [];
+    adminReportsFilter = 'open';
     _resetAdminDbAutosaveState();
 
     // Renders the deep-linked section/sub-view directly — no fade/resize
@@ -6043,7 +6227,7 @@ function initAdmin() {
     const page = document.getElementById('admin-page');
     page?.querySelectorAll('.admin-subnav-btn').forEach(btn => {
         const sec = btn.dataset.section;
-        const allowed = sec === 'users'
+        const allowed = sec === 'users' || sec === 'reports'
             || (sec === 'pricing' && canCards)
             || (sec === 'system' && canSystem);
         btn.classList.toggle('hidden', !allowed);
@@ -6075,14 +6259,18 @@ function initAdmin() {
     positionPillIndicator(document.getElementById('admin-pid-marketplace-toggle'));
     positionPillIndicator(document.getElementById('admin-na-filter'));
     document.querySelectorAll('.admin-system-option-toggle').forEach(positionPillIndicator);
+    positionPillIndicator(document.getElementById('admin-reports-filter'));
 
     if (adminActiveSection === 'system') {
         loadAdminSystemSettings();
     } else if (adminActiveSection === 'users') {
         loadAdminUsers();
-    } else {
+    } else if (adminActiveSection !== 'reports') {
         loadAdminPricingIds();
     }
+    // Loaded whichever tab is showing — it also drives the open-count badge
+    // on the Reports sub-nav button.
+    loadAdminReports();
 }
 
 document.addEventListener('click', e => {

@@ -3256,3 +3256,127 @@
 .admin-na-detail .admin-na-resolve-btn {
     align-self: flex-end;
 }
+
+/* ═══════════════════════════════════════
+   REPORTS
+   User-submitted "Report an issue" tickets (loadAdminReports in admin.js).
+═══════════════════════════════════════ */
+
+/* Open-report count on the Reports sub-nav button — same pill as .admin-na-count. */
+.admin-reports-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 4px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--bg);
+    background: var(--error);
+}
+
+.admin-reports-controls {
+    flex-wrap: wrap;
+}
+
+.admin-reports-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-right: 4px;
+}
+
+.admin-report-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 900px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    flex-shrink: 0;
+}
+
+.admin-report-card.is-resolved {
+    opacity: 0.8;
+}
+
+.admin-report-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.admin-report-id {
+    color: var(--text);
+}
+
+.admin-report-reporter {
+    color: var(--accent);
+}
+
+.admin-report-reporter.is-guest {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.admin-report-page {
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+a.admin-report-page:hover {
+    color: var(--accent);
+}
+
+.admin-report-message {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.admin-report-ua {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-report-note {
+    font-size: 0.82rem;
+    resize: vertical;
+}
+
+.admin-report-resolved {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--success);
+}
+
+.admin-report-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.admin-report-delete:hover:not(:disabled) {
+    color: var(--error);
+    border-color: var(--error);
+}

@@ -17,6 +17,7 @@ also a first integrity check of the schema (every foreign key below is
 enforced by Postgres, not just assumed).
 """
 
+from db import event_sync
 from db.catalog_sync import (
     _chunked, _set_slug, _split_speed, build_card_row, build_edition_row, build_foil_rows, build_rule_rows,
     build_thema_rows, upsert as _upsert,
@@ -51,6 +52,7 @@ DIR_DECK_INDEX = Path("DATA_GA/DECK_GA")
 DIR_DECKS = Path("DATA_GA/DECKS_GA")
 DIR_WATCHLIST = Path("DATA_GA/WATCHLIST_GA")
 DIR_WISH = Path("DATA_GA/WISH_GA")
+DIR_EVENTS = Path("DATA_GA/EVENTS_GA")
 
 # Confirmed no-listings sentinel from api_tcgplayer.py's NO_LISTINGS_SENTINEL
 # ("admin confirmed this card has no TCGPlayer listings", distinct from a
@@ -116,7 +118,9 @@ def _guard_full_replace(session: Session, model, new_count: int, label: str, for
 # reassigning an existing user's id (and orphaning every inventory_bins/
 # decks/watchlist_entries/wishlist_entries row still pointing at the old
 # one) on every re-run. Listing update_cols explicitly avoids that.
-_USER_UPDATE_COLS = ["password_hash", "auth_type", "notes", "bio", "omnidex_id", "admin_note", "created_at"]
+_USER_UPDATE_COLS = [
+    "password_hash", "auth_type", "notes", "bio", "omnidex_id", "admin_note", "created_at", "profile_private",
+]
 
 
 def migrate_users() -> dict[str, int]:
@@ -136,6 +140,7 @@ def migrate_users() -> dict[str, int]:
             "bio": info.get("bio", ""),
             "omnidex_id": info.get("omnidex_id"),
             "admin_note": info.get("admin_note", ""),
+            "profile_private": bool(info.get("profile_private", False)),
         }
         for username, info in users_data.items()
     ]
@@ -753,6 +758,41 @@ def migrate_watchlist_and_wishlist(user_ids: dict[str, int], known_foil_pairs: s
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+def migrate_events() -> None:
+    """Rebuilds each stored event's normalized record from the
+    DATA_GA/EVENTS_GA files and writes it through event_sync.persist_event —
+    the same writer a live DB-mode event fetch uses, so the two can't drift.
+    One transaction per event, so a bad file only skips that event."""
+    events_data = _load(DIR_EVENTS / "EVENTS.json")
+    players_data = _load(DIR_EVENTS / "PLAYERS.json")
+
+    written = 0
+    for event_id, meta in events_data.items():
+        detail_path = DIR_EVENTS / "EVENT_DATA" / f"{event_id}.json"
+        detail = _load(detail_path) if detail_path.exists() else {}
+        entrants = detail.get("entrants", [])
+
+        record = {
+            "event": meta,
+            "players": {
+                str(e["player_id"]): players_data[str(e["player_id"])]
+                for e in entrants if str(e["player_id"]) in players_data
+            },
+            # An entrant whose player snapshot is missing would trip the
+            # omnidex_players FK — drop it rather than fail the whole event.
+            "entrants": [e for e in entrants if str(e["player_id"]) in players_data],
+            "standings": detail.get("standings", []),
+            "matches": detail.get("matches", []),
+            "decklists": detail.get("decklists", []),
+        }
+
+        with get_session() as session:
+            event_sync.persist_event(session, record)
+        written += 1
+
+    print(f"events: {written}")
+
+
 def main(force: bool = False) -> None:
     with get_session() as session:
         session.execute(text("SELECT 1"))
@@ -791,6 +831,7 @@ _WIPE_TABLE_NAMES = [
     "deck_cards", "deck_sections", "decks",
     "watchlist_entries", "wishlist_entries",
     "foils", "editions", "card_rules", "card_slugs", "cards", "sets", "featured_set_groups",
+    "event_decklists", "event_matches", "event_standings", "event_entrants", "events", "omnidex_players",
 ]
 
 

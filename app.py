@@ -31,6 +31,7 @@ from rapidfuzz import fuzz, process
 from settings import load_settings, save_settings, SETTINGS_DEFAULTS
 from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import ProgrammingError
 from user import (
     RANK_ORDER,
     user_admin_reset_omnidex,
@@ -46,11 +47,13 @@ from user import (
     user_list,
     user_login,
     user_needs_setup,
+    user_private_omnidex_ids,
     user_reset,
     user_search,
     user_set_admin_note,
     user_set_bio,
     user_set_omnidex_id,
+    user_set_profile_private,
     user_set_role,
 )
 from util_file import new_json
@@ -59,12 +62,14 @@ from watchlist_ga import watchlist_add, watchlist_list, watchlist_remove
 import asyncio
 import contextlib
 import db_cache
+import events_ga
 import io
 import json
 import needs_action
 import os
 import random
 import re
+import reports
 import requests
 import threading
 import uuid
@@ -276,6 +281,11 @@ async def login_page():
 
 @app.get("/prices", response_class=HTMLResponse)
 async def prices_page():
+    return serve_index()
+
+
+@app.get("/events", response_class=HTMLResponse)
+async def events_page():
     return serve_index()
 
 
@@ -686,9 +696,12 @@ async def api_me(request: Request):
     if not user or auth_type is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    profile = user_get_profile(user) or {}
+
     return JSONResponse({
         "username": user,
         "auth_type": auth_type,
+        "profile_private": bool(profile.get("profile_private")),
         **user_needs_setup(user),
     })
 
@@ -764,13 +777,20 @@ async def api_users_suggest(request: Request, q: str = ""):
 
 
 @app.get("/api/users/{omnidex_id}")
-async def api_public_profile(omnidex_id: str):
+async def api_public_profile(omnidex_id: str, request: Request):
     """Read-only public view of a user's profile, looked up by Omnidex ID —
-    no auth required, no account-management surface (see _profile_payload)."""
+    no auth required, no account-management surface (see _profile_payload).
+
+    A private profile answers {"private": true} and nothing else — not even
+    the username — to everyone except its owner, who gets the full payload
+    (so profile.js can still hand them off to their own /profile page)."""
     username = user_find_by_omnidex(omnidex_id.strip())
 
     if username is None:
         raise HTTPException(status_code=404, detail="No user with that Omnidex ID")
+
+    if get_current_user(request) != username and (user_get_profile(username) or {}).get("profile_private"):
+        return JSONResponse({"private": True})
 
     profile = _profile_payload(username, public_view=True)
 
@@ -780,11 +800,36 @@ async def api_public_profile(omnidex_id: str):
     return JSONResponse(profile)
 
 
+@app.get("/api/users/{omnidex_id}/events")
+async def api_user_events(omnidex_id: str):
+    """Stored Omnidex events this Omnidex ID played or judged in — the
+    profile page's Events menu (own and public view alike; event results are
+    public on the Omnidex anyway). Matched by number: the API's player id is
+    the same value users enter as their Omnidex ID."""
+    player_id = omnidex_id.strip()
+    if not player_id.isdigit():
+        return JSONResponse({"events": []})
+    return JSONResponse({"events": await run_in_threadpool(events_ga.load_player_events, int(player_id))})
+
+
 @app.get("/api/omnidex-taken/{omnidex_id}")
 async def api_omnidex_taken(omnidex_id: str):
     """Whether an Omnidex ID is already registered — the sign-up form checks
     this before submitting. (user_create re-checks server-side regardless.)"""
     return JSONResponse({"taken": user_find_by_omnidex(omnidex_id.strip()) is not None})
+
+
+@app.post("/api/profile/privacy")
+async def api_profile_set_privacy(request: Request):
+    user = _require_login(request)
+
+    body = await request.json()
+    private = body.get("private")
+    if not isinstance(private, bool):
+        raise HTTPException(status_code=400, detail="private must be true or false")
+
+    user_set_profile_private(user, private)
+    return JSONResponse({"profile_private": private})
 
 
 @app.post("/api/profile/bio")
@@ -2748,6 +2793,88 @@ async def api_admin_needs_action_resolve(flag_id: int, request: Request):
     return JSONResponse({"flag": flag})
 
 
+# "Report an issue" tickets — filed by anyone (signed in or not) from the
+# topbar ❓ button, reviewed in the admin console's Reports tab. See reports.py.
+#
+# Submissions are open to guests, so each submitter (username, else client IP)
+# is capped at REPORT_RATE_LIMIT per REPORT_RATE_WINDOW. In-memory only — it
+# resets on restart, which is fine for a spam brake.
+REPORT_RATE_LIMIT = 5
+REPORT_RATE_WINDOW = timedelta(minutes=10)
+_report_submissions: dict[str, list[datetime]] = {}
+_report_submissions_lock = threading.Lock()
+
+
+def _report_rate_limited(key: str) -> bool:
+    now = datetime.now(timezone.utc)
+    with _report_submissions_lock:
+        recent = [t for t in _report_submissions.get(key, []) if now - t < REPORT_RATE_WINDOW]
+        if len(recent) >= REPORT_RATE_LIMIT:
+            _report_submissions[key] = recent
+            return True
+        recent.append(now)
+        _report_submissions[key] = recent
+        return False
+
+
+@app.post("/api/reports")
+async def api_submit_report(request: Request):
+    user = get_current_user(request)
+
+    body = await request.json()
+    # Railway sits behind a proxy, so the real client is X-Forwarded-For's first hop.
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    if _report_rate_limited(f"user:{user}" if user else f"ip:{client_ip}"):
+        raise HTTPException(status_code=429, detail="Too many reports — please try again in a few minutes.")
+
+    try:
+        report = reports.create_report(
+            category=str(body.get("category") or ""),
+            message=str(body.get("message") or ""),
+            page_url=str(body.get("page_url") or ""),
+            user_agent=request.headers.get("user-agent"),
+            reporter=user,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return JSONResponse({"id": report["id"]})
+
+
+@app.get("/api/admin/reports")
+async def api_admin_reports(request: Request):
+    require_admin(request)
+
+    return JSONResponse({"reports": reports.list_reports()})
+
+
+# Body: {"resolved"?: bool, "admin_note"?: str} — an omitted key is left as is.
+@app.post("/api/admin/reports/{report_id}")
+async def api_admin_report_update(report_id: int, request: Request):
+    username = require_admin(request)
+
+    body = await request.json()
+    resolved = None if body.get("resolved") is None else bool(body["resolved"])
+    admin_note = None if body.get("admin_note") is None else str(body["admin_note"])
+
+    report = reports.update_report(report_id, resolved, username, admin_note)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return JSONResponse({"report": report})
+
+
+@app.delete("/api/admin/reports/{report_id}")
+async def api_admin_report_delete(report_id: int, request: Request):
+    require_admin(request)
+
+    if not reports.delete_report(report_id):
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return JSONResponse({"deleted": report_id})
+
+
 @app.post("/api/admin/pricing/clear-last-updated")
 async def api_admin_clear_last_updated(request: Request):
     require_cards_admin(request)
@@ -3169,6 +3296,7 @@ async def api_login(username: str = Form(...), password: str = Form("")):
     resp = JSONResponse({
         "username": username,
         "auth_type": get_user_auth_type(username),
+        "profile_private": bool((user_get_profile(username) or {}).get("profile_private")),
         **user_needs_setup(username),
     })
     resp.set_cookie(
@@ -3337,6 +3465,11 @@ async def admin_users_page():
     return serve_index()
 
 
+@app.get("/admin/reports", response_class=HTMLResponse)
+async def admin_reports_page():
+    return serve_index()
+
+
 @app.get("/admin/system", response_class=HTMLResponse)
 async def admin_system_page():
     return serve_index()
@@ -3400,6 +3533,111 @@ async def fragment_prices():
 async def fragment_profile():
     with open("templates/profile.html", encoding="utf-8") as f:
         return HTMLResponse(f.read())
+
+
+@app.get("/fragments/events", response_class=HTMLResponse)
+async def fragment_events():
+    with open("templates/events.html", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+# ════════════════════════════════════════
+# ── Events API ──
+# ════════════════════════════════════════
+#
+# Omnidex organized-play events — see events_ga.py. Reading is public, like
+# the card catalog. Adding / refreshing / deleting is Cards-admin only: the
+# API has no event listing, so an event is only stored once someone adds it
+# by id, and each fetch fans out into ~20 upstream calls.
+
+def _site_omnidex_ids() -> set[str]:
+    """Omnidex IDs that belong to a registered GA Library account with a
+    public profile, so the Events page can link those players to it. Private
+    profiles stay listed in the event, just unlinked."""
+    registered = {u["omnidex_id"] for u in user_list() if u.get("omnidex_id")}
+    return registered - user_private_omnidex_ids()
+
+
+def _event_id_or_400(value) -> int:
+    event_id = events_ga.parse_event_id(value)
+    if event_id is None:
+        raise HTTPException(status_code=400, detail="Enter an Omnidex event ID or event URL")
+    return event_id
+
+
+async def _sync_event_or_raise(event_id: int) -> dict:
+    try:
+        return await run_in_threadpool(events_ga.sync_event, event_id)
+    except events_ga.EventNotFound:
+        raise HTTPException(status_code=404, detail=f"No Omnidex event with ID {event_id}")
+    except events_ga.EventFetchError as e:
+        raise HTTPException(status_code=502, detail=f"Grand Archive API error: {e}")
+    except ProgrammingError as e:
+        # DB mode before migration d0e1f2a3b4c5 has run — the events tables
+        # don't exist yet.
+        if "does not exist" in str(e.orig):
+            raise HTTPException(
+                status_code=503,
+                detail="The events tables don't exist yet — run `alembic upgrade head` (or redeploy).",
+            )
+        raise
+
+
+@app.get("/api/events")
+async def api_events_list():
+    return JSONResponse({"events": await run_in_threadpool(events_ga.load_event_list)})
+
+
+@app.get("/api/events/{event_id}")
+async def api_event_detail(event_id: int):
+    meta = await run_in_threadpool(events_ga.load_event_meta, event_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="Event not stored")
+
+    # A still-running event re-syncs on view once its copy goes stale (see
+    # events_ga.needs_refresh). If the API is unreachable, serve what we have.
+    refreshed = False
+    if events_ga.needs_refresh(meta):
+        try:
+            await run_in_threadpool(events_ga.sync_event, event_id)
+            refreshed = True
+        except (events_ga.EventNotFound, events_ga.EventFetchError) as e:
+            print(f"Event auto-refresh failed | event_id={event_id} | {e}")
+
+    detail = await run_in_threadpool(events_ga.load_event_detail, event_id)
+    site_ids = await run_in_threadpool(_site_omnidex_ids)
+    detail["site_users"] = sorted(
+        p["player_id"] for p in detail["players"] + detail["judges"] if str(p["player_id"]) in site_ids
+    )
+    detail["refreshed"] = refreshed
+    return JSONResponse(detail)
+
+
+@app.post("/api/events")
+async def api_event_add(request: Request):
+    require_cards_admin(request)
+
+    body = await request.json()
+    event_id = _event_id_or_400(body.get("event"))
+    meta = await _sync_event_or_raise(event_id)
+    return JSONResponse({"event": meta})
+
+
+@app.post("/api/events/{event_id}/refresh")
+async def api_event_refresh(event_id: int, request: Request):
+    require_cards_admin(request)
+
+    meta = await _sync_event_or_raise(event_id)
+    return JSONResponse({"event": meta})
+
+
+@app.delete("/api/events/{event_id}")
+async def api_event_delete(event_id: int, request: Request):
+    require_cards_admin(request)
+
+    if not await run_in_threadpool(events_ga.delete_event, event_id):
+        raise HTTPException(status_code=404, detail="Event not stored")
+    return JSONResponse({"ok": True})
 
 
 # ════════════════════════════════════════

@@ -37,6 +37,7 @@ const routes = {
     '/collection': '/fragments/collection',
     '/decks': '/fragments/decks',
     '/prices': '/fragments/prices',
+    '/events': '/fragments/events',
     '/inventory': '/fragments/inventory',
     '/decks_ga': '/fragments/decks_ga',
     '/admin': '/fragments/admin',
@@ -48,6 +49,7 @@ const routes = {
     '/admin/cards/pricing': '/fragments/admin',
     '/admin/cards/needs-action': '/fragments/admin',
     '/admin/users': '/fragments/admin',
+    '/admin/reports': '/fragments/admin',
     '/admin/system': '/fragments/admin',
     '/profile': '/fragments/profile',
 };
@@ -217,6 +219,12 @@ async function navigate(path, pushState = true) {
         }
     }
 
+    if (pathname === '/events') {
+        if (typeof window.initEvents === 'function') {
+            await window.initEvents();
+        }
+    }
+
     if (pathname === '/profile') {
         if (!currentUser) {
             navigate('/login');
@@ -331,6 +339,7 @@ async function checkAuth() {
             currentUser = data.username;
             authType = data.auth_type;
             isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
+            setPrivacySwitch(!!data.profile_private);
             setLoggedIn(currentUser);
             maybeShowAccountSetup(data);
         } else {
@@ -476,6 +485,40 @@ function setLoggedOut() {
     document.getElementById('nav-admin').classList.add('hidden');
     const binWrap = document.getElementById('default-bin-wrap');
     if (binWrap) binWrap.classList.add('hidden');
+}
+
+// ── Private profile switch (account dropdown) ──
+// A private profile's public /#<omnidex_id> page just reads "this user is
+// private" to everyone else; they still show up in event results.
+function setPrivacySwitch(on) {
+    document.getElementById('topbar-privacy-btn')?.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+
+async function toggleProfilePrivacy(e) {
+    e?.stopPropagation();   // keep the dropdown open so the change is visible
+    const btn = document.getElementById('topbar-privacy-btn');
+    if (!btn || btn.disabled) return;
+
+    const next = btn.getAttribute('aria-checked') !== 'true';
+    btn.disabled = true;
+    setPrivacySwitch(next);
+    try {
+        const res = await fetch('/api/profile/privacy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({private: next}),
+        });
+        if (!res.ok) throw new Error();
+        // The open profile page shows a "Private" tag on your own overview.
+        if (typeof profileData !== 'undefined' && profileData && profileMode === 'self') {
+            profileData.profile_private = next;
+            if (typeof renderProfilePrivacyTag === 'function') renderProfilePrivacyTag();
+        }
+    } catch {
+        setPrivacySwitch(!next);
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 async function handleLogout() {
@@ -750,6 +793,7 @@ async function handleLogin() {
             currentUser = data.username;
             authType = data.auth_type;
             isAdmin = ADMIN_CONSOLE_RANKS.has(authType);
+            setPrivacySwitch(!!data.profile_private);
             setLoggedIn(currentUser);
             if (!maybeShowAccountSetup(data)) navigate('/');
         } else {

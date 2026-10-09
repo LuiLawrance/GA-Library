@@ -11,6 +11,9 @@
             <button class="admin-subnav-btn" data-section="users" onclick="switchAdminSection('users')">
                 Users
             </button>
+            <button class="admin-subnav-btn" data-section="reports" onclick="switchAdminSection('reports')">
+                Reports <span class="admin-reports-count hidden" id="admin-reports-count"></span>
+            </button>
         </nav>
     </div>
 
@@ -378,6 +381,25 @@
                 <button type="button" class="admin-user-row-menu-item admin-user-row-menu-item-danger"
                         onclick="adminUserRowMenuAction('delete')">Delete User</button>
             </div>
+        </div>
+
+        <!-- User-submitted "Report an issue" tickets (topbar ❓ button) — see
+             loadAdminReports in admin.js and reports.py. -->
+        <div class="admin-section hidden" id="admin-section-reports">
+            <span class="admin-section-title">Reports</span>
+            <div class="admin-user-controls admin-reports-controls">
+                <div class="pill-toggle admin-reports-filter" id="admin-reports-filter">
+                    <span class="pill-indicator"></span>
+                    <button type="button" class="pill-toggle-btn active" data-filter="open"
+                            onclick="switchAdminReportsFilter('open')">Open</button>
+                    <button type="button" class="pill-toggle-btn" data-filter="resolved"
+                            onclick="switchAdminReportsFilter('resolved')">Resolved</button>
+                </div>
+                <input type="text" class="admin-pid-search" id="admin-reports-search"
+                       placeholder="Search reports..." oninput="renderAdminReports()">
+                <div class="admin-user-summary" id="admin-reports-summary"></div>
+            </div>
+            <div class="admin-reports-list scroll-thin" id="admin-reports-list"></div>
         </div>
 
         <div class="admin-section" id="admin-section-pricing">

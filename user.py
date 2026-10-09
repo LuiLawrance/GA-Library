@@ -340,7 +340,8 @@ def user_set_role(username: str, auth_type: str) -> None:
 
 
 def user_get_profile(username: str) -> dict | None:
-    """{username, auth_type, bio, omnidex_id, admin_note, created_at} — feeds
+    """{username, auth_type, bio, omnidex_id, admin_note, created_at,
+    profile_private} — feeds
     the self-service Profile page and the Admin -> Users panel.
 
     created_at is an ISO string in DB mode and for JSON users created since the
@@ -361,6 +362,7 @@ def user_get_profile(username: str) -> dict | None:
                 "omnidex_id": user.omnidex_id,
                 "admin_note": user.admin_note or "",
                 "created_at": user.created_at.isoformat() if user.created_at else None,
+                "profile_private": bool(user.profile_private),
             }
 
     info = _load_users_data().get(username)
@@ -375,6 +377,7 @@ def user_get_profile(username: str) -> dict | None:
         "omnidex_id": info.get("omnidex_id"),
         "admin_note": info.get("admin_note", ""),
         "created_at": info.get("created_at"),
+        "profile_private": bool(info.get("profile_private", False)),
     }
 
 
@@ -420,6 +423,38 @@ def user_set_bio(username: str, bio: str) -> None:
     users_data = _load_users_data()
     users_data[username]["bio"] = bio
     _save_users_data(users_data)
+
+
+def user_set_profile_private(username: str, private: bool) -> None:
+    """A private profile hides the public /#<omnidex_id> page from everyone
+    but its owner (it just reads "this user is private"). The user still
+    appears in event standings/rosters — those are public Omnidex data — but
+    the Events page stops linking their name to the profile."""
+    if is_db_mode():
+        with get_session() as session:
+            user = _get_user(session, username)
+            user.profile_private = private
+        return
+
+    users_data = _load_users_data()
+    users_data[username]["profile_private"] = private
+    _save_users_data(users_data)
+
+
+def user_private_omnidex_ids() -> set[str]:
+    """Omnidex IDs of every account whose profile is private."""
+    if is_db_mode():
+        with get_session() as session:
+            return {
+                oid for oid in session.execute(
+                    select(UserModel.omnidex_id).where(UserModel.profile_private.is_(True))
+                ).scalars() if oid
+            }
+
+    return {
+        info["omnidex_id"] for info in _load_users_data().values()
+        if info.get("profile_private") and info.get("omnidex_id")
+    }
 
 
 def user_set_admin_note(username: str, note: str) -> None:
@@ -507,7 +542,7 @@ def user_admin_reset_password(username: str) -> None:
 
 def user_export_all() -> dict:
     """{username: {auth_type, password, notes, bio, omnidex_id, admin_note,
-    created_at}} for every account."""
+    created_at, profile_private}} for every account."""
     if is_db_mode():
         with get_session() as session:
             users = session.execute(select(UserModel)).scalars().all()
@@ -520,6 +555,7 @@ def user_export_all() -> dict:
                     "omnidex_id": user.omnidex_id,
                     "admin_note": user.admin_note or "",
                     "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "profile_private": bool(user.profile_private),
                 }
                 for user in users
             }
@@ -533,6 +569,7 @@ def user_export_all() -> dict:
             "omnidex_id": info.get("omnidex_id"),
             "admin_note": info.get("admin_note", ""),
             "created_at": info.get("created_at"),
+            "profile_private": bool(info.get("profile_private", False)),
         }
         for username, info in _load_users_data().items()
     }
@@ -556,6 +593,7 @@ def _persist_imported_users(new_rows: dict, debug: bool = False) -> None:
                     bio=info["bio"],
                     omnidex_id=info["omnidex_id"],
                     admin_note=info["admin_note"],
+                    profile_private=info["profile_private"],
                 )
                 if info.get("created_at"):
                     try:
@@ -575,6 +613,7 @@ def _persist_imported_users(new_rows: dict, debug: bool = False) -> None:
             "omnidex_id": info["omnidex_id"],
             "admin_note": info["admin_note"],
             "created_at": info["created_at"],
+            "profile_private": info["profile_private"],
         }
     _save_users_data(users_data)
 
@@ -621,6 +660,7 @@ def user_import_bulk(users: dict, debug: bool = False) -> dict:
             "omnidex_id": omnidex_id,
             "admin_note": info.get("admin_note") or "",
             "created_at": info.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            "profile_private": bool(info.get("profile_private", False)),
         }
         if omnidex_id:
             taken_omnidex.add(omnidex_id)

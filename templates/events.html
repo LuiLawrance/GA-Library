@@ -1,0 +1,40 @@
+<div class="events-page page" id="events-page">
+    <div class="events-content">
+        <!-- ── Stored events ── -->
+        <div class="events-panel panel events-list-panel">
+            <div class="events-panel-header">
+                <span class="label label--muted">Events</span>
+                <span class="events-count label label--muted label--sm" id="events-count"></span>
+            </div>
+
+            <!-- Cards-admin only (shown by initEvents). The API can't list
+                 events, so this is the only way one gets stored. -->
+            <div class="events-add hidden" id="events-add">
+                <input type="text" id="events-add-input" class="inv-text-input"
+                       placeholder="Omnidex event ID or URL" autocomplete="off"
+                       onkeydown="if (event.key === 'Enter') addEvent()">
+                <button class="btn btn--primary" id="events-add-btn" onclick="addEvent()">Add</button>
+            </div>
+            <div class="events-add-msg hidden" id="events-add-msg"></div>
+
+            <div class="events-filter">
+                <input type="text" id="events-filter-input" class="inv-text-input"
+                       placeholder="Filter by name, store, or season..." autocomplete="off"
+                       oninput="renderEventList()">
+                <select id="events-filter-category" class="events-select" onchange="renderEventList()">
+                    <option value="">All categories</option>
+                </select>
+            </div>
+
+            <div class="events-list scroll-thin" id="events-list"></div>
+        </div>
+
+        <!-- ── Selected event ── -->
+        <div class="events-panel panel events-detail-panel" id="events-detail">
+            <div class="events-placeholder">
+                <span class="inv-empty-icon">🏆</span>
+                <p>Select an event to see its standings, pairings, and decklists.</p>
+            </div>
+        </div>
+    </div>
+</div>

@@ -65,6 +65,11 @@ class User(Base):
     # users; immutable once set (enforced in app.py, not the schema).
     omnidex_id: Mapped[str | None] = mapped_column(Text, unique=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=dt.datetime.utcnow)
+    # Hides the public /#<omnidex_id> profile from everyone but the owner —
+    # see user.user_set_profile_private.
+    profile_private: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+    )
 
 
 # ── Card catalog ──────────────────────────────────────────────────────────────
@@ -272,6 +277,26 @@ class PricingFlag(Base):
     last_flagged_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_by: Mapped[str | None] = mapped_column(Text)
+
+
+class IssueReport(Base):
+    """A user-submitted "Report an issue" ticket (topbar ❓ button) — see
+    reports.py. reporter is the signed-in username at submit time, or NULL for
+    a guest; kept as plain text (like resolved_by) rather than a users FK so a
+    report outlives a renamed or deleted account. Resolved rows are kept as
+    history."""
+    __tablename__ = "issue_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    page_url: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    reporter: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[str | None] = mapped_column(Text)
+    admin_note: Mapped[str | None] = mapped_column(Text)
 
 
 class ThemaScore(Base):
@@ -504,3 +529,132 @@ class WishlistEntry(Base):
     edition_id: Mapped[str] = mapped_column(Text, nullable=False)
     foil_id: Mapped[str] = mapped_column(Text, nullable=False)
     added_date: Mapped[dt.date | None] = mapped_column(Date)
+
+
+# ── Omnidex events ────────────────────────────────────────────────────────────
+#
+# Organized-play events pulled from the Grand Archive API's /omnidex/events/*
+# endpoints (see events_ga.py). Same split as the card catalog: one shared
+# normalized record (events_ga._build_event_record) feeds both the JSON files
+# (DATA_GA/EVENTS_GA/*) and these tables (db/event_sync.py). The API has no
+# "list events" endpoint, so an event only lands here once someone adds it by
+# ID; a refresh replaces all of its child rows in one transaction.
+
+class Event(Base):
+    __tablename__ = "events"
+
+    # The Omnidex's own numeric event id (omni.gatcg.com/events/{event_id}).
+    event_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(Text)
+    format: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text)
+    setting: Mapped[str | None] = mapped_column(Text)
+    structure: Mapped[str | None] = mapped_column(Text)
+    type: Mapped[str | None] = mapped_column(Text)
+    ranked: Mapped[bool | None] = mapped_column(Boolean)
+    description: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    start_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    vp_multiplier: Mapped[float | None] = mapped_column(Numeric)
+    swiss_rounds: Mapped[int | None]
+    swiss_match_config: Mapped[str | None] = mapped_column(Text)
+    se_cut_size: Mapped[int | None]
+    se_match_config: Mapped[str | None] = mapped_column(Text)
+    team_size: Mapped[int | None]
+    has_decklists: Mapped[bool | None] = mapped_column(Boolean)
+    host_id: Mapped[int | None]
+    host_name: Mapped[str | None] = mapped_column(Text)
+    host_address: Mapped[str | None] = mapped_column(Text)
+    host_country: Mapped[str | None] = mapped_column(Text)
+    season_id: Mapped[int | None]
+    season_name: Mapped[str | None] = mapped_column(Text)
+    player_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    team_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    # [{id, status, type}, ...] — tiny, read whole, never queried into.
+    stages: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # The /statistics payload (element/champion breakdowns, once revealed).
+    statistics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    last_synced: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OmnidexPlayer(Base):
+    """Shared player directory across every stored event — the latest
+    snapshot seen of each Omnidex account (cp/rank/emblem move over time, so
+    whichever event synced most recently wins). Event rows reference a player
+    by id only, the way editions reference cards."""
+    __tablename__ = "omnidex_players"
+
+    player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    username: Mapped[str | None] = mapped_column(Text)
+    country: Mapped[str | None] = mapped_column(Text)
+    cp: Mapped[int | None]
+    emblem: Mapped[str | None] = mapped_column(Text)
+    rank: Mapped[int | None]
+    judge_level: Mapped[int | None]
+    judge_experience: Mapped[int | None]
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EventEntrant(Base):
+    """One player's or judge's participation in one event."""
+    __tablename__ = "event_entrants"
+    __table_args__ = (
+        CheckConstraint("role IN ('player', 'judge')", name="ck_event_entrants_role"),
+    )
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.event_id", ondelete="CASCADE"), primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("omnidex_players.player_id"), primary_key=True, index=True)
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    final_placement: Mapped[int | None]
+    team_name: Mapped[str | None] = mapped_column(Text)
+    team_slot: Mapped[int | None]
+
+
+class EventStanding(Base):
+    """One row of the Swiss standings, in the API's own order (`position`).
+    Exactly one of player_id (1v1 formats) / team_name (team formats) is set."""
+    __tablename__ = "event_standings"
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.event_id", ondelete="CASCADE"), primary_key=True)
+    position: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    player_id: Mapped[int | None]
+    team_name: Mapped[str | None] = mapped_column(Text)
+    final_placement: Mapped[int | None]
+    status: Mapped[str | None] = mapped_column(Text)
+    # statsWins / statsLosses / statsPercentOMW / tiebreaker / ... exactly as
+    # the API names them — ~15 numbers only ever displayed together.
+    stats: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class EventMatch(Base):
+    """One match of one round of one stage. `pairing` holds both sides
+    ([{id, score, status, dropped, eloChange?}, ...]) — `id` is a player id in
+    1v1 formats and a team name in team formats."""
+    __tablename__ = "event_matches"
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.event_id", ondelete="CASCADE"), primary_key=True)
+    stage_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    round_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    match_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    stage_type: Mapped[str | None] = mapped_column(Text)
+    label: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text)
+    completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    pairing: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class EventDecklist(Base):
+    """A player's public decklist. Sections are [{card, quantity}, ...] keyed
+    by card *name* (that's all the API gives) — the UI links each one to a
+    card search rather than joining to cards.card_id."""
+    __tablename__ = "event_decklists"
+
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.event_id", ondelete="CASCADE"), primary_key=True)
+    player_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    main: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    material: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    sideboard: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)

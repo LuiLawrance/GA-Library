@@ -55,6 +55,17 @@ async function initPublicProfile(omnidexId) {
         return;
     }
 
+    // The owner set their profile to private — the server sent nothing else.
+    if (profileData.private) {
+        profileData = null;
+        body.innerHTML = `
+            <div class="profile-private-notice">
+                <span class="inv-empty-icon">🔒</span>
+                <p>This user is private.</p>
+            </div>`;
+        return;
+    }
+
     // Viewing your own Omnidex ID → hand off to the editable self page.
     if (currentUser && profileData.username === currentUser) {
         navigate('/profile');
@@ -76,6 +87,7 @@ function renderProfile() {
         : '';
     document.getElementById('profile-name').innerHTML = escapeHtml(profileData.username) + omniTrail;
     document.getElementById('profile-role').textContent = formatRole(profileData.auth_type);
+    renderProfilePrivacyTag();
 
     const sinceBlock = document.getElementById('profile-since-block');
     if (profileData.created_at) {
@@ -99,6 +111,79 @@ function renderProfile() {
 
     renderProfileDecks(profileData.decks || []);
     renderProfileBins(profileData.bins || []);
+    loadProfileEvents(profileData.omnidex_id);
+}
+
+// Events menu — stored Omnidex events this user's Omnidex ID played or
+// judged in (/api/users/{id}/events). Fetched separately so a slow events
+// lookup never holds up the rest of the profile.
+async function loadProfileEvents(omnidexId) {
+    const menu = document.getElementById('profile-events-menu');
+    if (!menu) return;
+
+    if (!omnidexId) {
+        renderProfileEvents([], 'No Omnidex ID set.');
+        return;
+    }
+
+    let events = [];
+    try {
+        const res = await fetch(`/api/users/${encodeURIComponent(omnidexId)}/events`);
+        if (!res.ok) throw new Error();
+        events = (await res.json()).events || [];
+    } catch {
+        renderProfileEvents([], 'Could not load events.');
+        return;
+    }
+
+    // The profile may have changed while this was in flight.
+    if (profileData?.omnidex_id !== omnidexId) return;
+    renderProfileEvents(events);
+}
+
+function renderProfileEvents(events, emptyMessage = 'No stored events yet.') {
+    document.getElementById('profile-events-count').textContent = events.length || '';
+
+    const menu = document.getElementById('profile-events-menu');
+    if (!events.length) {
+        menu.innerHTML = `<div class="profile-menu-empty">${escapeHtml(emptyMessage)}</div>`;
+        return;
+    }
+
+    menu.innerHTML = events.map(e => {
+        const result = e.role === 'judge'
+            ? '<span class="tag tag--slate">Judge</span>'
+            : `<span class="profile-event-place">${eventPlacement(e.final_placement)}</span>`;
+        const rec = e.record ? `${e.record.wins}-${e.record.losses}-${e.record.ties}` : '';
+        const meta = [
+            eventDate(e.start_at),
+            eventCategoryLabel(e.category),
+            e.team_name ? escapeHtml(e.team_name) : `${e.player_count} players`,
+        ].join(' · ');
+        return `
+            <a class="profile-event-row" href="/events?event=${e.event_id}" data-link>
+                <div class="profile-event-main">
+                    <span class="profile-event-name">${escapeHtml(e.name)}</span>
+                    <span class="profile-event-meta">${meta}</span>
+                </div>
+                <div class="profile-event-result">
+                    ${result}
+                    ${rec ? `<span class="profile-event-record">${rec}</span>` : ''}
+                </div>
+            </a>`;
+    }).join('');
+}
+
+// "Private" tag after the role on your own profile, so it's clear others
+// can't see this page. Toggled from the account dropdown (app.js).
+function renderProfilePrivacyTag() {
+    const role = document.getElementById('profile-role');
+    if (!role) return;
+    role.querySelector('.profile-private-tag')?.remove();
+    if (profileMode === 'self' && profileData?.profile_private) {
+        role.insertAdjacentHTML('beforeend',
+            ' <span class="tag tag--slate profile-private-tag" title="Only you can see this profile">Private</span>');
+    }
 }
 
 function renderProfileAbout(isPublic) {

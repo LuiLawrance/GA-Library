@@ -22,6 +22,8 @@
     <link rel="stylesheet" href="/static/css/decks_ga.css">
     <link rel="stylesheet" href="/static/css/admin.css">
     <link rel="stylesheet" href="/static/css/profile.css">
+    <link rel="stylesheet" href="/static/css/events.css">
+    <link rel="stylesheet" href="/static/css/report.css">
     <!-- Loaded last: mobile.css overrides everything above under its breakpoint. -->
     <link rel="stylesheet" href="/static/css/mobile.css">
 </head>
@@ -31,6 +33,8 @@
 <div class="topbar">
     <a href="/" class="topbar-brand" data-link>GA Library</a>
     <div class="topbar-right">
+        <button type="button" id="topbar-report-btn" class="topbar-report-btn"
+                title="Report an issue" aria-label="Report an issue" onclick="openReportModal()">&#10067;</button>
         <div id="topbar-user-menu" class="topbar-user-menu hidden">
             <button id="topbar-user-btn" class="topbar-user" onclick="toggleUserMenu(event)">
                 <span id="topbar-user-name"></span>
@@ -38,6 +42,12 @@
             </button>
             <div id="topbar-user-dropdown" class="menu topbar-user-dropdown hidden">
                 <a href="/profile" class="topbar-user-item" data-link>Profile</a>
+                <!-- Hides the public /#<omnidex_id> page (see toggleProfilePrivacy). -->
+                <button type="button" class="topbar-user-item topbar-privacy-item" id="topbar-privacy-btn"
+                        role="switch" aria-checked="false" onclick="toggleProfilePrivacy(event)">
+                    <span>Private profile</span>
+                    <span class="topbar-switch" aria-hidden="true"></span>
+                </button>
                 <button type="button" class="topbar-user-item" onclick="handleLogout()">Logout</button>
             </div>
         </div>
@@ -55,6 +65,7 @@
         <a href="/collection" data-link>Collection</a>
         <a href="/decks" data-link>Decks</a>
         <a href="/prices" data-link>Prices</a>
+        <a href="/events" data-link>Events</a>
         <div class="navbar-right">
             <a href="/admin" id="nav-admin" class="nav-admin hidden" data-link>Admin</a>
             <a href="/decks_ga" id="nav-decks-ga" class="nav-decks-ga" data-link>My Decks</a>
@@ -109,6 +120,48 @@
     </div>
 </div>
 
+<!-- "Report an issue" pop-up — opened by the topbar ❓ button, open to guests
+     too. See report.js and reports.py. -->
+<div id="report-modal" class="inv-modal-overlay overlay hidden" onclick="closeReportModal()">
+    <div class="inv-modal modal report-modal" onclick="event.stopPropagation()">
+        <div class="inv-modal-header">
+            <span class="inv-modal-title" id="report-modal-title">Report an issue</span>
+            <button class="inv-modal-close" onclick="closeReportModal()">✕</button>
+        </div>
+
+        <div class="report-form" id="report-form">
+            <div class="inv-field-group">
+                <span class="inv-field-label label label--muted">What kind of issue?</span>
+                <div class="report-category pill-toggle" id="report-category">
+                    <span class="pill-indicator"></span>
+                    <button type="button" class="pill-toggle-btn active" data-category="bug" onclick="setReportCategory('bug')">Bug</button>
+                    <button type="button" class="pill-toggle-btn" data-category="card_data" onclick="setReportCategory('card_data')">Card data</button>
+                    <button type="button" class="pill-toggle-btn" data-category="suggestion" onclick="setReportCategory('suggestion')">Suggestion</button>
+                    <button type="button" class="pill-toggle-btn" data-category="other" onclick="setReportCategory('other')">Other</button>
+                </div>
+            </div>
+            <div class="inv-field-group">
+                <label class="inv-field-label label label--muted" for="report-message">Details</label>
+                <textarea class="textarea report-message" id="report-message" rows="6" maxlength="2000"
+                          placeholder="What happened, and what did you expect? Include the card or page if relevant."
+                          oninput="updateReportSubmit()"></textarea>
+            </div>
+            <div class="report-page" id="report-page"></div>
+            <div class="inv-modal-error hidden" id="report-error"></div>
+            <div class="inv-modal-actions">
+                <button class="inv-modal-submit" id="report-submit" onclick="submitReport()" disabled>Send report</button>
+            </div>
+        </div>
+
+        <div class="report-done hidden" id="report-done">
+            <p>Thanks — your report was sent to the admins.</p>
+            <div class="inv-modal-actions">
+                <button class="inv-modal-submit" onclick="closeReportModal()">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Global delete-confirmation modal -->
 <div id="app-confirm-modal" class="inv-modal-overlay overlay hidden" onclick="appConfirmResolve(false)">
     <div class="inv-modal modal" onclick="event.stopPropagation()">
@@ -143,6 +196,8 @@
 <script src="/static/js/decks_ga.js"></script>
 <script src="/static/js/admin.js"></script>
 <script src="/static/js/profile.js"></script>
+<script src="/static/js/events.js"></script>
+<script src="/static/js/report.js"></script>
 <script src="/static/js/app.js"></script>
 
 </body>
