@@ -39,43 +39,88 @@
 }
 
 /* ── List panel ── */
-.events-add,
 .events-filter {
     display: flex;
     gap: 8px;
     padding: 0 18px 12px;
 }
 
-.events-add .inv-text-input,
 .events-filter .inv-text-input {
     flex: 1;
     min-width: 0;
 }
 
-.events-add .btn {
-    flex-shrink: 0;
+/* Category filter: the shared .select-dropdown (components.css), sized to
+   sit level with .inv-text-input beside it. */
+.events-category {
+    flex: 0 0 148px;
 }
 
-.events-add-msg {
+.events-category .select-dropdown-btn {
+    font-size: 0.88rem;
+    padding: 9px 12px;
+}
+
+.events-category .select-dropdown-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.events-category .select-dropdown-menu {
+    left: auto;
+    right: 0;
+}
+
+.events-search-msg {
     margin: 0 18px 12px;
     font-family: var(--font-mono);
     font-size: 0.72rem;
     color: var(--text-muted);
 }
 
-.events-add-msg.error {
+.events-search-msg.error {
     color: var(--error);
 }
 
-.events-select {
+/* "Look up event #N" — shown in the list when the search bar holds an
+   Omnidex event ID that isn't stored yet. */
+.events-lookup-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: calc(100% - 36px);
+    margin: 14px 18px;
+    padding: 12px 14px;
+    text-align: left;
     font-family: var(--font-sans);
-    font-size: 0.8rem;
     color: var(--text);
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: 1px dashed var(--border-focus);
     border-radius: var(--radius-sm);
-    padding: 0 8px;
-    max-width: 45%;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.events-lookup-row:hover:not(:disabled) {
+    border-color: var(--accent-dim);
+    background: var(--bg-hover);
+}
+
+.events-lookup-row:disabled {
+    cursor: wait;
+    opacity: 0.75;
+}
+
+.events-lookup-title {
+    font-size: 0.88rem;
+    font-weight: 500;
+}
+
+.events-lookup-sub {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-muted);
 }
 
 .events-list {
@@ -108,6 +153,17 @@
 .events-row.active {
     background: var(--bg-hover);
     border-left-color: var(--accent);
+}
+
+/* A just-fetched event's row: a short accent wash that fades back to the
+   normal active style (added by revealEventRow). */
+.events-row--new {
+    animation: eventsRowNew 1.6s ease-out;
+}
+
+@keyframes eventsRowNew {
+    0%, 25% { background: rgba(200, 169, 110, 0.18); }
+    100%    { background: var(--bg-hover); }
 }
 
 .events-row-top {
@@ -143,6 +199,15 @@
 }
 
 /* ── Detail panel ── */
+/* Content wrapper inside the panel frame — what fadeSwap fades on an event
+   switch, so the panel border itself never moves. */
+.events-detail-inner {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
 .events-placeholder {
     flex: 1;
     display: flex;
@@ -563,6 +628,10 @@
        panel (header + tabs + body) rather than just the tab body. */
     .events-detail-panel {
         overflow-y: auto;
+    }
+
+    .events-detail-inner {
+        flex: none;
     }
 
     /* Grows to its content (the panel scrolls vertically); wide tables

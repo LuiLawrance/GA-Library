@@ -9,6 +9,7 @@ let eventsDetail = null;
 let eventsSelectedId = null;
 let eventsTab = 'standings';
 let eventsCanManage = false;
+let eventsLookupBusy = false;   // a search-bar API lookup is in flight
 
 const EVENT_CATEGORY_LABELS = {
     'worlds': 'Worlds',
@@ -71,15 +72,29 @@ function eventPlacement(n) {
 
 window.initEvents = async function () {
     eventsCanManage = typeof ADMIN_CARDS_RANKS !== 'undefined' && ADMIN_CARDS_RANKS.has(authType);
-    document.getElementById('events-add')?.classList.toggle('hidden', !eventsCanManage);
 
     eventsDetail = null;
     eventsTab = 'standings';
+    eventsLookupBusy = false;
+    renderEventCategoryDropdown([]);
+    document.getElementById('events-filter-category')
+        ?.addEventListener('dropdown:change', renderEventList);
     await loadEventList();
 
     const id = parseInt(new URLSearchParams(window.location.search).get('event'), 10);
     if (id) await selectEvent(id, false);
 };
+
+// Category filter — the shared .select-dropdown (dropdown.js), rebuilt from
+// whatever categories the stored events actually have.
+function renderEventCategoryDropdown(categories) {
+    const wrap = document.getElementById('events-filter-category');
+    if (!wrap) return;
+    const current = selectDropdownValue(wrap) || '';
+    const options = [{value: '', label: 'All categories'},
+        ...categories.map(c => ({value: c, label: eventCategoryLabel(c)}))];
+    wrap.innerHTML = selectDropdownHTML(options, categories.includes(current) ? current : '');
+}
 
 async function loadEventList() {
     const listEl = document.getElementById('events-list');
@@ -93,48 +108,64 @@ async function loadEventList() {
         return;
     }
 
-    const select = document.getElementById('events-filter-category');
-    if (select) {
-        const current = select.value;
-        const cats = [...new Set(eventsList.map(e => e.category).filter(Boolean))].sort();
-        select.innerHTML = '<option value="">All categories</option>' +
-            cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(eventCategoryLabel(c))}</option>`).join('');
-        select.value = cats.includes(current) ? current : '';
-    }
-
+    renderEventCategoryDropdown([...new Set(eventsList.map(e => e.category).filter(Boolean))].sort());
     renderEventList();
+}
+
+// An Omnidex event ID ("27292", "#27292") or event URL typed into the search
+// bar — mirrors events_ga.parse_event_id. null for ordinary search text.
+function parseEventSearchId(text) {
+    const t = (text || '').trim();
+    const m = t.match(/events\/(\d+)/) || t.match(/^#?(\d{1,10})$/);
+    return m ? parseInt(m[1], 10) : null;
 }
 
 function renderEventList() {
     const listEl = document.getElementById('events-list');
     if (!listEl) return;
 
-    const q = (document.getElementById('events-filter-input')?.value || '').trim().toLowerCase();
-    const cat = document.getElementById('events-filter-category')?.value || '';
+    const raw = document.getElementById('events-filter-input')?.value || '';
+    const q = raw.trim().toLowerCase();
+    const searchId = parseEventSearchId(raw);
+    const cat = selectDropdownValue(document.getElementById('events-filter-category')) || '';
+
+    if (!eventsLookupBusy) setEventsSearchMsg('');
 
     const shown = eventsList.filter(e => {
         if (cat && e.category !== cat) return false;
+        if (searchId != null) return e.event_id === searchId;
         if (!q) return true;
-        return [e.name, e.host_name, e.season_name, String(e.event_id)]
+        return [e.name, e.host_name, e.season_name]
             .some(v => (v || '').toLowerCase().includes(q));
     });
 
     const countEl = document.getElementById('events-count');
     if (countEl) countEl.textContent = eventsList.length ? `${shown.length} / ${eventsList.length}` : '';
 
+    // An ID that isn't stored yet — offer to pull it from the Omnidex, the
+    // way a card search falls back to the API for a card it doesn't have.
+    if (searchId != null && !eventsList.some(e => e.event_id === searchId)) {
+        listEl.innerHTML = `
+            <button type="button" class="events-lookup-row" onclick="lookupEvent()" ${eventsLookupBusy ? 'disabled' : ''}>
+                <span class="events-lookup-title">${eventsLookupBusy
+                    ? `Fetching event #${searchId}…` : `Look up event #${searchId}`}</span>
+                <span class="events-lookup-sub">Not stored yet — press Enter to fetch it from the Omnidex.</span>
+            </button>`;
+        return;
+    }
+
     if (!eventsList.length) {
-        listEl.innerHTML = `<div class="events-empty">No events stored yet.${eventsCanManage
-            ? ' Add one by its Omnidex ID above.' : ''}</div>`;
+        listEl.innerHTML = '<div class="events-empty">No events stored yet. Enter an Omnidex event ID or URL above to look one up.</div>';
         return;
     }
     if (!shown.length) {
-        listEl.innerHTML = '<div class="events-empty">No events match.</div>';
+        listEl.innerHTML = '<div class="events-empty">No events match. Have its Omnidex ID? Enter it above.</div>';
         return;
     }
 
     listEl.innerHTML = shown.map(e => `
         <button type="button" class="events-row ${e.event_id === eventsSelectedId ? 'active' : ''}"
-                onclick="selectEvent(${e.event_id})">
+                data-event-id="${e.event_id}" onclick="selectEvent(${e.event_id})">
             <div class="events-row-top">
                 <span class="events-row-name">${escapeHtml(e.name)}</span>
                 ${eventStatusTag(e.status)}
@@ -151,53 +182,66 @@ function renderEventList() {
         </button>`).join('');
 }
 
-// ── Add / refresh / delete (cards admins) ──
+// ── Lookup (search bar) ──
 
-function setEventsAddMsg(text, isError = false) {
-    const el = document.getElementById('events-add-msg');
+function setEventsSearchMsg(text, isError = false) {
+    const el = document.getElementById('events-search-msg');
     if (!el) return;
     el.textContent = text || '';
     el.classList.toggle('hidden', !text);
     el.classList.toggle('error', isError);
 }
 
-async function addEvent() {
-    const input = document.getElementById('events-add-input');
-    const btn = document.getElementById('events-add-btn');
-    const value = (input?.value || '').trim();
-    if (!value) return;
-
-    btn.disabled = true;
-    setEventsAddMsg('Fetching from the Omnidex…');
-    let res;
-    try {
-        res = await fetch('/api/events', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({event: value}),
-        });
-    } catch {
-        setEventsAddMsg('Could not reach the server.', true);
-        btn.disabled = false;
-        return;
-    }
-    try {
-        // An unhandled server error comes back as plain text, not JSON.
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            setEventsAddMsg(data.detail || `Server error (${res.status}) — check the server log.`, true);
-            return;
-        }
-        input.value = '';
-        setEventsAddMsg('');
-        await loadEventList();
-        await selectEvent(data.event.event_id);
-    } catch {
-        setEventsAddMsg('The event was added, but the page failed to refresh — reload to see it.', true);
-    } finally {
-        btn.disabled = false;
+function handleEventSearchKeydown(e) {
+    if (e.key !== 'Enter') return;
+    const searchId = parseEventSearchId(e.target.value);
+    if (searchId == null) return;
+    e.preventDefault();
+    if (eventsList.some(ev => ev.event_id === searchId)) {
+        selectEvent(searchId);
+    } else {
+        lookupEvent();
     }
 }
+
+async function lookupEvent() {
+    const input = document.getElementById('events-filter-input');
+    const searchId = parseEventSearchId(input?.value);
+    if (searchId == null || eventsLookupBusy) return;
+
+    eventsLookupBusy = true;
+    renderEventList();
+    let res;
+    try {
+        res = await fetch('/api/events/lookup', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({event: input.value.trim()}),
+        });
+    } catch {
+        eventsLookupBusy = false;
+        renderEventList();
+        setEventsSearchMsg('Could not reach the server.', true);
+        return;
+    }
+
+    // An unhandled server error comes back as plain text, not JSON.
+    const data = await res.json().catch(() => ({}));
+    eventsLookupBusy = false;
+    if (!res.ok) {
+        renderEventList();
+        setEventsSearchMsg(data.detail || `Server error (${res.status}) — check the server log.`, true);
+        return;
+    }
+
+    input.value = '';
+    await loadEventList();
+    // Clearing the search re-lists everything, so the new event may sit far
+    // down the list — scroll it into view and flash it (see selectEvent).
+    await selectEvent(data.event.event_id, true, {flash: data.fetched});
+}
+
+// ── Refresh / delete (cards admins) ──
 
 async function refreshEvent() {
     if (!eventsSelectedId) return;
@@ -227,8 +271,8 @@ async function deleteEvent() {
     eventsSelectedId = null;
     eventsDetail = null;
     window.history.replaceState({}, '', '/events');
-    renderEventDetailPlaceholder();
-    await loadEventList();
+    const el = document.getElementById('events-detail');
+    await Promise.all([fadeSwap(el, () => renderEventDetailPlaceholder()), loadEventList()]);
 }
 
 // ── Detail ──
@@ -243,32 +287,51 @@ function renderEventDetailPlaceholder(message) {
         </div>`;
 }
 
-async function selectEvent(eventId, updateUrl = true) {
-    eventsSelectedId = eventId;
-    renderEventList();
+// Scrolls the event list (only the list — never the page) just far enough to
+// show `eventId`'s row: a no-op when it's already visible, so ordinary clicks
+// don't jump. `flash` briefly highlights it — used for a freshly fetched event.
+function revealEventRow(eventId, {flash = false} = {}) {
+    const list = document.getElementById('events-list');
+    const row = list?.querySelector(`.events-row[data-event-id="${eventId}"]`);
+    if (!row) return;
 
-    if (updateUrl) window.history.replaceState({}, '', `/events?event=${eventId}`);
+    const top = row.offsetTop - list.offsetTop;
+    const bottom = top + row.offsetHeight;
+    if (top < list.scrollTop) {
+        list.scrollTo({top, behavior: 'smooth'});
+    } else if (bottom > list.scrollTop + list.clientHeight) {
+        list.scrollTo({top: bottom - list.clientHeight, behavior: 'smooth'});
+    }
 
-    const el = document.getElementById('events-detail');
-    if (!el) return;
-    el.innerHTML = '<div class="events-placeholder"><p>Loading…</p></div>';
+    if (flash) {
+        row.classList.remove('events-row--new');
+        void row.offsetWidth;   // restart the animation if it's already applied
+        row.classList.add('events-row--new');
+    }
+}
 
-    let data;
+// How long the fade-out waits on the detail fetch before showing "Loading…"
+// instead — a stale live event re-syncs on open, which can take seconds.
+const EVENT_LOADING_AFTER_MS = 250;
+
+async function fetchEventDetail(eventId) {
     try {
         const res = await fetch(`/api/events/${eventId}`);
         if (!res.ok) {
-            renderEventDetailPlaceholder(res.status === 404 ? 'That event isn\'t stored.' : 'Could not load the event.');
-            return;
+            return {error: res.status === 404 ? "That event isn't stored." : 'Could not load the event.'};
         }
-        data = await res.json();
+        return {data: await res.json()};
     } catch {
-        renderEventDetailPlaceholder('Could not load the event.');
+        return {error: 'Could not load the event.'};
+    }
+}
+
+function applyEventDetail(result) {
+    if (result.error) {
+        renderEventDetailPlaceholder(result.error);
         return;
     }
-
-    // A newer click may have landed while this one was in flight.
-    if (eventsSelectedId !== eventId) return;
-
+    const data = result.data;
     eventsDetail = data;
     eventsDetail.siteUsers = new Set(data.site_users || []);
     eventsDetail.byId = new Map([...data.players, ...data.judges].map(p => [p.player_id, p]));
@@ -278,6 +341,36 @@ async function selectEvent(eventId, updateUrl = true) {
     const tabs = eventTabs();
     if (!tabs.some(t => t.id === eventsTab)) eventsTab = tabs[0].id;
     renderEventDetail();
+}
+
+// Switching events fades the detail out and the new one in (fadeSwap,
+// animation.js). The fetch runs alongside the fade-out; if it isn't back
+// shortly after, "Loading…" fades in first and the event follows it.
+async function selectEvent(eventId, updateUrl = true, {flash = false} = {}) {
+    eventsSelectedId = eventId;
+    renderEventList();
+    revealEventRow(eventId, {flash});
+
+    if (updateUrl) window.history.replaceState({}, '', `/events?event=${eventId}`);
+
+    const el = document.getElementById('events-detail');
+    if (!el) return;
+
+    const load = fetchEventDetail(eventId);
+    let result = null;
+
+    await fadeSwap(el, async () => {
+        result = await Promise.race([load, sleep(EVENT_LOADING_AFTER_MS).then(() => null)]);
+        // A newer click took over — its own fadeSwap renders the panel.
+        if (eventsSelectedId !== eventId) return;
+        if (result) applyEventDetail(result);
+        else el.innerHTML = '<div class="events-placeholder"><p>Loading…</p></div>';
+    });
+
+    if (result) return;
+    result = await load;
+    if (eventsSelectedId !== eventId) return;
+    await fadeSwap(el, () => applyEventDetail(result));
 }
 
 function eventIsTeam() {
@@ -380,11 +473,16 @@ function eventMapHtml(e) {
         </div>`;
 }
 
+// The tab underline moves at once; the body fades between the two tabs.
 function switchEventTab(tab) {
+    if (tab === eventsTab) return;
     eventsTab = tab;
     document.querySelectorAll('.events-tab').forEach(b =>
         b.classList.toggle('active', b.getAttribute('onclick') === `switchEventTab('${tab}')`));
-    renderEventTab();
+    const body = document.getElementById('events-tab-body');
+    // renderEventTab reads eventsTab when the swap happens, so quick
+    // successive clicks all land on the last tab picked.
+    fadeSwap(body, renderEventTab);
 }
 
 function renderEventTab() {

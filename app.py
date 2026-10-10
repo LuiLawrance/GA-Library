@@ -3546,9 +3546,10 @@ async def fragment_events():
 # ════════════════════════════════════════
 #
 # Omnidex organized-play events — see events_ga.py. Reading is public, like
-# the card catalog. Adding / refreshing / deleting is Cards-admin only: the
-# API has no event listing, so an event is only stored once someone adds it
-# by id, and each fetch fans out into ~20 upstream calls.
+# the card catalog. The API has no event listing, so an event is only stored
+# once someone looks it up by ID from the Events search bar — open to
+# everyone, the same way a card search pulls in a card that isn't stored yet
+# (see /api/events/lookup). Refreshing / deleting stays Cards-admin only.
 
 def _site_omnidex_ids() -> set[str]:
     """Omnidex IDs that belong to a registered GA Library account with a
@@ -3613,14 +3614,51 @@ async def api_event_detail(event_id: int):
     return JSONResponse(detail)
 
 
-@app.post("/api/events")
-async def api_event_add(request: Request):
-    require_cards_admin(request)
+# Each lookup of an unstored event fans out into ~20 upstream API calls, so
+# brand-new fetches (not lookups of events already stored) are capped per
+# user / IP. Cards admins are exempt.
+EVENT_LOOKUP_LIMIT = 10
+EVENT_LOOKUP_WINDOW = timedelta(minutes=10)
+_event_lookups: dict[str, list[datetime]] = {}
+_event_lookups_lock = threading.Lock()
 
+
+def _event_lookup_rate_limited(key: str) -> bool:
+    now = datetime.now(timezone.utc)
+    with _event_lookups_lock:
+        recent = [t for t in _event_lookups.get(key, []) if now - t < EVENT_LOOKUP_WINDOW]
+        if len(recent) >= EVENT_LOOKUP_LIMIT:
+            _event_lookups[key] = recent
+            return True
+        recent.append(now)
+        _event_lookups[key] = recent
+        return False
+
+
+@app.post("/api/events/lookup")
+async def api_event_lookup(request: Request):
+    """Search-bar lookup by Omnidex event ID or URL. An event that's already
+    stored comes straight back (its normal staleness refresh happens when the
+    detail is opened); one that isn't gets fetched from the API and stored —
+    the event counterpart of a card search syncing an unknown card."""
     body = await request.json()
     event_id = _event_id_or_400(body.get("event"))
+
+    meta = await run_in_threadpool(events_ga.load_event_meta, event_id)
+    if meta is not None:
+        return JSONResponse({"event": meta, "fetched": False})
+
+    user = get_current_user(request)
+    is_cards_admin = bool(user) and get_user_auth_type(user) in ADMIN_CARDS_RANKS
+    if not is_cards_admin:
+        # Railway sits behind a proxy, so the real client is X-Forwarded-For's first hop.
+        forwarded = request.headers.get("x-forwarded-for", "")
+        client_ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+        if _event_lookup_rate_limited(f"user:{user}" if user else f"ip:{client_ip}"):
+            raise HTTPException(status_code=429, detail="Too many new event lookups — try again in a few minutes.")
+
     meta = await _sync_event_or_raise(event_id)
-    return JSONResponse({"event": meta})
+    return JSONResponse({"event": meta, "fetched": True})
 
 
 @app.post("/api/events/{event_id}/refresh")
