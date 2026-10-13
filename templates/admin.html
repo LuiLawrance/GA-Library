@@ -416,6 +416,10 @@
                 </div>
                 <input type="text" class="admin-pid-search" id="admin-pid-search"
                        placeholder="Search cards or sets..." oninput="renderAdminPidRows()">
+                <!-- Admin-created cards / printings the Grand Archive API doesn't have
+                     (custom_cards.py) — see openAdminCustomCardModal in admin.js. -->
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-custom-add-btn"
+                        onclick="openAdminCustomCardModal()">+ Add Card</button>
             </div>
 
             <!-- Info and Pricing share this single grid/detail view — switchAdminCardsView

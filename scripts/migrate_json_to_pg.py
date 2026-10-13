@@ -20,7 +20,7 @@ enforced by Postgres, not just assumed).
 from db import event_sync
 from db.catalog_sync import (
     _chunked, _set_slug, _split_speed, build_card_row, build_edition_row, build_foil_rows, build_rule_rows,
-    build_thema_rows, upsert as _upsert,
+    build_thema_rows, CARD_UPDATE_COLS, upsert as _upsert,
 )
 from db.models import (
     Card, CardError, CardRule, CardSlug, Deck, DeckCard, DeckSection, Edition, FeaturedSetGroup, Foil,
@@ -30,7 +30,7 @@ from db.models import (
 from db.session import get_session
 from dotenv import load_dotenv
 from pathlib import Path
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -311,7 +311,7 @@ def migrate_cards(info_data: dict) -> None:
     ]
 
     with get_session() as session:
-        _upsert(session, Card, rows, index_elements=["card_id"])
+        _upsert(session, Card, rows, index_elements=["card_id"], update_cols=CARD_UPDATE_COLS)
 
     print(f"cards: {len(rows)}")
 
@@ -376,7 +376,8 @@ def migrate_editions_and_foils(info_data: dict) -> set[tuple[str, str]]:
             })
 
     with get_session() as session:
-        _upsert(session, Edition, edition_rows, index_elements=["edition_id"])
+        _upsert(session, Edition, edition_rows, index_elements=["edition_id"],
+                update_cols=[c.name for c in Edition.__table__.columns if c.name not in ("edition_id", "is_custom")])
 
     known_edition_ids = {row["edition_id"] for row in edition_rows}
     print(f"editions: {len(edition_rows)}")
@@ -488,6 +489,27 @@ def migrate_collector_numbers() -> None:
                     updated += result.rowcount
 
     print(f"editions.collector_number set on {updated} rows")
+
+
+def migrate_custom_flags() -> None:
+    """Admin-created cards/printings (custom_cards.py) are listed in
+    CUSTOM.json in JSON mode — carry that over as cards/editions.is_custom.
+    Only ever sets flags (never clears one already set in Postgres), and their
+    uploaded art stays on this machine's disk, which the image route falls
+    back to (see custom_cards.custom_image_path)."""
+    custom = _load(DIR_CARDS / "CUSTOM.json")
+    card_ids = custom.get("cards") or []
+    edition_ids = custom.get("editions") or []
+    if not card_ids and not edition_ids:
+        return
+
+    with get_session() as session:
+        if card_ids:
+            session.execute(update(Card).where(Card.card_id.in_(card_ids)).values(is_custom=True))
+        if edition_ids:
+            session.execute(update(Edition).where(Edition.edition_id.in_(edition_ids)).values(is_custom=True))
+
+    print(f"custom flags: {len(card_ids)} card(s), {len(edition_ids)} edition(s)")
 
 
 def migrate_thema(info_data: dict) -> None:
@@ -809,6 +831,7 @@ def main(force: bool = False) -> None:
     migrate_card_rules(info_data)
     known_foil_pairs = migrate_editions_and_foils(info_data)
     migrate_collector_numbers()
+    migrate_custom_flags()
     migrate_thema(info_data)
     migrate_card_errors(force=force)
     migrate_pricing(known_foil_pairs, force=force)

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from db import catalog_sync
-from db.catalog_sync import TEMP_FOIL_ID
+from db.catalog_sync import TEMP_FOIL_ID, TEMP_FOIL_KINDS, real_foil_for_temp, temp_placeholder_foils
 from db.models import Card, CardError, CardSlug, Edition, FeaturedSetGroup, Foil, Set, ThemaScore
 from db.session import get_session
 from db_mode import is_db_mode
@@ -58,8 +58,13 @@ def _api_search(slug: str, debug: bool = False) -> dict:
             timeout=10
         )
 
-        response.raise_for_status()
-        card_data = response.json()
+        if response.status_code == 404:
+            card_data = _api_search_moved(slug, debug)
+            if card_data is None:
+                response.raise_for_status()
+        else:
+            response.raise_for_status()
+            card_data = response.json()
 
         if debug:
             print(
@@ -86,14 +91,61 @@ def _api_search(slug: str, debug: bool = False) -> dict:
     return {}
 
 
+def _api_search_moved(slug: str, debug: bool = False) -> dict | None:
+    """Fallback for a 404 on /cards/{slug}: the API sometimes moves a card to a
+    new address without renaming it (e.g. "Croaking Webfoot" now lives at
+    /cards/frog). This app keys cards by a slug derived from the NAME (see
+    _format_search), so look the card up by name instead and take the hit
+    that's the same card — same card_id as the one stored locally under this
+    slug, or (for a card not stored yet) a name that formats to this slug.
+    Returns that hit's full card data (the search returns the same shape the
+    set sync persists), or None if nothing matches."""
+    local_card_id = None
+    local_name = None
+
+    if is_db_mode():
+        with get_session() as session:
+            row = session.execute(
+                select(CardSlug.card_id, CardSlug.name).where(CardSlug.slug == slug)
+            ).first()
+        if row:
+            local_card_id, local_name = row
+    else:
+        entry = load_slugs_data().get(slug)
+        if entry:
+            local_card_id, local_name = entry.get("card_id"), entry.get("name")
+
+    try:
+        response = requests.get(API_SET, params={"name": local_name or slug.replace("-", " ")}, timeout=10)
+        response.raise_for_status()
+        search_data = response.json()
+    except requests.exceptions.RequestException:
+        return None
+
+    hits = search_data.get("data") or search_data.get("cards") or search_data.get("results") or []
+    match = next((h for h in hits if local_card_id and h.get("uuid") == local_card_id), None) \
+        or next((h for h in hits if _format_search(h.get("name", "")) == slug), None)
+
+    if match is None:
+        return None
+
+    print(f"Card moved on the API | {slug} -> /cards/{match.get('slug')} (kept as '{slug}' locally)")
+    return match
+
+
 def _check_local(slug: str, debug: bool = False) -> bool:
     if is_db_mode():
         with get_session() as session:
             row = session.execute(
-                select(Card.last_synced)
+                select(Card.last_synced, Card.is_custom)
                 .join(CardSlug, CardSlug.card_id == Card.card_id)
                 .where(CardSlug.slug == slug)
             ).first()
+
+        # An admin-created card (custom_cards.py) has nothing on the API to
+        # sync from — always treat it as fresh.
+        if row is not None and row.is_custom:
+            return True
 
         if row is None or row[0] is None:
             if debug:
@@ -135,6 +187,11 @@ def _check_local(slug: str, debug: bool = False) -> bool:
         return False
 
     card_id = slug_data[slug]["card_id"]
+
+    from custom_cards import is_custom_card
+    if is_custom_card(card_id):
+        return True
+
     last_updated = update_data.get(card_id)
 
     if not last_updated:
@@ -835,11 +892,13 @@ def _update_edition(card_data: dict, debug: bool = False) -> None:
         )
 
 
-def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: bool = False) -> None:
-    """Moves sales, listings, and every user's inventory data for this edition
-    off the TEMP_FOIL_ID placeholder and onto the real foil_id the API just
-    reported. Called once per edition, right as the placeholder is about to
-    be dropped from INFO.json."""
+def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: bool = False,
+                       temp_foil_id: str = TEMP_FOIL_ID) -> None:
+    """Moves sales, listings, and every user's inventory, watchlist and
+    wishlist data for this edition off stand-in `temp_foil_id` and onto the
+    real foil_id the API just reported. Called once per stand-in, right as it's
+    about to be dropped from INFO.json. (JSON decks store card_id -> quantity
+    with no foil pinned, so they have nothing to move.)"""
     from pricing_ga import JSON_LISTINGS, JSON_SALES
 
     moved_records = 0
@@ -850,7 +909,7 @@ def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: 
         with target_file.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
-        temp_records = data.get(card_id, {}).get(edition_id, {}).pop(TEMP_FOIL_ID, None)
+        temp_records = data.get(card_id, {}).get(edition_id, {}).pop(temp_foil_id, None)
 
         if temp_records:
             data.setdefault(card_id, {}).setdefault(edition_id, {}).setdefault(real_foil_id, [])
@@ -875,7 +934,7 @@ def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: 
 
             for bin_info in inv_data.values():
                 for cards in bin_info.get("sections", {}).values():
-                    qty = cards.get(card_id, {}).get(edition_id, {}).pop(TEMP_FOIL_ID, None)
+                    qty = cards.get(card_id, {}).get(edition_id, {}).pop(temp_foil_id, None)
 
                     if qty:
                         cards.setdefault(card_id, {}).setdefault(edition_id, {})
@@ -894,14 +953,42 @@ def _migrate_temp_foil(card_id: str, edition_id: str, real_foil_id: str, debug: 
                 with open(entry.path, "w", encoding="utf-8") as f:
                     json.dump(inv_data, f, indent=4, ensure_ascii=False)
 
+    # Watch / wish lists: {card_id: {edition_id: {foil_id: {added, ...}}}} per
+    # user file — keep an existing real-foil entry, else move the stand-in's.
+    moved_lists = 0
+
+    for list_dir in ("DATA_GA/WATCHLIST_GA", "DATA_GA/WISH_GA"):
+        if not os.path.exists(list_dir):
+            continue
+
+        for entry in os.scandir(list_dir):
+            if not entry.name.endswith(".json"):
+                continue
+
+            with open(entry.path, "r", encoding="utf-8") as f:
+                list_data = json.load(f)
+
+            foils = list_data.get(card_id, {}).get(edition_id, {})
+            temp_entry = foils.pop(temp_foil_id, None)
+
+            if temp_entry is None:
+                continue
+
+            foils.setdefault(real_foil_id, temp_entry)
+            moved_lists += 1
+
+            with open(entry.path, "w", encoding="utf-8") as f:
+                json.dump(list_data, f, indent=4, ensure_ascii=False)
+
     if debug:
         print(
             f"Migrated temp foil | "
             f"card_id={card_id} | "
             f"edition_id={edition_id} | "
-            f"real_foil_id={real_foil_id} | "
+            f"{temp_foil_id} -> {real_foil_id} | "
             f"sales/listings_records={moved_records} | "
-            f"inventory_entries={moved_inventory}"
+            f"inventory_entries={moved_inventory} | "
+            f"watch/wish_entries={moved_lists}"
         )
 
 
@@ -969,7 +1056,7 @@ def _card_data_to_info_entry(card_data: dict) -> dict:
         # the placeholder by catalog_sync.persist_card (DB) / _update_info's
         # merge branch + _migrate_temp_foil (JSON).
         if not foils:
-            foils[TEMP_FOIL_ID] = {"kind": "NONFOIL", "population": None, "printing": None, "variants": {}}
+            foils.update(temp_placeholder_foils())
 
         entry["editions"][edition["uuid"]] = {
             "collector_number": edition.get("collector_number"),
@@ -1208,15 +1295,11 @@ def _update_info(card_data: dict, debug: bool = False) -> None:
         foils = editions[edition_id]["foils"]
 
         if not foils:
-            foils[TEMP_FOIL_ID] = {"kind": "NONFOIL", "population": None, "printing": None, "variants": {}}
-        elif TEMP_FOIL_ID in foils and len(foils) > 1:
-            real_foil_id = next(
-                (fid for fid, finfo in foils.items()
-                 if fid != TEMP_FOIL_ID and (finfo.get("kind") or "").upper() == "NONFOIL"),
-                next(fid for fid in foils if fid != TEMP_FOIL_ID)
-            )
-            _migrate_temp_foil(card_id, edition_id, real_foil_id, debug)
-            del foils[TEMP_FOIL_ID]
+            foils.update(temp_placeholder_foils())
+        elif any(fid not in TEMP_FOIL_KINDS for fid in foils):
+            for temp_id in [fid for fid in foils if fid in TEMP_FOIL_KINDS]:
+                _migrate_temp_foil(card_id, edition_id, real_foil_for_temp(temp_id, foils), debug, temp_id)
+                del foils[temp_id]
 
         if debug:
             print(
@@ -1475,8 +1558,11 @@ def card_reset(card_name: str, debug: bool = False) -> dict:
     # Delete cached images for the card's existing editions — _download_card_image
     # refills each one lazily the next time GET /images/{edition_id}.jpg is
     # actually requested, rather than this eagerly re-downloading them.
+    from custom_cards import custom_ids
+
     image_dir = new_dir(DIR_IMAGES)
-    existing_editions = _existing_edition_ids(slug)
+    custom_editions = custom_ids()["editions"]
+    existing_editions = [e for e in _existing_edition_ids(slug) if e not in custom_editions]
 
     if existing_editions:
         deleted = 0

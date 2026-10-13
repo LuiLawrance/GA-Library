@@ -540,16 +540,23 @@ function adminNaShortDate(isoDate) {
 
 // Pricing list rows get a ⚠ ahead of the name while the edition has an open
 // flag (either product). Info rows stay plain.
+// Small "Custom" tag after an admin-created printing's name (custom_cards.py).
+function adminCustomTagHtml(e) {
+    return e.is_custom
+        ? ` <span class="tag tag--slate admin-custom-tag" title="${e.card_is_custom ? 'Custom card' : 'Custom printing'} — added by an admin, not on the Grand Archive API">Custom</span>`
+        : '';
+}
+
 function adminPidRowNameHtml(e, infoMode) {
     const flags = !infoMode && adminNaOpenByEdition.get(e.edition_id);
-    if (!flags) return escapeHtml(e.name);
+    if (!flags) return escapeHtml(e.name) + adminCustomTagHtml(e);
 
     const title = flags.map(f => {
         const product = adminNaProductLabel(f, e);
         return `${product ? `${product}: ` : ''}${adminNaSalesText(f)} — check for missed sales`;
     }).join('\n');
 
-    return `<span class="admin-na-marker" title="${escapeHtml(title)}">⚠</span>${escapeHtml(e.name)}`;
+    return `<span class="admin-na-marker" title="${escapeHtml(title)}">⚠</span>${escapeHtml(e.name)}${adminCustomTagHtml(e)}`;
 }
 
 // One Needs Action list row: Card / Rarity / Set / New (sales across the
@@ -736,6 +743,632 @@ async function resolveAdminNeedsActionFlag(flagId, resolved) {
     }
 
     adminNaApplyFlags();
+}
+
+// ── Custom cards ──
+// Admin-created cards / printings the Grand Archive API doesn't have
+// (custom_cards.py), with uploaded art. "+ Add Card" in the Cards header opens
+// the dialog; it either creates a whole new card or adds a missing printing
+// (e.g. a new promo) to an existing one. Custom printings get the same Nonfoil
+// + Foil stand-in foils as an API edition with no circulation data, so sales
+// can be imported on them like any other card. Their Info panel swaps Refresh
+// Card (nothing on the API to refresh from) for Replace Image / Delete.
+
+let adminCustomOptions = null;      // {elements, sets, rarities} from /api/admin/cards/custom/options
+let adminCustomMode = 'card';       // 'card' | 'printing'
+let adminCustomImageFile = null;
+let adminCustomKinds = new Set(['NONFOIL', 'FOIL']);
+let adminCustomSubmitting = false;
+// edition_id -> upload timestamp, appended as ?v= to that edition's art so a
+// replaced image isn't served from the browser's in-page image cache.
+let adminCustomImageVersion = {};
+
+function adminCardImageUrl(editionId) {
+    const v = adminCustomImageVersion[editionId];
+    return `/images/${encodeURIComponent(editionId)}.jpg${v ? `?v=${v}` : ''}`;
+}
+
+async function loadAdminCustomOptions() {
+    if (adminCustomOptions) return adminCustomOptions;
+    const res = await fetch('/api/admin/cards/custom/options');
+    if (!res.ok) throw new Error('Failed to load form options');
+    adminCustomOptions = await res.json();
+    return adminCustomOptions;
+}
+
+// `prefill.cardId` opens straight into "New printing" for that card (the Info
+// panel's "+ Add Printing" button).
+async function openAdminCustomCardModal(prefill = {}) {
+    closeAdminCustomCardModal();
+
+    let options;
+    try {
+        options = await loadAdminCustomOptions();
+    } catch (err) {
+        alert('Could not load the card form — try again.');
+        return;
+    }
+
+    adminCustomMode = prefill.cardId ? 'printing' : 'card';
+    adminCustomImageFile = null;
+    adminCustomKinds = new Set(['NONFOIL', 'FOIL']);
+    adminCustomSubmitting = false;
+
+    const prefillName = prefill.cardId
+        ? (adminPidData.find(e => e.card_id === prefill.cardId)?.name || '')
+        : '';
+
+    // Every card once (adminPidData is per edition) for the printing picker.
+    const cardNames = [...new Map(adminPidData.map(e => [e.name, e.card_id])).keys()].sort((a, b) => a.localeCompare(b));
+    const elementOptions = [{value: '', label: '— None —'}, ...options.elements.map(el => ({value: el, label: el}))];
+    const rarityOptions = options.rarities.map(r => ({value: String(r.value), label: r.label}));
+    const stat = (key, label) => `
+        <label class="admin-custom-field admin-custom-field-stat">
+            <span class="admin-custom-label">${label}</span>
+            <input type="number" class="input" data-field="${key}" min="0" step="1">
+        </label>`;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'admin-custom-modal';
+    overlay.className = 'overlay';
+    overlay.onclick = closeAdminCustomCardModal;
+    overlay.innerHTML = `
+        <div class="modal admin-custom-modal scroll-thin" onclick="event.stopPropagation()">
+            <div class="admin-custom-header">
+                <span class="admin-custom-title">Add Card</span>
+                <button type="button" class="admin-custom-close" onclick="closeAdminCustomCardModal()">✕</button>
+            </div>
+            <p class="admin-custom-hint">
+                For cards or printings the Grand Archive API doesn't have yet. They get Nonfoil and Foil
+                placeholders (no population) so sales can be imported, and API syncs leave them alone.
+            </p>
+
+            <div class="admin-custom-mode pill-toggle" id="admin-custom-mode">
+                <span class="pill-indicator"></span>
+                <button type="button" class="pill-toggle-btn ${adminCustomMode === 'card' ? 'active' : ''}" data-mode="card"
+                        onclick="switchAdminCustomMode('card')">New Card</button>
+                <button type="button" class="pill-toggle-btn ${adminCustomMode === 'printing' ? 'active' : ''}" data-mode="printing"
+                        onclick="switchAdminCustomMode('printing')">New Printing</button>
+            </div>
+
+            <div class="admin-custom-body">
+                <div class="admin-custom-col">
+                    <div class="admin-custom-group" data-mode-only="card">
+                        <label class="admin-custom-field">
+                            <span class="admin-custom-label">Name *</span>
+                            <input type="text" class="input" data-field="name" maxlength="120" autocomplete="off">
+                        </label>
+                        <div class="admin-custom-row">
+                            <div class="admin-custom-field">
+                                <span class="admin-custom-label">Element</span>
+                                <span id="admin-custom-element">${selectDropdownHTML(elementOptions, '')}</span>
+                            </div>
+                            <label class="admin-custom-field">
+                                <span class="admin-custom-label">Types</span>
+                                <input type="text" class="input" data-field="types" placeholder="e.g. ACTION, ATTACK" autocomplete="off">
+                            </label>
+                        </div>
+                        <label class="admin-custom-field">
+                            <span class="admin-custom-label">Effect</span>
+                            <textarea class="input textarea admin-custom-effect scroll-thin" data-field="effect" rows="3"></textarea>
+                        </label>
+                        <div class="admin-custom-stats">
+                            ${stat('cost_memory', 'Memory')}${stat('cost_reserve', 'Reserve')}${stat('level', 'Level')}
+                            ${stat('power', 'Power')}${stat('life', 'Life')}${stat('durability', 'Durability')}${stat('speed', 'Speed')}
+                        </div>
+                    </div>
+
+                    <div class="admin-custom-group" data-mode-only="printing">
+                        <label class="admin-custom-field">
+                            <span class="admin-custom-label">Card *</span>
+                            <input type="text" class="input" data-field="card_name" list="admin-custom-card-list"
+                                   value="${escapeHtml(prefillName)}" placeholder="Start typing a card name…" autocomplete="off">
+                            <datalist id="admin-custom-card-list">
+                                ${cardNames.map(n => `<option value="${escapeHtml(n)}"></option>`).join('')}
+                            </datalist>
+                        </label>
+                    </div>
+
+                    <div class="admin-custom-group">
+                        <span class="admin-custom-group-title">Printing</span>
+                        <div class="admin-custom-row">
+                            <label class="admin-custom-field">
+                                <span class="admin-custom-label">Set *</span>
+                                <input type="text" class="input" data-field="set_prefix" list="admin-custom-set-list"
+                                       placeholder="e.g. P26" autocomplete="off" oninput="syncAdminCustomSetName()">
+                                <datalist id="admin-custom-set-list">
+                                    ${options.sets.map(s => `<option value="${escapeHtml(s.prefix)}">${escapeHtml(s.name)}</option>`).join('')}
+                                </datalist>
+                            </label>
+                            <label class="admin-custom-field admin-custom-field-narrow">
+                                <span class="admin-custom-label">Number *</span>
+                                <input type="text" class="input" data-field="collector_number" placeholder="027" autocomplete="off">
+                            </label>
+                            <div class="admin-custom-field admin-custom-field-narrow">
+                                <span class="admin-custom-label">Rarity *</span>
+                                <span id="admin-custom-rarity">${selectDropdownHTML(rarityOptions, '6')}</span>
+                            </div>
+                        </div>
+                        <label class="admin-custom-field admin-custom-set-name hidden" id="admin-custom-set-name">
+                            <span class="admin-custom-label">New set name *</span>
+                            <input type="text" class="input" data-field="set_name" placeholder="e.g. Promotional 2026" autocomplete="off">
+                        </label>
+                        <div class="admin-custom-row">
+                            <label class="admin-custom-field">
+                                <span class="admin-custom-label">Illustrator</span>
+                                <input type="text" class="input" data-field="illustrator" autocomplete="off">
+                            </label>
+                            <label class="admin-custom-field admin-custom-field-narrow">
+                                <span class="admin-custom-label">Release date</span>
+                                <input type="date" class="input" data-field="release_date">
+                            </label>
+                        </div>
+                        <div class="admin-custom-field">
+                            <span class="admin-custom-label">Printings *</span>
+                            <div class="admin-custom-kinds">
+                                <button type="button" class="admin-kind-chip active" data-kind="NONFOIL"
+                                        onclick="toggleAdminCustomKind(this)">Nonfoil</button>
+                                <button type="button" class="admin-kind-chip active" data-kind="FOIL"
+                                        onclick="toggleAdminCustomKind(this)">Foil</button>
+                                <span class="admin-custom-muted">Placeholders with no population — change any time in the Info panel.</span>
+                            </div>
+                        </div>
+                        <label class="admin-custom-field">
+                            <span class="admin-custom-label">Flavor text</span>
+                            <input type="text" class="input" data-field="flavor" autocomplete="off">
+                        </label>
+                    </div>
+                </div>
+
+                <label class="admin-custom-image" id="admin-custom-image-drop"
+                       ondragover="event.preventDefault(); this.classList.add('dragging')"
+                       ondragleave="this.classList.remove('dragging')"
+                       ondrop="onAdminCustomImageDrop(event)">
+                    <input type="file" accept="image/jpeg,image/png,image/webp" class="hidden"
+                           onchange="setAdminCustomImage(this.files[0])">
+                    <img class="admin-custom-image-preview hidden" id="admin-custom-image-preview" alt="Card image preview">
+                    <span class="admin-custom-image-empty" id="admin-custom-image-empty">
+                        <b>Card image *</b><br>Click or drop a JPEG, PNG or WebP<br><span class="admin-custom-muted">max 8 MB</span>
+                    </span>
+                </label>
+            </div>
+
+            <div class="admin-custom-error hidden" id="admin-custom-error"></div>
+            <div class="admin-custom-actions">
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                        onclick="closeAdminCustomCardModal()">Cancel</button>
+                <button type="button" class="admin-pid-refresh-btn" id="admin-custom-submit"
+                        onclick="submitAdminCustomCard()">${adminCustomMode === 'card' ? 'Create Card' : 'Add Printing'}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    applyAdminCustomMode();
+    positionPillIndicator(document.getElementById('admin-custom-mode'));
+    overlay.querySelector(`[data-mode-only="${adminCustomMode}"] input`)?.focus();
+}
+
+function toggleAdminCustomKind(btn) {
+    const kind = btn.dataset.kind;
+    if (adminCustomKinds.has(kind) && adminCustomKinds.size === 1) {
+        showAdminCustomError('Keep at least one of Nonfoil / Foil.');
+        return;
+    }
+    adminCustomKinds.has(kind) ? adminCustomKinds.delete(kind) : adminCustomKinds.add(kind);
+    btn.classList.toggle('active', adminCustomKinds.has(kind));
+    showAdminCustomError('');
+}
+
+function closeAdminCustomCardModal() {
+    const box = document.querySelector('#admin-custom-modal .admin-custom-modal');
+    if (box) resetBoxResize(box);
+    document.getElementById('admin-custom-modal')?.remove();
+}
+
+// The two modes show different field groups (New Card's name/element/effect/
+// stats vs. New Printing's single card picker), so the dialog's height changes
+// a lot — animateBoxResize (animation.js) eases the box between the two sizes
+// instead of letting it snap, same as the inventory Add Card dialog's steps.
+function switchAdminCustomMode(mode) {
+    if (adminCustomMode === mode) return;
+    adminCustomMode = mode;
+    document.querySelectorAll('#admin-custom-mode .pill-toggle-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    positionPillIndicator(document.getElementById('admin-custom-mode'));
+
+    const box = document.querySelector('#admin-custom-modal .admin-custom-modal');
+    if (box) {
+        animateBoxResize(box, applyAdminCustomMode);
+    } else {
+        applyAdminCustomMode();
+    }
+}
+
+function applyAdminCustomMode() {
+    const modal = document.getElementById('admin-custom-modal');
+    if (!modal) return;
+    modal.querySelectorAll('[data-mode-only]').forEach(el => {
+        el.classList.toggle('hidden', el.dataset.modeOnly !== adminCustomMode);
+    });
+    const submit = document.getElementById('admin-custom-submit');
+    if (submit) submit.textContent = adminCustomMode === 'card' ? 'Create Card' : 'Add Printing';
+    showAdminCustomError('');
+}
+
+// A set prefix the catalog doesn't know yet needs a name too.
+function syncAdminCustomSetName() {
+    const prefix = adminCustomField('set_prefix').trim().toLowerCase();
+    const known = (adminCustomOptions?.sets || []).some(s => s.prefix.toLowerCase() === prefix);
+    document.getElementById('admin-custom-set-name')?.classList.toggle('hidden', !prefix || known);
+}
+
+function adminCustomField(key) {
+    return document.querySelector(`#admin-custom-modal [data-field="${key}"]`)?.value ?? '';
+}
+
+function showAdminCustomError(message) {
+    const el = document.getElementById('admin-custom-error');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('hidden', !message);
+}
+
+function onAdminCustomImageDrop(event) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('dragging');
+    setAdminCustomImage(event.dataTransfer.files[0]);
+}
+
+function setAdminCustomImage(file) {
+    if (!file) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+        showAdminCustomError('Image must be a JPEG, PNG or WebP file.');
+        return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+        showAdminCustomError('Image is too large (max 8 MB).');
+        return;
+    }
+    adminCustomImageFile = file;
+    showAdminCustomError('');
+
+    const preview = document.getElementById('admin-custom-image-preview');
+    const empty = document.getElementById('admin-custom-image-empty');
+    if (preview) {
+        if (preview.src) URL.revokeObjectURL(preview.src);
+        preview.src = URL.createObjectURL(file);
+        preview.classList.remove('hidden');
+    }
+    empty?.classList.add('hidden');
+}
+
+async function submitAdminCustomCard() {
+    if (adminCustomSubmitting) return;
+
+    const printing = {
+        set_prefix: adminCustomField('set_prefix').trim(),
+        set_name: adminCustomField('set_name').trim(),
+        collector_number: adminCustomField('collector_number').trim(),
+        rarity: Number(selectDropdownValue(document.getElementById('admin-custom-rarity'))),
+        illustrator: adminCustomField('illustrator').trim(),
+        release_date: adminCustomField('release_date'),
+        flavor: adminCustomField('flavor').trim(),
+        kinds: [...adminCustomKinds],
+    };
+
+    const payload = {mode: adminCustomMode, printing};
+
+    if (adminCustomMode === 'card') {
+        payload.card = {
+            name: adminCustomField('name').trim(),
+            element: selectDropdownValue(document.getElementById('admin-custom-element')) || '',
+            types: adminCustomField('types'),
+            effect: adminCustomField('effect'),
+        };
+        for (const key of ['cost_memory', 'cost_reserve', 'level', 'power', 'life', 'durability', 'speed']) {
+            payload.card[key] = adminCustomField(key);
+        }
+        if (!payload.card.name) return showAdminCustomError('Card name is required.');
+    } else {
+        const name = adminCustomField('card_name').trim();
+        const match = adminPidData.find(e => e.name.toLowerCase() === name.toLowerCase());
+        if (!match) return showAdminCustomError('Pick an existing card from the list.');
+        payload.card_id = match.card_id;
+    }
+
+    if (!printing.set_prefix || !printing.collector_number) return showAdminCustomError('Set and number are required.');
+    if (!adminCustomImageFile) return showAdminCustomError('Choose a card image.');
+
+    const form = new FormData();
+    form.append('data', JSON.stringify(payload));
+    form.append('image', adminCustomImageFile);
+
+    const submit = document.getElementById('admin-custom-submit');
+    adminCustomSubmitting = true;
+    if (submit) submit.disabled = true;
+    showAdminCustomError('');
+
+    try {
+        const res = await fetch('/api/admin/cards/custom', {method: 'POST', body: form});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            showAdminCustomError(data.detail || 'Could not save the card.');
+            return;
+        }
+
+        closeAdminCustomCardModal();
+        adminCustomOptions = null;          // a new set may now exist
+        adminCustomImageVersion[data.edition_id] = Date.now();
+        await adminReloadAndSelect(data.edition_id);
+    } catch (err) {
+        showAdminCustomError('Request failed — try again.');
+    } finally {
+        adminCustomSubmitting = false;
+        if (submit) submit.disabled = false;
+    }
+}
+
+// Re-fetches the list (a card/printing was added or removed) and opens
+// `editionId` in the Card Info window, scrolled into view.
+async function adminReloadAndSelect(editionId) {
+    await loadAdminPricingIds();
+    if (!editionId) {
+        adminPidResetDetailState(null);
+        renderAdminPricingDetailAll();
+        return;
+    }
+    adminPidDetailSelected = null;
+    await selectAdminPricingDetail(editionId);
+    adminPidScrollToEdition(editionId);
+}
+
+// Info panel footer actions for a custom printing.
+function adminCustomReplaceImage(editionId) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('image', file);
+        const res = await fetch(`/api/admin/cards/custom/${encodeURIComponent(editionId)}/image`, {method: 'POST', body: form});
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.detail || 'Could not replace the image.');
+            return;
+        }
+        adminCustomImageVersion[editionId] = Date.now();
+        if (adminPidDetailSelected === editionId) renderAdminPricingImageCol();
+    };
+    input.click();
+}
+
+async function adminCustomDeletePrinting(editionId) {
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record) return;
+
+    const whole = record.card_is_custom && adminPidData.filter(e => e.card_id === record.card_id).length === 1;
+    const what = whole ? `the custom card "${record.name}"` : `this custom printing of "${record.name}"`;
+    if (!confirm(`Delete ${what}? Its sales, listings and image are deleted too. This can't be undone.`)) return;
+
+    const res = await fetch(`/api/admin/cards/custom/${encodeURIComponent(editionId)}`, {method: 'DELETE'});
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        alert(data.detail || 'Could not delete it.');
+        return;
+    }
+    await adminReloadAndSelect(null);
+}
+
+// ── Placeholder printings (Nonfoil / Foil) ──
+// A printing with no real foils from the database (an API promo it hasn't
+// filled in yet, or any custom printing) carries one placeholder per kind it
+// offers. Both by default; switch either off or back on here — TCGPlayer
+// sometimes sells a kind the official database doesn't list (or doesn't sell
+// one it does). The server refuses to drop one that still has entries on it.
+
+const ADMIN_STANDIN_FOIL_IDS = {temp: 'NONFOIL', 'temp-foil': 'FOIL'};
+
+function adminStandinKinds() {
+    if (!adminPidDetailFoils?.length) return null;
+    if (!adminPidDetailFoils.every(f => f.foil_id in ADMIN_STANDIN_FOIL_IDS)) return null;
+    return new Set(adminPidDetailFoils.map(f => ADMIN_STANDIN_FOIL_IDS[f.foil_id]));
+}
+
+function adminStandinRowHtml(record) {
+    const kinds = adminStandinKinds();
+    if (!kinds) return '';
+
+    const chip = (kind, label) => `
+        <button type="button" class="admin-kind-chip ${kinds.has(kind) ? 'active' : ''}"
+                title="${kinds.has(kind) ? `Remove the ${label} placeholder` : `Add a ${label} placeholder`}"
+                onclick="toggleAdminStandinKind('${escapeHtml(record.edition_id)}', '${kind}')">${label}</button>`;
+
+    return `
+        <div class="admin-standin-row" title="No print data from the official database — these placeholders hold sales and inventory until it arrives">
+            <span class="admin-pid-detail-label label label--muted">Placeholders</span>
+            ${chip('NONFOIL', 'Nonfoil')}${chip('FOIL', 'Foil')}
+        </div>
+    `;
+}
+
+async function toggleAdminStandinKind(editionId, kind) {
+    const kinds = adminStandinKinds();
+    if (!kinds) return;
+    kinds.has(kind) ? kinds.delete(kind) : kinds.add(kind);
+    if (kinds.size === 0) {
+        alert('Keep at least one of Nonfoil / Foil.');
+        return;
+    }
+
+    const res = await fetch(`/api/admin/cards/standins/${encodeURIComponent(editionId)}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kinds: [...kinds]}),
+    });
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.detail || 'Could not change the placeholders.');
+        return;
+    }
+    if (adminPidDetailSelected === editionId) await loadAdminPricingDetailFoils();
+}
+
+// ── Convert a custom printing into the real one ──
+// Once Grand Archive adds a card/printing that was created by hand: look the
+// real card up by name, pick the matching printing, and everything on the
+// custom one (sales, listings, inventory, decks, watch/wish, Needs Action
+// flags, scrape dates, TCGPlayer product ID) moves onto it. The custom
+// printing — and its card, if that was its last printing — is then removed.
+
+let adminConvertSource = null;
+let adminConvertTarget = null;
+
+function openAdminConvertModal(editionId) {
+    const record = adminPidData.find(e => e.edition_id === editionId);
+    if (!record) return;
+    closeAdminConvertModal();
+    adminConvertSource = editionId;
+    adminConvertTarget = null;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'admin-convert-modal';
+    overlay.className = 'overlay';
+    overlay.onclick = closeAdminConvertModal;
+    overlay.innerHTML = `
+        <div class="modal admin-custom-modal admin-convert-modal scroll-thin" onclick="event.stopPropagation()">
+            <div class="admin-custom-header">
+                <span class="admin-custom-title">Convert to Real Card</span>
+                <button type="button" class="admin-custom-close" onclick="closeAdminConvertModal()">✕</button>
+            </div>
+            <p class="admin-custom-hint">
+                For when the official database adds this card. Everything on the custom printing
+                (${escapeHtml(record.set_prefix || '')} · ${escapeHtml(record.rarity || '')}) — sales, listings,
+                inventory, decks, watchlists, flags and its TCGPlayer product ID — moves onto the real printing you pick,
+                Nonfoil to Nonfoil and Foil to Foil. The custom printing is then deleted.
+            </p>
+            <div class="admin-convert-search">
+                <input type="text" class="input" id="admin-convert-name" value="${escapeHtml(record.name)}"
+                       placeholder="Real card name" autocomplete="off"
+                       onkeydown="if (event.key === 'Enter') findAdminConvertTargets()">
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-convert-find"
+                        onclick="findAdminConvertTargets()">Find</button>
+            </div>
+            <div class="admin-convert-results scroll-thin" id="admin-convert-results">
+                <div class="admin-custom-hint">Find the real card to list its printings.</div>
+            </div>
+            <div class="admin-custom-error hidden" id="admin-convert-error"></div>
+            <div class="admin-custom-actions">
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                        onclick="closeAdminConvertModal()">Cancel</button>
+                <button type="button" class="admin-pid-refresh-btn" id="admin-convert-submit" disabled
+                        onclick="submitAdminConvert()">Convert</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById('admin-convert-name')?.select();
+}
+
+function closeAdminConvertModal() {
+    document.getElementById('admin-convert-modal')?.remove();
+}
+
+function showAdminConvertError(message) {
+    const el = document.getElementById('admin-convert-error');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('hidden', !message);
+}
+
+async function findAdminConvertTargets() {
+    const name = document.getElementById('admin-convert-name')?.value.trim();
+    const results = document.getElementById('admin-convert-results');
+    const find = document.getElementById('admin-convert-find');
+    if (!name || !results) return;
+
+    adminConvertTarget = null;
+    document.getElementById('admin-convert-submit').disabled = true;
+    showAdminConvertError('');
+    results.innerHTML = '<div class="admin-custom-hint">Looking it up…</div>';
+    if (find) find.disabled = true;
+
+    try {
+        const res = await fetch(`/api/admin/cards/custom/${encodeURIComponent(adminConvertSource)}/convert/lookup`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            results.innerHTML = '';
+            showAdminConvertError(data.detail || 'Lookup failed.');
+            return;
+        }
+        if (!data.printings.length) {
+            results.innerHTML = `<div class="admin-custom-hint">${escapeHtml(data.name)} has no printings to convert into.</div>`;
+            return;
+        }
+
+        const source = adminPidData.find(e => e.edition_id === adminConvertSource);
+        results.innerHTML = `
+            <div class="admin-custom-group-title">${escapeHtml(data.name)} — pick the printing</div>
+            ${data.printings.map(p => {
+                const likely = source && p.set_prefix === source.set_prefix && p.rarity === source.rarity;
+                return `
+                    <button type="button" class="admin-convert-option ${likely ? 'admin-convert-likely' : ''}"
+                            data-edition-id="${escapeHtml(p.edition_id)}" onclick="pickAdminConvertTarget(this)">
+                        <span class="admin-convert-set">${escapeHtml(p.set_prefix || '—')} #${escapeHtml(p.collector_number || '—')}</span>
+                        <span class="admin-convert-rarity">${escapeHtml(p.rarity)}</span>
+                        <span class="admin-convert-kinds">${escapeHtml(p.kinds.join(' · '))}${p.placeholder ? ' <span class="tag tag--slate">placeholder</span>' : ''}</span>
+                        ${likely ? '<span class="tag tag--accent">same set & rarity</span>' : ''}
+                    </button>`;
+            }).join('')}
+        `;
+    } catch (err) {
+        results.innerHTML = '';
+        showAdminConvertError('Request failed — try again.');
+    } finally {
+        if (find) find.disabled = false;
+    }
+}
+
+function pickAdminConvertTarget(btn) {
+    adminConvertTarget = btn.dataset.editionId;
+    document.querySelectorAll('#admin-convert-results .admin-convert-option').forEach(b => b.classList.toggle('selected', b === btn));
+    document.getElementById('admin-convert-submit').disabled = false;
+}
+
+async function submitAdminConvert() {
+    if (!adminConvertSource || !adminConvertTarget) return;
+    const label = document.querySelector('#admin-convert-results .admin-convert-option.selected .admin-convert-set')?.textContent || 'that printing';
+    if (!confirm(`Move everything onto ${label} and delete the custom printing? This can't be undone.`)) return;
+
+    const submit = document.getElementById('admin-convert-submit');
+    submit.disabled = true;
+    showAdminConvertError('');
+
+    try {
+        const res = await fetch(`/api/admin/cards/custom/${encodeURIComponent(adminConvertSource)}/convert`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({target_edition_id: adminConvertTarget}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            showAdminConvertError(data.detail || 'Conversion failed.');
+            submit.disabled = false;
+            return;
+        }
+        closeAdminConvertModal();
+        await adminReloadAndSelect(data.target_edition_id);
+    } catch (err) {
+        showAdminConvertError('Request failed — try again.');
+        submit.disabled = false;
+    }
 }
 
 async function loadAdminSystemSettings() {
@@ -3363,7 +3996,7 @@ function adminPidRowHtml(e, infoMode) {
         <div class="admin-pid-row admin-pid-row-info ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
              data-edition-id="${escapeHtml(e.edition_id)}"
              onclick="selectAdminPricingDetail('${escapeHtml(e.edition_id)}')">
-            <span class="admin-pid-col-name">${escapeHtml(e.name)}</span>
+            <span class="admin-pid-col-name">${escapeHtml(e.name)}${adminCustomTagHtml(e)}</span>
             <span class="admin-pid-col-rarity">${escapeHtml(e.rarity || '—')}</span>
             <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
         </div>
@@ -4843,7 +5476,7 @@ function renderAdminPricingImageCol() {
         </div>
         <div class="admin-pid-detail-image-wrap">
             <div class="tile-img-spinner">${TILE_SPINNER_SVG}</div>
-            <img class="admin-pid-detail-image" src="/images/${escapeHtml(record.edition_id)}.jpg" alt="${escapeHtml(record.name)}"
+            <img class="admin-pid-detail-image" src="${escapeHtml(adminCardImageUrl(record.edition_id))}" alt="${escapeHtml(record.name)}"
                  onload="revealTileImage(this)" onerror="revealTileImage(this)">
         </div>
         ${statsHtml}
@@ -5044,7 +5677,7 @@ function renderAdminInfoIdsPanel(panel, record) {
                         <li class="admin-pid-id-tree-node">
                             <span class="admin-pid-id-tree-row">
                                 <span class="admin-pid-detail-label label label--muted">Edition</span>
-                                <span class="admin-pid-detail-id-value">${escapeHtml(record.edition_id)}</span>
+                                <span class="admin-pid-detail-id-value">${escapeHtml(record.edition_id)}</span>${adminCustomTagHtml(record)}
                             </span>
                             ${editionMetaHtml}
                             <ul class="admin-pid-id-tree-list">
@@ -5054,13 +5687,30 @@ function renderAdminInfoIdsPanel(panel, record) {
                     </ul>
                 </li>
             </ul>
+            ${adminStandinRowHtml(record)}
             <div class="admin-pid-id-tree-footer">
                 <div class="drawer-stat admin-pid-id-tree-synced-stat">
                     <span class="drawer-stat-label label label--muted label--sm">Last Synced</span>
                     <span class="drawer-stat-value">${escapeHtml(record.system_updated || 'Never')}</span>
                 </div>
-                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pid-id-tree-refresh-btn"
-                        onclick="refreshAdminCard('${escapeHtml(record.edition_id)}', this)">Refresh Card</button>
+                <div class="admin-custom-footer-actions">
+                    <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                            title="Add a printing of this card the API doesn't have (e.g. a new promo)"
+                            onclick="openAdminCustomCardModal({cardId: '${escapeHtml(record.card_id)}'})">+ Add Printing</button>
+                    ${record.is_custom ? `
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                title="The official database has this card now — move everything onto the real printing"
+                                onclick="openAdminConvertModal('${escapeHtml(record.edition_id)}')">Convert to Real</button>
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary"
+                                onclick="adminCustomReplaceImage('${escapeHtml(record.edition_id)}')">Replace Image</button>
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-custom-delete-btn"
+                                onclick="adminCustomDeletePrinting('${escapeHtml(record.edition_id)}')">Delete</button>
+                    ` : ''}
+                    ${record.card_is_custom ? '' : `
+                        <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-pid-id-tree-refresh-btn"
+                                onclick="refreshAdminCard('${escapeHtml(record.edition_id)}', this)">Refresh Card</button>
+                    `}
+                </div>
             </div>
         </div>
     `;
@@ -6211,6 +6861,8 @@ function initAdmin() {
     adminPidImportPending = false;
     adminPidImportMode = 'paste';
     adminPidExportOpenType = null;
+    closeAdminCustomCardModal();
+    closeAdminConvertModal();
     adminNaFlags = [];
     adminNaOpenByEdition = new Map();
     adminNaFilter = 'open';

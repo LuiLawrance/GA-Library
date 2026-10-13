@@ -16,7 +16,7 @@ from db.session import get_session, reset_engine
 from db_connection import resolved_database_url, save_database_url
 from db_mode import is_db_mode
 from dotenv import load_dotenv
-from fastapi import FastAPI, Form, HTTPException, Request, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -64,6 +64,7 @@ import contextlib
 import db_cache
 import events_ga
 import io
+import custom_cards
 import json
 import needs_action
 import os
@@ -2488,6 +2489,7 @@ async def api_admin_pricing_product_ids(request: Request):
     listings_data = load_listings_data()
 
     results = []
+    custom = custom_cards.custom_ids()
 
     for edition_id, edition_ref in editions_data.items():
         card_id = edition_ref.get("card_id")
@@ -2559,6 +2561,10 @@ async def api_admin_pricing_product_ids(request: Request):
             "system_updated": system_update_data.get(card_id),
             "curio": curio,
             "curio_only": curio_only,
+            # Admin-created (custom_cards.py): its own printing, and whether
+            # the whole card is custom too (vs. a missing printing on a real one).
+            "is_custom": edition_id in custom["editions"],
+            "card_is_custom": card_id in custom["cards"],
         })
 
     results.sort(key=lambda r: (r["name"], r["set_prefix"] or ""))
@@ -3025,6 +3031,113 @@ async def api_admin_pricing_latest_dates(request: Request):
 # edition_id (matching this file's other per-edition admin endpoints) rather
 # than trusting a client-supplied card name, since card_reset needs one to
 # look up the card by slug.
+# ── Custom cards (custom_cards.py) ──
+# Admin-created cards / printings the Grand Archive API doesn't have, with
+# uploaded art. Multipart: a `data` JSON field plus an `image` file.
+
+@app.get("/api/admin/cards/custom/options")
+async def api_admin_custom_options(request: Request):
+    require_cards_admin(request)
+    return JSONResponse(await _run_blocking(custom_cards.form_options))
+
+
+def _custom_card_error(e: custom_cards.CustomCardError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/cards/custom")
+async def api_admin_custom_create(request: Request, data: str = Form(...), image: UploadFile = File(...)):
+    require_cards_admin(request)
+
+    try:
+        payload = json.loads(data)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed form data")
+
+    image_bytes = await image.read(custom_cards.MAX_IMAGE_BYTES + 1)
+
+    try:
+        if payload.get("mode") == "printing":
+            result = await _run_blocking(
+                custom_cards.add_printing, payload.get("card_id") or "", payload.get("printing") or {}, image_bytes)
+        else:
+            result = await _run_blocking(
+                custom_cards.create_card, payload.get("card") or {}, payload.get("printing") or {}, image_bytes)
+    except custom_cards.CustomCardError as e:
+        raise _custom_card_error(e)
+
+    return JSONResponse(result)
+
+
+@app.post("/api/admin/cards/custom/{edition_id}/image")
+async def api_admin_custom_image(edition_id: str, request: Request, image: UploadFile = File(...)):
+    require_cards_admin(request)
+
+    image_bytes = await image.read(custom_cards.MAX_IMAGE_BYTES + 1)
+    try:
+        await _run_blocking(custom_cards.replace_image, edition_id, image_bytes)
+    except custom_cards.CustomCardError as e:
+        raise _custom_card_error(e)
+
+    return JSONResponse({"ok": True})
+
+
+# Nonfoil / Foil stand-ins on a printing with no real foils (an API promo the
+# database hasn't filled in, or a custom printing) — custom_cards.set_standin_kinds.
+@app.post("/api/admin/cards/standins/{edition_id}")
+async def api_admin_standin_kinds(edition_id: str, request: Request):
+    require_cards_admin(request)
+
+    body = await request.json()
+    try:
+        kinds = await _run_blocking(custom_cards.set_standin_kinds, edition_id, body.get("kinds") or [])
+    except custom_cards.CustomCardError as e:
+        raise _custom_card_error(e)
+
+    return JSONResponse({"kinds": kinds})
+
+
+# Convert a custom printing into the real one once the API has it — step 1
+# fetches the real card by name and lists its printings, step 2 moves
+# everything over (custom_cards.conversion_targets / convert_printing).
+@app.post("/api/admin/cards/custom/{edition_id}/convert/lookup")
+async def api_admin_custom_convert_lookup(edition_id: str, request: Request):
+    require_cards_admin(request)
+
+    body = await request.json()
+    try:
+        result = await _run_blocking(custom_cards.conversion_targets, edition_id, (body.get("name") or "").strip())
+    except custom_cards.CustomCardError as e:
+        raise _custom_card_error(e)
+
+    return JSONResponse(result)
+
+
+@app.post("/api/admin/cards/custom/{edition_id}/convert")
+async def api_admin_custom_convert(edition_id: str, request: Request):
+    require_cards_admin(request)
+
+    body = await request.json()
+    try:
+        result = await _run_blocking(custom_cards.convert_printing, edition_id, body.get("target_edition_id") or "")
+    except custom_cards.CustomCardError as e:
+        raise _custom_card_error(e)
+
+    return JSONResponse(result)
+
+
+@app.delete("/api/admin/cards/custom/{edition_id}")
+async def api_admin_custom_delete(edition_id: str, request: Request):
+    require_cards_admin(request)
+
+    try:
+        result = await _run_blocking(custom_cards.delete_printing, edition_id)
+    except custom_cards.CustomCardError as e:
+        raise _custom_card_error(e)
+
+    return JSONResponse(result)
+
+
 @app.post("/api/admin/pricing/{edition_id}/refresh-card")
 async def api_admin_refresh_card(edition_id: str, request: Request):
     require_cards_admin(request)
@@ -3042,6 +3155,9 @@ async def api_admin_refresh_card(edition_id: str, request: Request):
 
     if not card_name:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    if custom_cards.is_custom_card(card_id):
+        raise HTTPException(status_code=400, detail="This is a custom card — it isn't on the Grand Archive API.")
 
     result = card_reset(card_name)
 
@@ -3357,6 +3473,15 @@ async def _run_blocking(func, *args):
 
 @app.get("/images/{edition_id}.jpg")
 async def get_image(edition_id: str):
+    # Admin-created printings (custom_cards.py) have no API image to redirect
+    # to — always serve their uploaded art, whatever store_images_locally says.
+    if custom_cards.is_custom_edition(edition_id):
+        found = await _run_blocking(custom_cards.custom_image_path, edition_id)
+        if found is None:
+            raise HTTPException(status_code=404, detail="Image not found")
+        path, content_type = found
+        return FileResponse(path, media_type=content_type, headers={"Cache-Control": "no-cache"})
+
     # The API's own image filename is always just "{edition_id}.jpg" (verified
     # against its /cards/{slug} responses), so this redirect needs no lookup —
     # with store_images_locally off, every card's image is served straight

@@ -24,8 +24,16 @@
 
         <!-- ── Selected event ── -->
         <!-- The panel frame stays put; #events-detail inside it is what
-             fades when switching events (fadeSwap, animation.js). -->
-        <div class="events-panel panel events-detail-panel">
+             fades when switching events (fadeSwap, animation.js). On a phone
+             the panel becomes a bottom sheet (events.css) that .open slides
+             up over the list; the scrim and sheet bar exist only there. -->
+        <div class="events-sheet-scrim" onclick="closeEventSheet()"></div>
+        <div class="events-panel panel events-detail-panel" id="events-detail-panel">
+            <div class="events-sheet-bar">
+                <span class="events-sheet-handle" aria-hidden="true"></span>
+                <button type="button" class="events-sheet-close btn btn--icon" onclick="closeEventSheet()"
+                        aria-label="Close event">&#x2715;</button>
+            </div>
             <div class="events-detail-inner" id="events-detail">
                 <div class="events-placeholder">
                     <span class="inv-empty-icon">🏆</span>

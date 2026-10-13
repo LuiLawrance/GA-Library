@@ -271,11 +271,40 @@ async function deleteEvent() {
     eventsSelectedId = null;
     eventsDetail = null;
     window.history.replaceState({}, '', '/events');
+    document.getElementById('events-detail-panel')?.classList.remove('open');
+    renderEventList();
     const el = document.getElementById('events-detail');
     await Promise.all([fadeSwap(el, () => renderEventDetailPlaceholder()), loadEventList()]);
 }
 
 // ── Detail ──
+
+// Phone-width bottom sheet. .open only has an effect under the mobile
+// breakpoint (events.css) — on wider screens the detail panel is always
+// shown beside the list, so these are harmless no-ops there.
+function openEventSheet() {
+    document.getElementById('events-detail-panel')?.classList.add('open');
+}
+
+function closeEventSheet() {
+    const panel = document.getElementById('events-detail-panel');
+    if (!panel?.classList.contains('open')) return;
+    panel.classList.remove('open');
+    // Deselect, but leave the detail rendered so it slides away intact.
+    eventsSelectedId = null;
+    window.history.replaceState({}, '', '/events');
+    renderEventList();
+}
+
+// Must match the bottom-sheet breakpoint in events.css.
+const EVENTS_SHEET_QUERY = window.matchMedia('(max-width: 768px)');
+
+document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !EVENTS_SHEET_QUERY.matches) return;
+    // A modal on top (e.g. the Remove confirmation) handles its own Escape.
+    if (document.querySelector('.overlay:not(.hidden)')) return;
+    closeEventSheet();
+});
 
 function renderEventDetailPlaceholder(message) {
     const el = document.getElementById('events-detail');
@@ -350,6 +379,7 @@ async function selectEvent(eventId, updateUrl = true, {flash = false} = {}) {
     eventsSelectedId = eventId;
     renderEventList();
     revealEventRow(eventId, {flash});
+    openEventSheet();
 
     if (updateUrl) window.history.replaceState({}, '', `/events?event=${eventId}`);
 

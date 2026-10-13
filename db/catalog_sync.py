@@ -21,16 +21,52 @@ a half-written card behind.
 """
 
 from db.models import (
-    Card, CardRule, CardSlug, Edition, Foil, InventoryCard, PriceListing, PriceSale, Set, ThemaScore,
+    Card, CardRule, CardSlug, DeckCard, Edition, Foil, InventoryCard, PriceListing, PriceSale, Set, ThemaScore,
+    WatchlistEntry, WishlistEntry,
 )
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-# Must match api_ga.TEMP_FOIL_ID (api_ga imports it from here). Synthetic
-# foil for an edition the API hasn't reported circulation data for yet — see
-# api_ga._card_data_to_info_entry / _migrate_temp_foil.
+# Synthetic "stand-in" foils for an edition the API hasn't reported
+# circulation data for yet (no foils, no population) — mostly brand-new promos.
+# Two of them, one per printing kind, so sales/inventory of EITHER kind have
+# somewhere to land (promos are usually Foil-only, so a lone Nonfoil stand-in
+# left foil sales unrecognized). Population stays None (unknown). Once the API
+# reports real foils, each stand-in is swapped for the real foil of the same
+# kind — see promote_temp_foils / migrate_temp_foil_db here and
+# api_ga._migrate_temp_foil (JSON). api_ga imports these from here.
 TEMP_FOIL_ID = "temp"
+TEMP_FOIL_FOIL_ID = "temp-foil"
+TEMP_FOIL_KINDS = {TEMP_FOIL_ID: "NONFOIL", TEMP_FOIL_FOIL_ID: "FOIL"}
+
+
+def temp_placeholder_foils() -> dict:
+    """The stand-in foils dict (INFO.json foils shape) for an edition the API
+    reported no circulations for."""
+    return {
+        foil_id: {"kind": kind, "population": None, "printing": None, "variants": {}}
+        for foil_id, kind in TEMP_FOIL_KINDS.items()
+    }
+
+
+def real_foil_for_temp(temp_foil_id: str, foils: dict) -> str | None:
+    """Which real top-level foil a stand-in should move onto now that the API
+    reports real ones: the first real foil of the stand-in's own kind, falling
+    back to the first real foil of any kind (e.g. a Foil-only promo absorbs the
+    Nonfoil stand-in too). None if there are no real foils yet."""
+    real_ids = [fid for fid in foils if fid not in TEMP_FOIL_KINDS]
+    if not real_ids:
+        return None
+    kind = TEMP_FOIL_KINDS[temp_foil_id]
+    return next(
+        (fid for fid in real_ids if (foils[fid].get("kind") or "").upper() == kind),
+        real_ids[0],
+    )
+
+# cards.is_custom is owned by custom_cards.py — every other cards column is
+# catalog data a sync may overwrite.
+CARD_UPDATE_COLS = [c.name for c in Card.__table__.columns if c.name not in ("card_id", "is_custom")]
 
 # editions.tcg_* is owned by the TCGPlayer sync (api_tcgplayer.py), NOT the
 # card catalog — a live card fetch or a re-run migrate must never null it
@@ -204,48 +240,68 @@ def replace_card_rules(session: Session, card_id: str, rules_list: list[dict]) -
         session.execute(CardRule.__table__.insert(), batch)
 
 
-def migrate_temp_foil_db(session: Session, card_id: str, edition_id: str, real_foil_id: str) -> None:
-    """DB equivalent of api_ga._migrate_temp_foil: the API just reported a
-    real foil for an edition that previously only had the TEMP_FOIL_ID
-    placeholder, so move every price / inventory row off the placeholder and
-    onto the real foil, then drop the placeholder foil row.
+def migrate_temp_foil_db(session: Session, card_id: str, edition_id: str, real_foil_id: str,
+                         temp_foil_id: str = TEMP_FOIL_ID) -> None:
+    """DB equivalent of api_ga._migrate_temp_foil: the API just reported real
+    foils for an edition that until now only had stand-ins, so move every row
+    that points at stand-in `temp_foil_id` onto `real_foil_id`, then drop the
+    stand-in foil row.
 
-    Best-effort on price rows: a bulk foil_id reassign can in principle
-    collide with price_sales' (edition_id, foil_id, date, marketplace,
-    price, quantity, condition) unique constraint if an identical real-foil
-    row already exists — vanishingly unlikely for a card that until now had
-    no real foil at all, and a collision just raises and rolls the whole
-    card write back, same as any other sync error."""
+    Every table with a foreign key to foils has to be moved first, or the
+    final delete fails and rolls the whole card write back — on every sync,
+    forever. That's prices, inventory, deck cards and the watch/wish lists.
+    Tables with a uniqueness rule that includes foil_id merge instead of
+    colliding: inventory and deck quantities add up; a watch/wish entry the
+    user already has on the real foil just drops the stand-in's."""
     for model in (PriceSale, PriceListing):
         session.execute(
             update(model)
-            .where(model.edition_id == edition_id, model.foil_id == TEMP_FOIL_ID)
+            .where(model.edition_id == edition_id, model.foil_id == temp_foil_id)
             .values(foil_id=real_foil_id)
         )
 
-    temp_inv = session.execute(
-        select(InventoryCard).where(
-            InventoryCard.edition_id == edition_id, InventoryCard.foil_id == TEMP_FOIL_ID
-        )
-    ).scalars().all()
-    for rec in temp_inv:
-        existing = session.execute(
-            select(InventoryCard).where(
-                InventoryCard.section_id == rec.section_id,
-                InventoryCard.card_id == rec.card_id,
-                InventoryCard.edition_id == edition_id,
-                InventoryCard.foil_id == real_foil_id,
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            existing.quantity += rec.quantity
-            session.delete(rec)
-        else:
-            rec.foil_id = real_foil_id
-    session.flush()
+    # Inventory / deck rows: one row per (section, card, edition, foil) — fold
+    # into an existing real-foil row in the same section, else repoint.
+    for model in (InventoryCard, DeckCard):
+        temp_rows = session.execute(
+            select(model).where(model.edition_id == edition_id, model.foil_id == temp_foil_id)
+        ).scalars().all()
+        for rec in temp_rows:
+            existing = session.execute(
+                select(model).where(
+                    model.section_id == rec.section_id,
+                    model.card_id == rec.card_id,
+                    model.edition_id == edition_id,
+                    model.foil_id == real_foil_id,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                existing.quantity += rec.quantity
+                session.delete(rec)
+            else:
+                rec.foil_id = real_foil_id
+        session.flush()
+
+    # Watch / wish lists: one row per (user, edition, foil) — keep the
+    # user's existing real-foil entry if they have one, else repoint.
+    for model in (WatchlistEntry, WishlistEntry):
+        temp_rows = session.execute(
+            select(model).where(model.edition_id == edition_id, model.foil_id == temp_foil_id)
+        ).scalars().all()
+        for rec in temp_rows:
+            has_real = session.execute(
+                select(model.id).where(
+                    model.user_id == rec.user_id, model.edition_id == edition_id, model.foil_id == real_foil_id,
+                )
+            ).first()
+            if has_real is not None:
+                session.delete(rec)
+            else:
+                rec.foil_id = real_foil_id
+        session.flush()
 
     session.execute(
-        delete(Foil).where(Foil.edition_id == edition_id, Foil.foil_id == TEMP_FOIL_ID)
+        delete(Foil).where(Foil.edition_id == edition_id, Foil.foil_id == temp_foil_id)
     )
 
 
@@ -274,7 +330,8 @@ def persist_card(
             }
     upsert(session, Set, list(set_rows.values()), ["slug"], update_cols=SET_CATALOG_COLS)
 
-    upsert(session, Card, [build_card_row(card_id, info_entry, name, last_synced)], ["card_id"])
+    upsert(session, Card, [build_card_row(card_id, info_entry, name, last_synced)], ["card_id"],
+           update_cols=CARD_UPDATE_COLS)
     upsert(session, CardSlug, [{"slug": slug, "card_id": card_id, "name": name}], ["slug"])
     replace_card_rules(session, card_id, rules_list)
 
@@ -286,27 +343,35 @@ def persist_card(
 
     top_level, variants = [], []
     for eid, e in editions.items():
-        t, v = build_foil_rows(eid, e.get("foils", {}))
+        foils = e.get("foils", {})
+        # Still no real foils from the API: keep whichever stand-ins this edition
+        # already has — an admin may have switched one off (custom_cards.
+        # set_standin_kinds) — rather than re-adding both. Brand-new editions
+        # (none stored yet) get both.
+        if foils and all(fid in TEMP_FOIL_KINDS for fid in foils):
+            kept = set(session.execute(
+                select(Foil.foil_id).where(Foil.edition_id == eid, Foil.foil_id.in_(list(TEMP_FOIL_KINDS)))
+            ).scalars().all())
+            if kept:
+                foils = {fid: f for fid, f in foils.items() if fid in kept}
+        t, v = build_foil_rows(eid, foils)
         top_level += t
         variants += v
     upsert(session, Foil, top_level, ["edition_id", "foil_id"])
     session.flush()
     upsert(session, Foil, variants, ["edition_id", "foil_id"])
 
-    # An edition that until now only had the placeholder foil but now has
-    # real one(s) — promote it (move pricing/inventory over, drop the temp).
+    # An edition that until now only had stand-in foils but now has real
+    # one(s) — promote each stand-in onto the real foil of its kind (moving
+    # everything that points at it), then drop it.
     for eid, e in editions.items():
-        real_ids = [fid for fid in e.get("foils", {}) if fid != TEMP_FOIL_ID]
-        if not real_ids:
+        foils = e.get("foils", {})
+        if not any(fid not in TEMP_FOIL_KINDS for fid in foils):
             continue
-        has_temp = session.execute(
-            select(Foil.foil_id).where(Foil.edition_id == eid, Foil.foil_id == TEMP_FOIL_ID)
-        ).first()
-        if has_temp:
-            real = next(
-                (fid for fid in real_ids if (e["foils"][fid].get("kind") or "").upper() == "NONFOIL"),
-                real_ids[0],
-            )
-            migrate_temp_foil_db(session, card_id, eid, real)
+        present = session.execute(
+            select(Foil.foil_id).where(Foil.edition_id == eid, Foil.foil_id.in_(list(TEMP_FOIL_KINDS)))
+        ).scalars().all()
+        for temp_id in present:
+            migrate_temp_foil_db(session, card_id, eid, real_foil_for_temp(temp_id, foils), temp_id)
 
     upsert(session, ThemaScore, build_thema_rows(thema_by_edition), ["edition_id", "foil_type"])

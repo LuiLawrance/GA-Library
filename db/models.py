@@ -31,7 +31,7 @@ import was qualified).
 import datetime as dt
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Numeric, Text,
+    Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, LargeBinary, Numeric, Text,
     UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -126,6 +126,10 @@ class Card(Base):
     speed_fast: Mapped[bool | None] = mapped_column(Boolean)
     types: Mapped[list | None] = mapped_column(JSONB)
     last_synced: Mapped[dt.date | None] = mapped_column(Date)
+    # Admin-created card the Grand Archive API doesn't have (custom_cards.py)
+    # — API syncs skip it. Never in catalog upserts' update columns, so a
+    # re-save can't flip it back (see catalog_sync.CARD_UPDATE_COLS).
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
 
 
 class CardSlug(Base):
@@ -175,6 +179,25 @@ class Edition(Base):
     # pricing_ga._store_sales_tcg / _store_listings_tcg) rather than affecting
     # the scrape itself.
     tcg_foil_kind_swapped: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Admin-created printing the API doesn't have (custom_cards.py) — on a
+    # custom card, or a missing printing (e.g. a new promo) on a real one. Its
+    # art is in custom_images. Not in EDITION_CATALOG_COLS, so API syncs of
+    # the card leave it set.
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+
+
+class CustomImage(Base):
+    """Uploaded art for a custom edition. Bytes live here (not just on disk) so
+    every instance sharing this database — local and Railway each have their
+    own DATA_GA disk — can serve it; each caches it to its own
+    DATA_GA/IMAGES_GA/{edition_id}.jpg on first view (custom_cards.py)."""
+    __tablename__ = "custom_images"
+
+    edition_id: Mapped[str] = mapped_column(
+        ForeignKey("editions.edition_id", ondelete="CASCADE"), primary_key=True)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Foil(Base):

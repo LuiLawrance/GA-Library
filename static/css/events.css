@@ -611,6 +611,12 @@
     color: var(--text-muted);
 }
 
+/* Bottom-sheet chrome — only used under the phone breakpoint below. */
+.events-sheet-scrim,
+.events-sheet-bar {
+    display: none;
+}
+
 /* ── Narrow screens: stack the list above the detail ── */
 @media (max-width: 900px) {
     .events-content {
@@ -665,5 +671,85 @@
 
     .events-match-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ── Phones: the list fills the page; the detail is a bottom sheet ──
+   Mirrors the card drawer's mobile sheet (mobile.css): it rises from the
+   bottom over a scrim when an event is picked (.open, set by
+   openEventSheet) and closes via the ✕, a tap on the scrim, or Escape.
+   The sheet bar stays put while the event content scrolls beneath it.
+   Breakpoint must match EVENTS_SHEET_QUERY in events.js. */
+@media (max-width: 768px) {
+    .events-content {
+        grid-template-rows: 1fr;
+    }
+
+    .events-detail-panel {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 84vh;            /* fallback for no-dvh browsers */
+        height: 84dvh;
+        border-bottom: none;
+        border-radius: var(--radius) var(--radius) 0 0;
+        overflow: hidden;
+        transform: translateY(100%);
+        transition: transform 0.25s ease, box-shadow 0.25s ease;
+        z-index: 600;
+    }
+
+    .events-detail-panel.open {
+        transform: translateY(0);
+        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
+    }
+
+    .events-sheet-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+        z-index: 598;
+    }
+
+    .events-content:has(.events-detail-panel.open) .events-sheet-scrim {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .events-sheet-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        flex-shrink: 0;
+        height: 40px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .events-sheet-handle {
+        width: 36px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--border-focus);
+    }
+
+    .events-sheet-close {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.9rem;
+    }
+
+    /* The sheet's content area scrolls (header + tabs + tab body together). */
+    .events-detail-inner {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
     }
 }
