@@ -301,11 +301,11 @@ async function showPriceGraph(cardId, editionId, foilId, cardName, updateUrl = t
         // the chart is sized once here and never adjusted afterward, so it
         // has to be right the first time regardless of what's currently
         // hovered.
-        body.innerHTML = buildPricingComboChart(sales, listings, Infinity);
+        body.innerHTML = buildPricingComboChart(sales, listings, true);
         const canvasEl = body.querySelector('.pricing-chart-canvas');
         if (canvasEl) {
             const {width, height} = measureRestingGraphSize(canvasEl);
-            body.innerHTML = buildPricingComboChart(sales, listings, Infinity, width, height);
+            body.innerHTML = buildPricingComboChart(sales, listings, true, width, height);
         }
 
         // A card with enough history renders wider than the panel and scrolls

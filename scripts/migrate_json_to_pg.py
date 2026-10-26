@@ -25,7 +25,7 @@ from db.catalog_sync import (
 from db.models import (
     Card, CardError, CardRule, CardSlug, Deck, DeckCard, DeckSection, Edition, FeaturedSetGroup, Foil,
     FoilTcgOverride, InventoryBin, InventoryCard, InventorySection, MarketplaceScrapeClock, PriceListing, PriceSale,
-    Set, ThemaScore, User, WatchlistEntry, WishlistEntry,
+    Set, ThemaScore, TimelineEvent, User, WatchlistEntry, WishlistEntry,
 )
 from db.session import get_session
 from dotenv import load_dotenv
@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 
 import argparse
 import contextlib
+import datetime as dt
 import io
 import json
 import os
@@ -53,6 +54,7 @@ DIR_DECKS = Path("DATA_GA/DECKS_GA")
 DIR_WATCHLIST = Path("DATA_GA/WATCHLIST_GA")
 DIR_WISH = Path("DATA_GA/WISH_GA")
 DIR_EVENTS = Path("DATA_GA/EVENTS_GA")
+JSON_TIMELINE = Path("DATA_GA/TIMELINE.json")
 
 # Confirmed no-listings sentinel from api_tcgplayer.py's NO_LISTINGS_SENTINEL
 # ("admin confirmed this card has no TCGPlayer listings", distinct from a
@@ -815,6 +817,49 @@ def migrate_events() -> None:
     print(f"events: {written}")
 
 
+def migrate_timeline() -> None:
+    """Admin → Cards → Events entries (timeline.py), upserted by id so a
+    re-run updates rather than duplicates them. Entries added in DB mode and
+    absent from the JSON file are left alone. The id sequence is moved past
+    the highest id afterwards so the next DB-mode insert can't collide."""
+    entries = _load(JSON_TIMELINE).get("entries", [])
+
+    def parse_date(value):
+        return dt.date.fromisoformat(value) if value else None
+
+    def parse_ts(value):
+        return dt.datetime.fromisoformat(value) if value else None
+
+    with get_session() as session:
+        for e in entries:
+            values = {
+                "id": e["id"],
+                "title": e["title"],
+                "category": e["category"],
+                "start_date": parse_date(e.get("start_date")),
+                "end_date": parse_date(e.get("end_date")),
+                "set_prefix": e.get("set_prefix"),
+                "omnidex_event_id": e.get("omnidex_event_id"),
+                "notes": e.get("notes"),
+                "created_at": parse_ts(e.get("created_at")) or dt.datetime.now(dt.timezone.utc),
+                "created_by": e.get("created_by"),
+                "updated_at": parse_ts(e.get("updated_at")),
+                "updated_by": e.get("updated_by"),
+            }
+            stmt = pg_insert(TimelineEvent).values(**values)
+            session.execute(stmt.on_conflict_do_update(
+                index_elements=["id"], set_={k: v for k, v in values.items() if k != "id"},
+            ))
+
+        session.execute(text(
+            "SELECT setval(pg_get_serial_sequence('timeline_events', 'id'), "
+            "GREATEST((SELECT COALESCE(MAX(id), 0) FROM timeline_events), 1), "
+            "(SELECT COUNT(*) > 0 FROM timeline_events))"
+        ))
+
+    print(f"timeline: {len(entries)}")
+
+
 def main(force: bool = False) -> None:
     with get_session() as session:
         session.execute(text("SELECT 1"))
@@ -838,6 +883,7 @@ def main(force: bool = False) -> None:
     migrate_inventory(user_ids, known_foil_pairs)
     migrate_decks(user_ids, known_card_ids)
     migrate_watchlist_and_wishlist(user_ids, known_foil_pairs)
+    migrate_timeline()
 
     print("\nDone.")
 

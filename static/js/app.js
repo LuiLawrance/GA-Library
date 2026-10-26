@@ -48,6 +48,7 @@ const routes = {
     '/admin/cards/info': '/fragments/admin',
     '/admin/cards/pricing': '/fragments/admin',
     '/admin/cards/needs-action': '/fragments/admin',
+    '/admin/cards/events': '/fragments/admin',
     '/admin/users': '/fragments/admin',
     '/admin/reports': '/fragments/admin',
     '/admin/system': '/fragments/admin',
@@ -924,8 +925,21 @@ window.fetch = function (...args) {
 })();
 // ── Global confirmation modal (replaces browser confirm()) ──
 let _appConfirmResolver = null;
+// True while the modal is showing an appNotice() (OK-only, no type gate).
+let _appConfirmNotice = false;
+
+// The same modal serves both: appConfirm's type-"confirm" gate + danger
+// button, or appNotice's plain acknowledgement with the standard submit button.
+function _setAppConfirmMode(notice) {
+    _appConfirmNotice = notice;
+    const btn = document.getElementById('app-confirm-btn');
+    document.querySelector('#app-confirm-modal .inv-modal-field').classList.toggle('hidden', notice);
+    btn.classList.toggle('inv-modal-danger', !notice);
+    btn.classList.toggle('inv-modal-submit', notice);
+}
 
 function appConfirm(message, {title = 'Confirm Delete', confirmLabel = 'Delete'} = {}) {
+    _setAppConfirmMode(false);
     document.getElementById('app-confirm-title').textContent = title;
     document.getElementById('app-confirm-message').textContent = message;
     document.getElementById('app-confirm-btn').textContent = confirmLabel;
@@ -935,6 +949,22 @@ function appConfirm(message, {title = 'Confirm Delete', confirmLabel = 'Delete'}
     document.getElementById('app-confirm-btn').disabled = true;
     document.getElementById('app-confirm-modal').classList.remove('hidden');
     setTimeout(() => input.focus(), 60);
+    return new Promise(resolve => {
+        _appConfirmResolver = resolve;
+    });
+}
+
+// The app-styled replacement for browser alert() — an OK-only message in the
+// same modal as appConfirm. Resolves once it's dismissed.
+function appNotice(message, {title = 'Notice', label = 'OK'} = {}) {
+    _setAppConfirmMode(true);
+    document.getElementById('app-confirm-title').textContent = title;
+    document.getElementById('app-confirm-message').textContent = message;
+    const btn = document.getElementById('app-confirm-btn');
+    btn.textContent = label;
+    btn.disabled = false;
+    document.getElementById('app-confirm-modal').classList.remove('hidden');
+    setTimeout(() => btn.focus(), 60);
     return new Promise(resolve => {
         _appConfirmResolver = resolve;
     });
@@ -952,7 +982,7 @@ function appConfirmKeydown(e) {
 
 function appConfirmResolve(result) {
     // The gate is the last line of defense — never resolve true without it
-    if (result && !appConfirmValidate()) return;
+    if (result && !_appConfirmNotice && !appConfirmValidate()) return;
     document.getElementById('app-confirm-modal').classList.add('hidden');
     _appConfirmResolver?.(result);
     _appConfirmResolver = null;

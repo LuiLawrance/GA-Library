@@ -234,3 +234,57 @@ def set_resolved(flag_id: int, resolved: bool, username: str | None = None) -> d
     row["resolved_by"] = username if resolved else None
     _save_json(data)
     return dict(row)
+
+
+def set_resolved_many(flag_ids: list[int], resolved: bool, username: str | None = None) -> dict:
+    """Bulk set_resolved — the admin Needs Action list's "Resolve Selected" /
+    "Reopen Selected". Each flag is handled exactly as a single resolve would
+    be; one that can't be (gone, or a reopen blocked by a newer open flag for
+    the same product) is skipped rather than failing the whole batch.
+    Returns {"flags": [updated flag, ...], "skipped": count}.
+
+    DB mode does the whole batch in ONE transaction (one load, one commit) —
+    calling set_resolved per flag cost a round trip each to a remote Postgres
+    (~110 ms), so a few hundred selected flags took tens of seconds."""
+    ids = list(dict.fromkeys(flag_ids))
+
+    if not is_db_mode():
+        updated = [f for f in (set_resolved(i, resolved, username) for i in ids) if f is not None]
+        return {"flags": updated, "skipped": len(ids) - len(updated)}
+
+    now = _now()
+    updated = []
+
+    with get_session() as session:
+        rows = session.execute(select(PricingFlag).where(PricingFlag.id.in_(ids))).scalars().all()
+
+        if resolved:
+            for row in rows:
+                row.resolved_at, row.resolved_by = now, username
+            updated = rows
+        else:
+            # A reopen is blocked when its product already has an open flag
+            # (one open flag per product). Products that are open now, plus
+            # each one this batch reopens as it goes — so two resolved flags
+            # for the same product don't both come back.
+            key = lambda r: (r.edition_id, r.foil_id, r.marketplace, r.reason)
+            edition_ids = {r.edition_id for r in rows}
+            open_keys = {
+                key(r) for r in session.execute(select(PricingFlag).where(
+                    PricingFlag.edition_id.in_(edition_ids), PricingFlag.resolved_at.is_(None),
+                )).scalars().all()
+            }
+            for row in sorted(rows, key=lambda r: r.last_flagged_at, reverse=True):
+                if row.resolved_at is None:
+                    updated.append(row)
+                    continue
+                if key(row) in open_keys:
+                    continue
+                row.resolved_at, row.resolved_by = None, None
+                open_keys.add(key(row))
+                updated.append(row)
+
+        session.flush()
+        result = [_flag_dict(r) for r in updated]
+
+    return {"flags": result, "skipped": len(ids) - len(result)}

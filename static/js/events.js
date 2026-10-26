@@ -454,6 +454,7 @@ function renderEventDetail() {
                         ${eventStatusTag(e.status)}
                         ${e.ranked ? '<span class="tag tag--accent">Ranked</span>' : ''}
                         ${e.vp_multiplier && e.vp_multiplier !== 1 ? `<span class="tag tag--mint">${e.vp_multiplier}× VP</span>` : ''}
+                        ${eventTimelineTagsHtml(e.event_id)}
                         <span class="events-detail-host">${escapeHtml(e.host_name || '')}${e.host_address
                             ? ` <span class="events-muted">— ${escapeHtml(e.host_address)}</span>` : ''}</span>
                     </div>
@@ -478,6 +479,22 @@ function renderEventDetail() {
         <div class="events-tab-body scroll-thin" id="events-tab-body"></div>`;
 
     renderEventTab();
+}
+
+// The Admin → Cards → Events timeline entries linked to this event
+// (timeline.py) — this page's side of that link. Cards admins can jump to an
+// entry, or start a new one already linked to this event.
+function eventTimelineTagsHtml(eventId) {
+    const linked = eventsDetail?.timeline || [];
+    const tags = linked.map(t => eventsCanManage
+        ? `<a class="tag tag--gold events-timeline-tag" href="/admin/cards/events?entry=${t.id}" title="Open in the admin timeline"
+              onclick="event.preventDefault(); navigate('/admin/cards/events?entry=${t.id}')">📅 ${escapeHtml(t.title)}</a>`
+        : `<span class="tag tag--gold events-timeline-tag" title="Timeline: ${escapeHtml(t.start_date || '')}">📅 ${escapeHtml(t.title)}</span>`);
+    if (eventsCanManage && !linked.length) {
+        tags.push(`<button type="button" class="events-timeline-add" title="Record this event on the admin timeline"
+                           onclick="navigate('/admin/cards/events?link=${eventId}')">+ Timeline</button>`);
+    }
+    return tags.join('');
 }
 
 // Location map for in-person events, filling the right of the event header.

@@ -3094,7 +3094,25 @@
 /* Needs Action rows: Card / Rarity / Set / New. Same selector shape as
    .admin-pid-row.admin-pid-row-info so it beats .admin-pid-row's own columns. */
 .admin-pid-row.admin-pid-row-na {
-    grid-template-columns: 2fr 0.6fr 0.8fr 56px;
+    grid-template-columns: 28px 2fr 0.6fr 0.8fr 56px;
+}
+
+/* "Resolve Selected" sits where the Refresh group would be — Needs Action
+   only, with the same fade+wipe the Refresh group uses to hide. */
+.admin-na-bulk-group {
+    display: flex;
+    margin-left: auto;
+    overflow: hidden;
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, max-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.admin-cards-mode-na .admin-na-bulk-group {
+    max-width: 400px;
+    opacity: 1;
+    pointer-events: auto;
 }
 
 .admin-na-col-new {

@@ -73,6 +73,7 @@ import re
 import reports
 import requests
 import threading
+import timeline
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -2782,6 +2783,21 @@ async def api_admin_needs_action(request: Request):
     return JSONResponse({"flags": needs_action.list_flags(include_resolved)})
 
 
+@app.post("/api/admin/pricing/needs-action/resolve-bulk")
+async def api_admin_needs_action_resolve_bulk(request: Request):
+    username = require_cards_admin(request)
+
+    body = await request.json()
+    flag_ids = body.get("flag_ids")
+    if not isinstance(flag_ids, list) or not flag_ids or not all(isinstance(i, int) for i in flag_ids):
+        raise HTTPException(status_code=400, detail="flag_ids must be a non-empty list of flag ids")
+    if len(flag_ids) > 5000:
+        raise HTTPException(status_code=400, detail="Too many flags in one request")
+
+    result = await _run_blocking(needs_action.set_resolved_many, flag_ids, bool(body.get("resolved", True)), username)
+    return JSONResponse(result)
+
+
 @app.post("/api/admin/pricing/needs-action/{flag_id}/resolve")
 async def api_admin_needs_action_resolve(flag_id: int, request: Request):
     username = require_cards_admin(request)
@@ -2879,6 +2895,69 @@ async def api_admin_report_delete(report_id: int, request: Request):
         raise HTTPException(status_code=404, detail="Report not found")
 
     return JSONResponse({"deleted": report_id})
+
+
+# ── Timeline (Admin → Cards → Events) ──
+# Admin-curated dated milestones — see timeline.py. Cards-admin only for now;
+# the Events page reads an Omnidex event's linked entries through
+# api_event_detail instead.
+
+def _timeline_tables_missing(e: ProgrammingError) -> HTTPException | None:
+    # DB mode before migration 8c4f2b6d1e93 has run.
+    if "does not exist" in str(e.orig):
+        return HTTPException(
+            status_code=503,
+            detail="The timeline table doesn't exist yet — run `alembic upgrade head` (or redeploy).",
+        )
+    return None
+
+
+@app.get("/api/admin/timeline")
+async def api_admin_timeline(request: Request):
+    require_cards_admin(request)
+
+    try:
+        entries = await run_in_threadpool(timeline.list_entries)
+    except ProgrammingError as e:
+        raise _timeline_tables_missing(e) or e
+    return JSONResponse({"entries": entries, "categories": list(timeline.CATEGORIES)})
+
+
+@app.post("/api/admin/timeline")
+async def api_admin_timeline_create(request: Request):
+    username = require_cards_admin(request)
+
+    body = await request.json()
+    try:
+        entry = await run_in_threadpool(timeline.create_entry, body, username)
+    except timeline.TimelineError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ProgrammingError as e:
+        raise _timeline_tables_missing(e) or e
+    return JSONResponse({"entry": entry})
+
+
+@app.post("/api/admin/timeline/{entry_id}")
+async def api_admin_timeline_update(entry_id: int, request: Request):
+    username = require_cards_admin(request)
+
+    body = await request.json()
+    try:
+        entry = await run_in_threadpool(timeline.update_entry, entry_id, body, username)
+    except timeline.TimelineError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Timeline entry not found")
+    return JSONResponse({"entry": entry})
+
+
+@app.delete("/api/admin/timeline/{entry_id}")
+async def api_admin_timeline_delete(entry_id: int, request: Request):
+    require_cards_admin(request)
+
+    if not await run_in_threadpool(timeline.delete_entry, entry_id):
+        raise HTTPException(status_code=404, detail="Timeline entry not found")
+    return JSONResponse({"deleted": entry_id})
 
 
 @app.post("/api/admin/pricing/clear-last-updated")
@@ -3585,6 +3664,11 @@ async def admin_cards_needs_action_page():
     return serve_index()
 
 
+@app.get("/admin/cards/events", response_class=HTMLResponse)
+async def admin_cards_events_page():
+    return serve_index()
+
+
 @app.get("/admin/users", response_class=HTMLResponse)
 async def admin_users_page():
     return serve_index()
@@ -3736,6 +3820,15 @@ async def api_event_detail(event_id: int):
         p["player_id"] for p in detail["players"] + detail["judges"] if str(p["player_id"]) in site_ids
     )
     detail["refreshed"] = refreshed
+    # The Timeline entries an admin linked to this event (timeline.py) — the
+    # Events page's side of that link. Public, so only the dated summary.
+    try:
+        linked = await run_in_threadpool(timeline.entries_for_omnidex_event, event_id)
+    except ProgrammingError:
+        linked = []  # DB mode before the timeline migration has run
+    detail["timeline"] = [
+        {k: e[k] for k in ("id", "title", "category", "start_date", "end_date")} for e in linked
+    ]
     return JSONResponse(detail)
 
 

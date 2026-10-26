@@ -667,6 +667,23 @@
     border-color: var(--border-focus);
 }
 
+/* Mirrors .pricing-tcg-btn on the header's left edge — opens this foil's
+   full-history graph on the Prices page (see pricingPricesLinkHTML). */
+.pricing-prices-btn {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    --btn-size: 26px;
+    border-color: var(--border);
+    font-size: 0.8rem;
+    text-decoration: none;
+}
+
+.pricing-prices-btn:hover {
+    border-color: var(--border-focus);
+}
+
 .pricing-tcg-icon {
     width: 14px;
     height: 14px;
@@ -735,6 +752,14 @@
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+/* The drawer chart's lead-in from a series' nearest point before its window
+   (see leadIns in buildPricingComboChart) — dashed and dimmed so it reads as
+   "earlier history continues off-chart" rather than as plotted data. */
+.pricing-chart-line--lead-in {
+    stroke-dasharray: 4 3;
+    opacity: 0.55;
 }
 
 /* Hover indicator: a static ring that just fades in, rather than resizing

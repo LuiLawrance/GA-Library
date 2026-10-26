@@ -400,6 +400,13 @@ body {
 
 /* ── Global confirm modal ── */
 
+/* Always above any other open dialog — it's often raised FROM one (e.g. the
+   admin Convert to Real Card dialog), and same-z-index overlays stack by DOM
+   order, which would otherwise put this underneath one appended later. */
+#app-confirm-modal {
+    z-index: 600;
+}
+
 #app-confirm-modal .inv-modal-actions {
     display: block;
 }

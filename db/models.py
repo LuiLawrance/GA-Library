@@ -681,3 +681,33 @@ class EventDecklist(Base):
     main: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     material: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     sideboard: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+# ── Timeline ──────────────────────────────────────────────────────────────────
+
+class TimelineEvent(Base):
+    """An admin-curated dated milestone — a set release, a World/Ascent
+    tournament, a banlist update — recorded from Admin → Cards → Events (see
+    timeline.py) so other features can line data up against it later.
+
+    Kept apart from `events` on purpose: those rows are Omnidex API snapshots
+    that a refresh rewrites and an admin can delete, while these are
+    hand-entered and outlive both. omnidex_event_id ties a tournament entry to
+    its Omnidex event when the API has one; it's a plain column, not a
+    foreign key, so the link survives that event being deleted locally (and
+    re-fetched later) and doesn't require the event to be stored to save.
+    set_prefix is likewise a plain column (the user-facing set code)."""
+    __tablename__ = "timeline_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    start_date: Mapped[dt.date] = mapped_column(Date, nullable=False, index=True)
+    end_date: Mapped[dt.date | None] = mapped_column(Date)
+    set_prefix: Mapped[str | None] = mapped_column(Text)
+    omnidex_event_id: Mapped[int | None] = mapped_column(index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_by: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_by: Mapped[str | None] = mapped_column(Text)

@@ -408,6 +408,8 @@
                     <span class="pill-indicator"></span>
                     <button class="admin-cards-subnav-btn pill-toggle-btn" data-view="info" onclick="switchAdminCardsView('info')">Info</button>
                     <button class="admin-cards-subnav-btn pill-toggle-btn active" data-view="pricing" onclick="switchAdminCardsView('pricing')">Pricing</button>
+                    <!-- Before Needs Action so that option's collapse (it stays last) never shifts this one. -->
+                    <button class="admin-cards-subnav-btn pill-toggle-btn" data-view="events" onclick="switchAdminCardsView('events')">Events</button>
                     <!-- Collapsed until there's an open flag — see updateAdminNaPillVisibility. -->
                     <button class="admin-cards-subnav-btn pill-toggle-btn admin-na-subnav-btn admin-na-collapsed" data-view="needs-action"
                             onclick="switchAdminCardsView('needs-action')">
@@ -420,6 +422,32 @@
                      (custom_cards.py) — see openAdminCustomCardModal in admin.js. -->
                 <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-custom-add-btn"
                         onclick="openAdminCustomCardModal()">+ Add Card</button>
+                <!-- Events mode's own search / add in the same spots — admin-tl-only
+                     swaps them in for the two above (admin_timeline.css). -->
+                <input type="text" class="admin-pid-search admin-tl-only" id="admin-tl-search"
+                       placeholder="Search events..." oninput="renderAdminTimelineList()">
+                <button type="button" class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary admin-custom-add-btn admin-tl-only"
+                        onclick="newAdminTimelineEntry()">+ Add Event</button>
+            </div>
+
+            <!-- Events: admin-curated timeline milestones (timeline.py, admin_timeline.js) —
+                 its own list + editor in place of the card grid below. -->
+            <div class="admin-tl-view hidden" id="admin-tl-view">
+                <div class="admin-tl-list-col">
+                    <div class="admin-tl-toolbar">
+                        <div class="admin-tl-filter pill-toggle" id="admin-tl-filter">
+                            <span class="pill-indicator"></span>
+                            <button type="button" class="pill-toggle-btn active" data-filter="all" onclick="switchAdminTimelineFilter('all')">All</button>
+                            <button type="button" class="pill-toggle-btn" data-filter="set_release" onclick="switchAdminTimelineFilter('set_release')">Sets</button>
+                            <button type="button" class="pill-toggle-btn" data-filter="tournament" onclick="switchAdminTimelineFilter('tournament')">Tournaments</button>
+                            <button type="button" class="pill-toggle-btn" data-filter="banlist" onclick="switchAdminTimelineFilter('banlist')">Banlist</button>
+                            <button type="button" class="pill-toggle-btn" data-filter="other" onclick="switchAdminTimelineFilter('other')">Other</button>
+                        </div>
+                        <div class="admin-pid-summary" id="admin-tl-summary"></div>
+                    </div>
+                    <div class="admin-tl-list scroll-thin" id="admin-tl-list"></div>
+                </div>
+                <div class="admin-tl-editor scroll-thin" id="admin-tl-editor"></div>
             </div>
 
             <!-- Info and Pricing share this single grid/detail view — switchAdminCardsView
@@ -484,6 +512,13 @@
                                         onclick="refreshSelectedAdminPricing('listings')" disabled>Refresh Listings</button>
                                 <button class="admin-pid-refresh-btn" id="admin-pid-refresh-btn-both"
                                         onclick="refreshSelectedAdminPricing('both')" disabled>Refresh Selected</button>
+                            </div>
+                            <!-- Needs Action mode only (in the Refresh group's place) — resolves, or
+                                 under the Resolved filter reopens, every flag on the checked cards.
+                                 See bulkResolveAdminNeedsAction in admin.js. -->
+                            <div class="admin-na-bulk-group">
+                                <button class="admin-pid-refresh-btn" id="admin-na-bulk-btn"
+                                        onclick="bulkResolveAdminNeedsAction()" disabled>Resolve Selected</button>
                             </div>
                         </div>
                     </div>

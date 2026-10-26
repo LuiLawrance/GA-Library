@@ -297,16 +297,17 @@ const PRICING_CHART_PAD = {top: 14, right: 10, bottom: 32, left: 46};
 // edges instead of flush against them — see timeToX in buildPricingComboChart.
 const PRICING_CHART_X_INSET = 16;
 
-// The drawer's chart is a brief, at-a-glance snapshot — cap each series to its
-// most recent points rather than plotting a card's entire trade history. Full
-// history stays available from the Prices page's watchlist.
-const PRICING_CHART_MAX_POINTS = 5;
+// The drawer's chart is a brief, at-a-glance snapshot — it plots every point
+// within this many months rather than a card's entire trade history (see
+// pricingRecentWindow). Full history stays available from the Prices page's
+// watchlist.
+const PRICING_CHART_WINDOW_MONTHS = 2;
 
 // A card with only a handful of data points never gets cramped no matter how
 // wide a date range they're spread across — a sparse trickle of sales over two
 // years still reads fine plotted across one fixed-width panel. Below this many
 // distinct dates, the Prices page's full-history chart (the useLegendMenu
-// chart, which unlike the drawer's never truncates via maxPoints) always
+// chart, which unlike the drawer's is never windowed) always
 // renders at the panel's own width. At or above it, buildPricingComboChart
 // switches to the windowed/scrolling layout governed by
 // PRICING_CHART_MAX_VISIBLE_DAYS below.
@@ -566,10 +567,56 @@ function buildLegendMenuGroup(headerLabel, groupSeries) {
         </div>`).join('')}`;
 }
 
-function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_POINTS, widthPx = null, heightPx = null) {
+// Shifts a "YYYY-MM-DD" date by whole calendar months, clamping the day to
+// the target month's length (e.g. Apr 30 - 2 months = Feb 28/29, not Mar 2).
+function shiftISOMonths(isoDate, months) {
+    const [y, m, d] = isoDate.split('-').map(Number);
+    const target = new Date(Date.UTC(y, m - 1 + months, 1));
+    const daysInTarget = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+    target.setUTCDate(Math.min(d, daysInTarget));
+    return target.toISOString().slice(0, 10);
+}
+
+// The drawer chart's {start, end} date window, shared by every series in one
+// chart (sales and listings, all conditions) so they plot on the same time
+// axis. Always ends on the most recent entry (any type, any condition) and
+// reaches back PRICING_CHART_WINDOW_MONTHS from there, so the newest point
+// always sits at the right edge and nothing can ever fall to the right of
+// the window — only earlier history falls off it, to the left.
+function pricingRecentWindow(entries) {
+    if (!entries.length) return null;
+
+    const end = entries.reduce((max, e) => e.date > max ? e.date : max, entries[0].date);
+    return {start: shiftISOMonths(end, -PRICING_CHART_WINDOW_MONTHS), end};
+}
+
+function buildPricingComboChart(sales, listings, fullHistory = false, widthPx = null, heightPx = null) {
+    // The drawer's snapshot chart only plots entries inside its recent window
+    // (see pricingRecentWindow); the Prices page's full-history chart plots
+    // everything.
+    const timeWindow = fullHistory ? null : pricingRecentWindow([...(sales || []), ...(listings || [])]);
+    const inWindow = e => !timeWindow || (e.date >= timeWindow.start && e.date <= timeWindow.end);
+
+    // The series' nearest point just before the window — its latest earlier
+    // date, averaged the same way the line averages a shared date (see
+    // buildPricingSeriesMarks) — so the line can be led in from off the
+    // chart's left edge toward it. Null when nothing predates the window.
+    const prevBeforeWindow = entries => {
+        if (!timeWindow) return null;
+        const before = entries.filter(e => e.date < timeWindow.start);
+        if (!before.length) return null;
+        const date = before.reduce((max, e) => e.date > max ? e.date : max, before[0].date);
+        const group = before.filter(e => e.date === date);
+        return {date, price: group.reduce((sum, e) => sum + e.price, 0) / group.length};
+    };
+
     // Split into one series per (type, condition) pair — "Near Mint Sales" and
     // "Lightly Played Sales" never share a line, same for listings — so each
     // grade's trend is readable on its own instead of averaged together.
+    // A condition with nothing inside the window is dropped entirely — no
+    // line, no legend entry — even if it has earlier history; only conditions
+    // with at least one in-window point are graphed (and those trail off to
+    // their earlier history, see leadIns below).
     const series = [
         ...groupPricingByCondition(sales || []).map(([condition, entries]) => ({
             type: 'sales',
@@ -577,7 +624,8 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
             label: `${condition} Sales`,
             color: pricingConditionColor('sales', condition),
             key: pricingSeriesKey('sales', condition),
-            entries: [...entries].sort((a, b) => a.date.localeCompare(b.date)).slice(-maxPoints),
+            entries: entries.filter(inWindow).sort((a, b) => a.date.localeCompare(b.date)),
+            prev: prevBeforeWindow(entries),
         })),
         ...groupPricingByCondition(listings || []).map(([condition, entries]) => ({
             type: 'listings',
@@ -585,17 +633,18 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
             label: `${condition} Listings`,
             color: pricingConditionColor('listings', condition),
             key: pricingSeriesKey('listings', condition),
-            entries: [...entries].sort((a, b) => a.date.localeCompare(b.date)).slice(-maxPoints),
+            entries: entries.filter(inWindow).sort((a, b) => a.date.localeCompare(b.date)),
+            prev: prevBeforeWindow(entries),
         })),
-    ];
+    ].filter(s => s.entries.length);
 
-    // The Prices page's graph panel (maxPoints=Infinity, i.e. full-history
-    // mode) shows the legend as a toggle menu beside the chart instead of a
-    // static strip above it — tied to maxPoints rather than widthPx/heightPx
-    // so the very first render (before those are measured) already uses the
-    // row layout, giving showPriceGraph a .pricing-chart-canvas to measure.
-    // The drawer's compact ≤5-point chart keeps the plain static legend.
-    const useLegendMenu = !Number.isFinite(maxPoints);
+    // The Prices page's graph panel (fullHistory mode) shows the legend as a
+    // toggle menu beside the chart instead of a static strip above it — tied
+    // to fullHistory rather than widthPx/heightPx so the very first render
+    // (before those are measured) already uses the row layout, giving
+    // showPriceGraph a .pricing-chart-canvas to measure. The drawer's compact
+    // windowed chart keeps the plain static legend.
+    const useLegendMenu = fullHistory;
 
     const legendHTML = `
         <div class="pricing-legend">
@@ -632,14 +681,19 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
     }
 
     const times = all.map(e => new Date(e.date).getTime());
+    // The axis fits the plotted points themselves — earliest in-window date at
+    // the left, latest at the right — rather than the window's own bounds, so
+    // a window whose activity is bunched into part of its two months doesn't
+    // leave empty space on either side. The window only decides which points
+    // make it onto the chart; earlier ones trail off the left (see leadIns).
     const minTime = Math.min(...times);
     const maxTime = Math.max(...times);
     const timeSpan = (maxTime - minTime) || 1;
 
-    // Only the Prices page's full-history chart (useLegendMenu, maxPoints=
-    // Infinity) can ever have enough history to trip this — the drawer's own
-    // chart caps each series to PRICING_CHART_MAX_POINTS and always comfortably
-    // fits its fixed 400px width. Both gates have to clear: a card sparse
+    // Only the Prices page's full-history chart (useLegendMenu) can ever have
+    // enough history to trip this — the drawer's own chart is limited to
+    // PRICING_CHART_WINDOW_MONTHS and always comfortably fits its fixed 400px
+    // width. Both gates have to clear: a card sparse
     // enough to stay under the point threshold is left at full width even if
     // its handful of sales span years, and a card with plenty of points but
     // packed into a short window is left at full width too since it isn't
@@ -679,19 +733,49 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
         : viewportPlotW;
     const w = needsScroll ? plotW + pad.left + pad.right : viewportW;
 
-    const prices = all.map(e => e.price);
+    // Guards a very narrow chart from having the inset eat the whole plot
+    // width (and, in turn, xAt/timeToX dividing by a zero or negative span).
+    const insetX = Math.min(PRICING_CHART_X_INSET, plotW / 4);
+    const dataPlotW = plotW - insetX * 2;
+
+    // Lead-in for a series with earlier history off the left of the window:
+    // the segment from its nearest pre-window point (s.prev) to its first
+    // in-window date, clipped where it crosses the plot's left edge (pad.left,
+    // which sits insetX before the earliest plotted date). Its clipped endpoint's
+    // price is interpolated along that segment and counted in the price range
+    // below, so the lead-in always lands inside the plot instead of shooting
+    // off the top or bottom when the earlier price was far from the window's.
+    //
+    // When only one date made it into the window (singleTime — that point is
+    // centered, with no time scale to interpolate along), the lead-in just
+    // starts at the left edge at the earlier point's own price.
+    const singleTime = minTime === maxTime;
+    const edgeTime = minTime - (insetX / dataPlotW) * timeSpan;
+    const leadIns = new Map();
+    for (const s of series) {
+        if (!s.prev) continue;
+        const firstDate = s.entries[0].date;
+        const firstGroup = s.entries.filter(e => e.date === firstDate);
+        const firstPrice = firstGroup.reduce((sum, e) => sum + e.price, 0) / firstGroup.length;
+        const prevTime = new Date(s.prev.date).getTime();
+        const firstTime = new Date(firstDate).getTime();
+        const clipTime = Math.max(edgeTime, prevTime);
+        const t = (clipTime - prevTime) / ((firstTime - prevTime) || 1);
+        leadIns.set(s.key, {
+            time: clipTime,
+            price: singleTime ? s.prev.price : s.prev.price + t * (firstPrice - s.prev.price),
+            firstDate,
+            firstPrice,
+        });
+    }
+
+    const prices = [...all.map(e => e.price), ...[...leadIns.values()].map(l => l.price)];
     const rawMin = Math.min(...prices);
     const rawMax = Math.max(...prices);
     const span = (rawMax - rawMin) || Math.max(rawMax * 0.2, 1);
     const minPrice = rawMin - span * 0.15;
     const maxPrice = rawMax + span * 0.15;
 
-    const singleTime = minTime === maxTime;
-
-    // Guards a very narrow chart from having the inset eat the whole plot
-    // width (and, in turn, xAt/timeToX dividing by a zero or negative span).
-    const insetX = Math.min(PRICING_CHART_X_INSET, plotW / 4);
-    const dataPlotW = plotW - insetX * 2;
     const timeToX = time => pad.left + insetX + ((time - minTime) / timeSpan) * dataPlotW;
     const xAt = date => singleTime ? pad.left + plotW / 2 : timeToX(new Date(date).getTime());
     const yAt = price => pad.top + plotH - ((price - minPrice) / (maxPrice - minPrice)) * plotH;
@@ -839,7 +923,17 @@ function buildPricingComboChart(sales, listings, maxPoints = PRICING_CHART_MAX_P
         return dividersHTML + labelsHTML;
     })();
 
-    const linesHTML = marks.map(m => `<path d="${m.linePath}" style="stroke:${m.color}" class="pricing-chart-line" data-series-key="${escapeHtml(m.key)}" fill="none" />`).join('');
+    const leadInsHTML = marks.map(m => {
+        const lead = leadIns.get(m.key);
+        if (!lead) return '';
+        const x1 = timeToX(lead.time).toFixed(1);
+        const y1 = yAt(lead.price).toFixed(1);
+        const x2 = xAt(lead.firstDate).toFixed(1);
+        const y2 = yAt(lead.firstPrice).toFixed(1);
+        return `<path d="M ${x1} ${y1} L ${x2} ${y2}" style="stroke:${m.color}" class="pricing-chart-line pricing-chart-line--lead-in" data-series-key="${escapeHtml(m.key)}" fill="none" />`;
+    }).join('');
+
+    const linesHTML = leadInsHTML + marks.map(m => `<path d="${m.linePath}" style="stroke:${m.color}" class="pricing-chart-line" data-series-key="${escapeHtml(m.key)}" fill="none" />`).join('');
     const dotsHTML = marks.map(m => m.dotsHTML).join('');
 
     // Explicit pixel width/height (not the default width:100%/height:auto CSS)
@@ -941,6 +1035,33 @@ function pricingTcgLinkHTML(productId, searchName) {
         </a>`;
 }
 
+// Opens this foil's full-history graph on the Prices page (?card_id=
+// &edition_id=&foil_id=, the same params its initPrices restores a selection
+// from). Same-tab, unlike the TCGPlayer button — a plain href so middle-click
+// / copy-link still work, but a normal click goes through drawerOpenPriceGraph
+// for an in-app navigation.
+function pricingPricesLinkHTML(cardId, editionId, foilId) {
+    if (!cardId || !editionId || !foilId) return '';
+    const params = new URLSearchParams({card_id: cardId, edition_id: editionId, foil_id: foilId});
+    return `
+        <a class="pricing-prices-btn btn btn--icon" href="/prices?${escapeHtml(params.toString())}"
+           onclick="event.preventDefault(); event.stopPropagation(); drawerOpenPriceGraph(this.getAttribute('href'))"
+           title="View full price history">📈</a>`;
+}
+
+// Closes whichever drawer is open, then routes to the Prices page — mirrors
+// drawerSearchSet's close-then-navigate so the footer/drawer state is reset
+// the same way a manual close would.
+function drawerOpenPriceGraph(href) {
+    if (document.getElementById('card-drawer') && typeof closeCardDrawer === 'function') {
+        closeCardDrawer();
+    }
+    if (document.getElementById('inv-card-drawer') && typeof closeInvDrawer === 'function') {
+        closeInvDrawer();
+    }
+    navigate(href);
+}
+
 function buildPricingFoilSection(foilId, label, pricing, linkHTML, mergeFoilId = null) {
     const primary = pricing?.[foilId] || {listings: [], sales: []};
     const secondary = mergeFoilId ? (pricing?.[mergeFoilId] || {listings: [], sales: []}) : {listings: [], sales: []};
@@ -974,7 +1095,7 @@ function soleVariantOf([, foilObj]) {
     return basePop <= 0 ? [variantId, variantInfo] : null;
 }
 
-function buildTabPricingPanel(edition, cardName) {
+function buildTabPricingPanel(edition, cardName, cardId, editionId) {
     const foils = edition?.foils || {};
     const pricing = edition?.pricing || {};
     // Regular nonfoil/foil printings (and top-level "special" foils, which
@@ -1001,16 +1122,22 @@ function buildTabPricingPanel(edition, cardName) {
     // is scraped against the parent foil_id's product page in this case (see
     // app.py), so the edition's product_id is a meaningful fallback link
     // here — unlike the standalone-variant case below, where it isn't.
+    //
+    // The Prices link for that case passes the variant's id, not the parent's:
+    // the Prices page folds the parent's data into a sole Curio variant the
+    // same way (findSoleCurioParent in prices.js), so it shows this same graph.
+    const pricesLink = foilId => pricingPricesLinkHTML(cardId, editionId, foilId);
+
     function sectionFor(entry, fallbackLabel) {
         const [foilId] = entry;
         const sole = soleVariantOf(entry);
         if (sole) {
             const [variantId, variantInfo] = sole;
             const label = toFoilLabel(variantInfo.kind);
-            const link = pricingTcgLinkHTML(variantInfo.product_id || editionProductId, `${cardName} ${label}`);
+            const link = pricesLink(variantId) + pricingTcgLinkHTML(variantInfo.product_id || editionProductId, `${cardName} ${label}`);
             return buildPricingFoilSection(foilId, label, pricing, link, variantId);
         }
-        const link = pricingTcgLinkHTML(editionProductId, cardName);
+        const link = pricesLink(foilId) + pricingTcgLinkHTML(editionProductId, cardName);
         return buildPricingFoilSection(foilId, fallbackLabel, pricing, link);
     }
 
@@ -1031,7 +1158,7 @@ function buildTabPricingPanel(edition, cardName) {
         Object.entries(entry[1].variants || {}).forEach(([variantId, variantInfo]) => {
             if (sole && sole[0] === variantId) return;
             const label = toFoilLabel(variantInfo.kind);
-            const link = pricingTcgLinkHTML(variantInfo.product_id, `${cardName} ${label}`);
+            const link = pricesLink(variantId) + pricingTcgLinkHTML(variantInfo.product_id, `${cardName} ${label}`);
             sections.push(buildPricingFoilSection(variantId, label, pricing, link));
         });
     });
@@ -1092,7 +1219,7 @@ function switchDrawerTab(tab, drawerId = 'card-drawer') {
     if (tab === 'thema') {
         incoming.innerHTML = buildTabThemaPanel(edition);
     } else if (tab === 'pricing') {
-        incoming.innerHTML = buildTabPricingPanel(edition, cardInfo.querySelector('.drawer-name')?.textContent || '');
+        incoming.innerHTML = buildTabPricingPanel(edition, cardInfo.querySelector('.drawer-name')?.textContent || '', cfg.getSelectedCardId(), currentEditionId);
     }
 
     // Capture the editions grid's position NOW, while `outgoing` is still in
@@ -1370,7 +1497,7 @@ async function openDrawer(drawerId, cardId, editionId, cardName, updateUrl = tru
                 } else if (activeTab === 'pricing') {
                     const pricingPanel = cardInfo.querySelector('.drawer-tab-pricing');
                     pricingPanel.classList.remove('hidden');
-                    pricingPanel.innerHTML = buildTabPricingPanel(selectedEdition, cardName);
+                    pricingPanel.innerHTML = buildTabPricingPanel(selectedEdition, cardName, cardId, editionId);
                 }
             }
         };
@@ -1532,7 +1659,7 @@ async function selectDrawerEditionFor(drawerId, editionId) {
             if (themaPanel) themaPanel.innerHTML = buildTabThemaPanel(edition);
         } else if (activeTab === 'pricing') {
             const pricingPanel = cardInfo?.querySelector('.drawer-tab-pricing');
-            if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition, cardInfo?.querySelector('.drawer-name')?.textContent || '');
+            if (pricingPanel) pricingPanel.innerHTML = buildTabPricingPanel(edition, cardInfo?.querySelector('.drawer-name')?.textContent || '', cfg.getSelectedCardId(), editionId);
         }
 
         playGridShift();

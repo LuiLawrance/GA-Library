@@ -1,5 +1,5 @@
 let adminActiveSection = 'pricing';
-let adminCardsView = 'pricing'; // 'info' | 'pricing' | 'needs-action'
+let adminCardsView = 'pricing'; // 'info' | 'pricing' | 'needs-action' | 'events' (admin_timeline.js)
 // The Needs Action log (see needs_action.py) — every flag the last load
 // returned (open, plus resolved ones once the Resolved filter has been
 // opened), and the open ones indexed by edition for the list's ⚠ markers and
@@ -209,8 +209,10 @@ function syncAdminUrl() {
         path = '/admin/reports';
     } else {
         path = `/admin/cards/${adminCardsView}`;
+        // Events keeps its open entry in the URL (see initAdminTimeline).
+        if (adminCardsView === 'events' && adminTlSelectedId) path += `?entry=${adminTlSelectedId}`;
     }
-    if (window.location.pathname !== path) {
+    if (window.location.pathname + window.location.search !== path) {
         window.history.replaceState({}, '', path);
     }
 }
@@ -279,6 +281,10 @@ function switchAdminSection(section) {
 async function switchAdminCardsView(view) {
     const section = document.getElementById('admin-section-pricing');
     if (!section || adminCardsView === view) return;
+
+    // Events isn't a mode of the card grid — it swaps in its own view
+    // (admin_timeline.js), so moving to or from it takes a different path.
+    if (view === 'events' || adminCardsView === 'events') return switchAdminCardsEventsView(view);
 
     // Needs Action is TCGPlayer-only (it's TCGPlayer's 5-sale window it's
     // about), so its Sales/Listings panel always shows that marketplace — its
@@ -571,6 +577,11 @@ function adminNaRowHtml(e) {
         <div class="admin-pid-row admin-pid-row-na ${e.edition_id === adminPidDetailSelected ? 'admin-pid-row-active' : ''}"
              data-edition-id="${escapeHtml(e.edition_id)}"
              onclick="selectAdminNaEdition('${escapeHtml(e.edition_id)}')">
+            <span class="admin-pid-col-check" onclick="event.stopPropagation()">
+                <input type="checkbox" class="admin-pid-row-check" data-edition-id="${escapeHtml(e.edition_id)}"
+                       ${adminPidSelected.has(e.edition_id) ? 'checked' : ''}
+                       onchange="onAdminPidRowCheckToggle(this)">
+            </span>
             <span class="admin-pid-col-name">${escapeHtml(e.name)}${curioFlagged ? ' <span class="admin-na-curio-mark" title="Curio Foil flagged">✨</span>' : ''}</span>
             <span class="admin-pid-col-rarity">${escapeHtml(e.rarity || '—')}</span>
             <span class="admin-pid-col-set">${escapeHtml(e.set_prefix || '—')}</span>
@@ -697,6 +708,7 @@ function syncAdminNaBanner() {
 async function switchAdminNeedsActionFilter(filter) {
     if (adminNaFilter === filter) return;
     adminNaFilter = filter;
+    adminPidSelected = new Set();
 
     document.querySelectorAll('#admin-na-filter .pill-toggle-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.filter === filter);
@@ -711,6 +723,96 @@ async function switchAdminNeedsActionFilter(filter) {
     }
 
     adminNaApplyFlags();
+}
+
+// Needs Action's "Resolve Selected" — every flag (main product and Curio Foil)
+// on each checked card, under whichever filter is showing: Open resolves,
+// Resolved reopens. Only checked cards still listed count, so a card resolved
+// some other way since it was checked isn't acted on twice.
+function adminNaBulkTargets() {
+    if (adminCardsView !== 'needs-action') return [];
+    const listed = adminNaListedEditionIds();
+    return [...adminPidSelected].filter(id => listed.has(id));
+}
+
+function updateAdminNaBulkButton() {
+    const btn = document.getElementById('admin-na-bulk-btn');
+    if (!btn) return;
+
+    const count = adminNaBulkTargets().length;
+    const verb = adminNaFilter === 'resolved' ? 'Reopen' : 'Resolve';
+    btn.disabled = count === 0;
+    btn.innerHTML = count > 0
+        ? `${verb} Selected <span class="admin-pid-refresh-count">${count}</span>`
+        : `${verb} Selected`;
+}
+
+async function bulkResolveAdminNeedsAction() {
+    const editionIds = adminNaBulkTargets();
+    if (editionIds.length === 0) return;
+
+    const resolving = adminNaFilter !== 'resolved';
+    const verb = resolving ? 'Resolve' : 'Reopen';
+    const flagIds = editionIds.flatMap(id => adminNaFlagsForEdition(id).map(f => f.id));
+    const n = editionIds.length;
+
+    // The shared type-"confirm" dialog (appConfirm, app.js) — same one every
+    // other bulk/destructive action in the app uses.
+    const ok = await appConfirm(
+        resolving
+            ? `Resolve ${n} card${n === 1 ? '' : 's'} (${flagIds.length} flag${flagIds.length === 1 ? '' : 's'})? `
+              + 'They leave the Needs Action list; you can reopen them from Resolved.'
+            : `Reopen ${n} card${n === 1 ? '' : 's'} (${flagIds.length} flag${flagIds.length === 1 ? '' : 's'})? `
+              + 'They go back on the Needs Action list.',
+        {title: `${verb} Selected`, confirmLabel: verb},
+    );
+    if (!ok) return;
+
+    // Visible while the request runs, so a big selection doesn't look like
+    // the click did nothing.
+    const btn = document.getElementById('admin-na-bulk-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = `${resolving ? 'Resolving' : 'Reopening'} ${n}…`;
+    }
+
+    let result;
+    try {
+        const res = await fetch('/api/admin/pricing/needs-action/resolve-bulk', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({flag_ids: flagIds, resolved: resolving}),
+        });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            appNotice(data.detail || 'Could not update the selected cards.', {title: `${verb} Selected`});
+            updateAdminNaBulkButton();
+            return;
+        }
+        result = await res.json();
+    } catch (err) {
+        updateAdminNaBulkButton();
+        return;
+    }
+
+    // Same bookkeeping as a single resolve, per flag.
+    for (const flag of result.flags) {
+        const index = adminNaFlags.findIndex(f => f.id === flag.id);
+        if (index < 0) continue;
+        if (resolving && !adminNaResolvedLoaded) {
+            adminNaFlags.splice(index, 1);
+        } else {
+            adminNaFlags[index] = flag;
+        }
+    }
+    adminPidSelected = new Set();
+    adminNaApplyFlags();
+
+    if (result.skipped > 0) {
+        appNotice(`${result.skipped} flag${result.skipped === 1 ? " wasn't" : "s weren't"} changed — ` +
+            (resolving ? 'already resolved or removed.' : 'that product already has a newer open flag.'),
+            {title: `${verb} Selected`});
+    }
 }
 
 async function resolveAdminNeedsActionFlag(flagId, resolved) {
@@ -785,7 +887,7 @@ async function openAdminCustomCardModal(prefill = {}) {
     try {
         options = await loadAdminCustomOptions();
     } catch (err) {
-        alert('Could not load the card form — try again.');
+        appNotice('Could not load the card form — try again.', {title: 'Add Card'});
         return;
     }
 
@@ -1137,7 +1239,7 @@ function adminCustomReplaceImage(editionId) {
         const res = await fetch(`/api/admin/cards/custom/${encodeURIComponent(editionId)}/image`, {method: 'POST', body: form});
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            alert(data.detail || 'Could not replace the image.');
+            appNotice(data.detail || 'Could not replace the image.', {title: 'Replace Image'});
             return;
         }
         adminCustomImageVersion[editionId] = Date.now();
@@ -1152,12 +1254,14 @@ async function adminCustomDeletePrinting(editionId) {
 
     const whole = record.card_is_custom && adminPidData.filter(e => e.card_id === record.card_id).length === 1;
     const what = whole ? `the custom card "${record.name}"` : `this custom printing of "${record.name}"`;
-    if (!confirm(`Delete ${what}? Its sales, listings and image are deleted too. This can't be undone.`)) return;
+    const ok = await appConfirm(`Delete ${what}? Its sales, listings and image are deleted too. This can't be undone.`,
+        {title: 'Delete Custom Card', confirmLabel: 'Delete'});
+    if (!ok) return;
 
     const res = await fetch(`/api/admin/cards/custom/${encodeURIComponent(editionId)}`, {method: 'DELETE'});
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-        alert(data.detail || 'Could not delete it.');
+        appNotice(data.detail || 'Could not delete it.', {title: 'Delete Custom Card'});
         return;
     }
     await adminReloadAndSelect(null);
@@ -1200,7 +1304,7 @@ async function toggleAdminStandinKind(editionId, kind) {
     if (!kinds) return;
     kinds.has(kind) ? kinds.delete(kind) : kinds.add(kind);
     if (kinds.size === 0) {
-        alert('Keep at least one of Nonfoil / Foil.');
+        appNotice('Keep at least one of Nonfoil / Foil.', {title: 'Placeholder Printings'});
         return;
     }
 
@@ -1211,7 +1315,7 @@ async function toggleAdminStandinKind(editionId, kind) {
     });
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(data.detail || 'Could not change the placeholders.');
+        appNotice(data.detail || 'Could not change the placeholders.', {title: 'Placeholder Printings'});
         return;
     }
     if (adminPidDetailSelected === editionId) await loadAdminPricingDetailFoils();
@@ -1345,7 +1449,10 @@ function pickAdminConvertTarget(btn) {
 async function submitAdminConvert() {
     if (!adminConvertSource || !adminConvertTarget) return;
     const label = document.querySelector('#admin-convert-results .admin-convert-option.selected .admin-convert-set')?.textContent || 'that printing';
-    if (!confirm(`Move everything onto ${label} and delete the custom printing? This can't be undone.`)) return;
+    // The convert dialog itself is an overlay — appConfirm's sits above it.
+    const ok = await appConfirm(`Move everything onto ${label} and delete the custom printing? This can't be undone.`,
+        {title: 'Convert to Real Card', confirmLabel: 'Convert'});
+    if (!ok) return;
 
     const submit = document.getElementById('admin-convert-submit');
     submit.disabled = true;
@@ -1590,7 +1697,7 @@ async function updateAdminSystemSetting(key, value) {
 
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            alert(data.detail || 'Failed to update setting.');
+            appNotice(data.detail || 'Failed to update setting.', {title: 'Update Setting'});
             renderAdminSystemToggle(key, prevValue);
             if (key === 'use_json') {
                 animateSystemPanelsForUseJson(prevValue);
@@ -1615,7 +1722,7 @@ async function updateAdminSystemSetting(key, value) {
             updateAdminPidRefreshButton();
         }
     } catch (err) {
-        alert('Failed to update setting.');
+        appNotice('Failed to update setting.', {title: 'Update Setting'});
         renderAdminSystemToggle(key, prevValue);
         if (key === 'use_json') {
             animateSystemPanelsForUseJson(prevValue);
@@ -2679,7 +2786,7 @@ async function _adminUserActionRequest(username, action, failMsg) {
         const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/${action}`, {method: 'POST'});
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            alert(data.detail || failMsg);
+            appNotice(data.detail || failMsg, {title: 'User Action'});
             return;
         }
         // Keep the list's Omni ID column in step with a reset.
@@ -2692,7 +2799,7 @@ async function _adminUserActionRequest(username, action, failMsg) {
         // Refresh the detail panel if this user is open.
         if (adminUserDetailSelected === username) await loadAdminUserProfile();
     } catch (err) {
-        alert('Request failed.');
+        appNotice('Request failed.', {title: 'User Action'});
     }
 }
 
@@ -2731,7 +2838,7 @@ async function deleteAdminUser(username) {
         const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {method: 'DELETE'});
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            alert(data.detail || 'Failed to delete user.');
+            appNotice(data.detail || 'Failed to delete user.', {title: 'Delete User'});
             return;
         }
 
@@ -2748,7 +2855,7 @@ async function deleteAdminUser(username) {
 
         renderAdminUserRows();
     } catch (err) {
-        alert('Request failed.');
+        appNotice('Request failed.', {title: 'Delete User'});
     }
 }
 
@@ -2783,7 +2890,7 @@ async function setAdminUserRole(username, newRole) {
 
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            alert(data.detail || 'Failed to update role.');
+            appNotice(data.detail || 'Failed to update role.', {title: 'Change Role'});
             return;
         }
 
@@ -2793,7 +2900,7 @@ async function setAdminUserRole(username, newRole) {
         renderAdminUserRows();
         if (adminUserDetailSelected === username) renderAdminUserProfileCol();
     } catch (err) {
-        alert('Request failed.');
+        appNotice('Request failed.', {title: 'Change Role'});
     }
 }
 
@@ -3696,6 +3803,10 @@ function renderAdminPidHeader() {
 
     header.innerHTML = naMode ? `
         <div class="admin-pid-row admin-pid-row-header admin-pid-row-na">
+            <span class="admin-pid-col-check">
+                <input type="checkbox" id="admin-pid-select-all" title="Select every card listed"
+                       onchange="toggleSelectAllAdminPricing(this)">
+            </span>
             <span class="admin-pid-col-name admin-pid-sort-header" title="Sort by card name (click again to reverse; Sales/Listings sorts order by most recently flagged)"
                   onclick="setAdminPidSort('name')">CARD${adminPidSortArrowHtml('name')}</span>
             <span class="admin-pid-col-rarity">${adminPidRarityFilterHtml()}</span>
@@ -4673,6 +4784,8 @@ function getAdminPidRefreshTargets() {
 }
 
 function updateAdminPidRefreshButton() {
+    updateAdminNaBulkButton();
+
     const salesBtn = document.getElementById('admin-pid-refresh-btn-sales');
     const listingsBtn = document.getElementById('admin-pid-refresh-btn-listings');
     const bothBtn = document.getElementById('admin-pid-refresh-btn-both');
@@ -6563,7 +6676,9 @@ async function deleteAdminPidEntry(entryType, foilId, index, btnEl) {
     const editionId = adminPidDetailSelected;
     if (!editionId) return;
 
-    if (!confirm(`Delete this ${entryType === 'sales' ? 'sale' : 'listing'} entry?`)) return;
+    const ok = await appConfirm(`Delete this ${entryType === 'sales' ? 'sale' : 'listing'} entry?`,
+        {title: `Delete ${entryType === 'sales' ? 'Sale' : 'Listing'}`, confirmLabel: 'Delete'});
+    if (!ok) return;
 
     btnEl.disabled = true;
 
@@ -6741,7 +6856,7 @@ async function setAdminReportResolved(id, resolved) {
     try {
         await _postAdminReportUpdate(id, {resolved, admin_note: note ?? null});
     } catch (err) {
-        alert(err.message);
+        appNotice(err.message, {title: 'Update Report'});
     }
 }
 
@@ -6750,7 +6865,7 @@ async function saveAdminReportNote(id) {
     try {
         await _postAdminReportUpdate(id, {admin_note: note});
     } catch (err) {
-        alert(err.message);
+        appNotice(err.message, {title: 'Save Note'});
     }
 }
 
@@ -6763,7 +6878,7 @@ async function deleteAdminReport(id) {
         adminReportsData = adminReportsData.filter(r => r.id !== id);
         renderAdminReports();
     } catch (err) {
-        alert(err.message);
+        appNotice(err.message, {title: 'Delete Report'});
     }
 }
 
@@ -6807,7 +6922,9 @@ function initAdmin() {
     // renderAdminPidHeader/renderAdminPidRows) inside the fresh, unmorphed
     // Pricing-width layout, rather than actually starting on Pricing.
     adminCardsView = path === '/admin/cards/info' ? 'info'
-        : path === '/admin/cards/needs-action' ? 'needs-action' : 'pricing';
+        : path === '/admin/cards/needs-action' ? 'needs-action'
+        : path === '/admin/cards/events' ? 'events' : 'pricing';
+    resetAdminTimelineState();
 
     // Normalizes the address bar to whichever specific sub-view that just
     // resolved to — e.g. clicking the top-level Admin nav link lands on the
@@ -6906,6 +7023,7 @@ function initAdmin() {
     // Hide/show the Refresh group up front from the retained adminLocalDbOn
     // (see the reset block above) so it doesn't flash on the way in.
     updateAdminPidRefreshButton();
+    initAdminTimeline();
     positionPillIndicator(document.querySelector('.admin-cards-subnav'));
     positionPillIndicator(document.getElementById('admin-pid-source-toggle'));
     positionPillIndicator(document.getElementById('admin-pid-marketplace-toggle'));
