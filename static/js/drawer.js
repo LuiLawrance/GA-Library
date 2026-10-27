@@ -445,7 +445,9 @@ function showPricingTooltip(evt) {
 }
 
 function anchorPricingTooltip(g, tooltip) {
-    const dot = g.querySelector('.pricing-chart-dot, .pricing-chart-avg-dot');
+    // A timeline event anchors to its top marker, or its band when its start
+    // is off the chart (see pricingChartEventsHTML).
+    const dot = g.querySelector('.pricing-chart-dot, .pricing-chart-avg-dot, .pricing-chart-event-marker, .pricing-chart-event-band');
     if (!dot) return;
 
     // Anchor to the hovered point's own screen position (not the cursor) so the
@@ -480,6 +482,173 @@ function anchorPricingTooltip(g, tooltip) {
 function hidePricingTooltip() {
     document.getElementById('pricing-tooltip')?.classList.add('hidden');
 }
+
+// ── Timeline events on the price charts ──
+// Admin → Cards → Events entries (timeline.py, public via /api/timeline)
+// drawn as vertical lines — a band too when an event spans several days —
+// so a price move can be read against the set release or tournament beside
+// it. Only events overlapping the chart's plotted date range are drawn: the
+// drawer's ~2-month window, or the span of data the Prices page has.
+
+// Mirrors ADMIN_TL_CATEGORIES / the .admin-tl-dot-* colors in the admin.
+const PRICING_EVENT_CATEGORIES = {
+    set_release: {label: 'Set Release', color: '#e3b565'},
+    tournament: {label: 'Tournament', color: 'var(--accent)'},
+    announcement: {label: 'Announcement', color: '#6ec8a9'},
+    other: {label: 'Other', color: 'var(--text-muted)'},
+};
+
+// The series key the Prices page's "Timeline" legend toggle hides the
+// events layer by (see togglePricingSeries).
+const PRICING_EVENTS_KEY = 'timeline-events';
+
+// Re-fetched at most this often, so an event added in the admin shows up on
+// later charts without a full page reload.
+const PRICING_EVENTS_TTL_MS = 5 * 60 * 1000;
+
+let pricingTimelineEvents = [];
+let _pricingEventsPromise = null;
+let _pricingEventsFetchedAt = 0;
+
+// Resolves once the events are cached. Charts read the cache synchronously
+// (buildPricingComboChart), so a chart rendered before the first fetch lands
+// is back-filled by fillPricingChartEvents when it does.
+function loadPricingTimelineEvents() {
+    if (_pricingEventsPromise && Date.now() - _pricingEventsFetchedAt < PRICING_EVENTS_TTL_MS) {
+        return _pricingEventsPromise;
+    }
+    _pricingEventsFetchedAt = Date.now();
+    _pricingEventsPromise = fetch('/api/timeline')
+        .then(res => res.ok ? res.json() : {entries: []})
+        .then(data => {
+            pricingTimelineEvents = data.entries || [];
+            fillPricingChartEvents();
+        })
+        .catch(() => {
+            // Charts just go without event lines; retry on the next load.
+            _pricingEventsFetchedAt = 0;
+        });
+    return _pricingEventsPromise;
+}
+
+// Drops the cache so the next chart re-fetches — the admin calls this after
+// saving or deleting an entry.
+function invalidatePricingTimelineEvents() {
+    _pricingEventsPromise = null;
+    _pricingEventsFetchedAt = 0;
+}
+
+// The events layer's markup for one chart. `geom` is the chart's time axis
+// as buildPricingComboChart laid it out (it's also stored on the layer's
+// data-geom, so fillPricingChartEvents can redraw it later).
+function pricingChartEventsHTML(geom, events = pricingTimelineEvents) {
+    const {minTime, maxTime, timeSpan, left, insetX, dataPlotW, plotW, top, axisY, singleTime} = geom;
+    const timeToX = time => left + insetX + ((time - minTime) / timeSpan) * dataPlotW;
+    const plotLeft = left;
+    const plotRight = left + plotW;
+
+    return pricingEventsInView(geom, events).map(ev => {
+        const start = new Date(ev.start_date).getTime();
+        const end = ev.end_date ? new Date(ev.end_date).getTime() : start;
+
+        const cat = PRICING_EVENT_CATEGORIES[ev.category] || PRICING_EVENT_CATEGORIES.other;
+        const startX = singleTime ? left + plotW / 2 : timeToX(start);
+        const startInView = start >= minTime;
+
+        // A multi-day event's band, clipped to the plot.
+        let bandHTML = '';
+        if (!singleTime && end > start) {
+            const x1 = Math.max(plotLeft, timeToX(Math.max(start, minTime)));
+            const x2 = Math.min(plotRight, timeToX(Math.min(end, maxTime)));
+            bandHTML = `<rect x="${x1.toFixed(1)}" y="${top}" width="${Math.max(x2 - x1, 1).toFixed(1)}" height="${(axisY - top).toFixed(1)}"
+                              class="pricing-chart-event-band" style="fill:${cat.color}" />`;
+        }
+
+        // The start line + its marker only when the start itself is in view —
+        // an event that began before the chart just shows its band.
+        const lineHTML = startInView ? `
+            <line x1="${startX.toFixed(1)}" y1="${top}" x2="${startX.toFixed(1)}" y2="${axisY.toFixed(1)}"
+                  class="pricing-chart-event-line" style="stroke:${cat.color}" />
+            <path d="M ${startX.toFixed(1)} ${(top - 9).toFixed(1)} l 3.5 3.5 l -3.5 3.5 l -3.5 -3.5 Z"
+                  class="pricing-chart-event-marker" style="fill:${cat.color}" />
+            <rect x="${(startX - 5).toFixed(1)}" y="${(top - 10).toFixed(1)}" width="10" height="${(axisY - top + 10).toFixed(1)}"
+                  class="pricing-chart-event-hit" />` : '';
+
+        const dates = ev.end_date && ev.end_date !== ev.start_date ? `${ev.start_date} → ${ev.end_date}` : ev.start_date;
+        return `
+            <g class="pricing-chart-event"
+               data-title="${escapeHtml(ev.title || '')}"
+               data-category="${escapeHtml(cat.label)}"
+               data-color="${escapeHtml(cat.color)}"
+               data-dates="${escapeHtml(dates)}"
+               onmouseenter="showPricingEventTooltip(event)"
+               onmouseleave="hidePricingTooltip()">
+                ${bandHTML}${lineHTML}
+            </g>`;
+    }).join('');
+}
+
+// The events overlapping a chart's plotted date range (start through end
+// date, or just the start for a one-day event).
+function pricingEventsInView(geom, events = pricingTimelineEvents) {
+    return events.filter(ev => {
+        const start = new Date(ev.start_date).getTime();
+        const end = ev.end_date ? new Date(ev.end_date).getTime() : start;
+        return Number.isFinite(start) && end >= geom.minTime && start <= geom.maxTime;
+    });
+}
+
+// Redraws every rendered chart's events layer from the current cache.
+function fillPricingChartEvents(root = document) {
+    root.querySelectorAll('.pricing-chart-events[data-geom]').forEach(layer => {
+        try {
+            layer.innerHTML = pricingChartEventsHTML(JSON.parse(layer.dataset.geom));
+        } catch {
+            // A malformed geom just leaves that chart without event lines.
+        }
+    });
+}
+
+function showPricingEventTooltip(evt) {
+    const g = evt.currentTarget;
+    let tooltip = document.getElementById('pricing-tooltip');
+
+    if (!tooltip) {
+        tooltip = document.createElement('div');
+        tooltip.id = 'pricing-tooltip';
+        tooltip.className = 'pricing-tooltip hidden';
+        document.body.appendChild(tooltip);
+    }
+
+    tooltip.innerHTML = '';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'pricing-tooltip-header';
+    const keyEl = document.createElement('span');
+    keyEl.className = 'pricing-tooltip-key';
+    keyEl.style.background = g.dataset.color;
+    headerEl.appendChild(keyEl);
+    const seriesEl = document.createElement('span');
+    seriesEl.className = 'pricing-tooltip-series';
+    seriesEl.textContent = g.dataset.category;
+    headerEl.appendChild(seriesEl);
+    tooltip.appendChild(headerEl);
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'pricing-tooltip-price';
+    titleEl.textContent = g.dataset.title;
+    tooltip.appendChild(titleEl);
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'pricing-tooltip-meta';
+    metaEl.textContent = g.dataset.dates;
+    tooltip.appendChild(metaEl);
+
+    tooltip.classList.remove('hidden');
+    anchorPricingTooltip(g, tooltip);
+}
+
+loadPricingTimelineEvents();
 
 function buildPricingSeriesMarks(series, xAt, yAt) {
     const {label, color, entries, key} = series;
@@ -666,10 +835,21 @@ function buildPricingComboChart(sales, listings, fullHistory = false, widthPx = 
     // starts at the container's midpoint (see .pricing-legend-menu.has-both).
     const hasBothGroups = salesGroupSeries.length > 0 && listingsGroupSeries.length > 0;
 
-    const legendMenuHTML = `
-        <div class="pricing-legend-menu${hasBothGroups ? ' has-both' : ''}">
+    // Built at the return below, once the chart knows how many timeline
+    // events it shows — those get a "Timeline" toggle pinned under the two
+    // groups (an auto-height third row, so the halves stay equal).
+    const legendMenuHTML = eventCount => `
+        <div class="pricing-legend-menu${hasBothGroups ? ' has-both' : ''}${eventCount ? ' has-events' : ''}">
             <div class="pricing-legend-menu-group">${buildLegendMenuGroup('Sales', salesGroupSeries)}</div>
             <div class="pricing-legend-menu-group">${buildLegendMenuGroup('Listings', listingsGroupSeries)}</div>
+            ${eventCount ? `
+            <div class="pricing-legend-menu-group pricing-legend-menu-events">
+                <div class="pricing-legend-menu-header">Timeline</div>
+                <div class="pricing-legend-toggle" data-series-key="${PRICING_EVENTS_KEY}" onclick="togglePricingSeries(this)" role="checkbox" aria-checked="true">
+                    <span class="pricing-legend-swatch" style="--swatch-color:${PRICING_EVENT_CATEGORIES.set_release.color}"></span>
+                    <span class="pricing-legend-toggle-label">Events (${eventCount})</span>
+                </div>
+            </div>` : ''}
         </div>`;
 
     const all = series.flatMap(s => s.entries);
@@ -820,6 +1000,16 @@ function buildPricingComboChart(sales, listings, fullHistory = false, widthPx = 
     const dayLabelY = (h - pad.bottom + 12).toFixed(1);
     const monthLabelY = (h - 4).toFixed(1);
 
+    // The timeline events layer (pricingChartEventsHTML) — drawn now from
+    // the cache, and its axis kept on data-geom so a cache that lands later
+    // can redraw it (fillPricingChartEvents).
+    const eventsGeom = {
+        minTime, maxTime, timeSpan, left: pad.left, insetX, dataPlotW, plotW,
+        top: pad.top, axisY: h - pad.bottom, singleTime,
+    };
+    const eventsInView = pricingEventsInView(eventsGeom);
+    const eventsLayerHTML = `<g class="pricing-chart-events" data-series-key="${PRICING_EVENTS_KEY}" data-geom="${escapeHtml(JSON.stringify(eventsGeom))}">${pricingChartEventsHTML(eventsGeom)}</g>`;
+
     // Rather than only ever labeling the two endpoint dates (which doesn't
     // reflect how the points in between are actually distributed in time),
     // pick a handful of ticks spread evenly across the real time range, each
@@ -949,6 +1139,7 @@ function buildPricingComboChart(sales, listings, fullHistory = false, widthPx = 
         <svg class="pricing-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"${svgStyle}>
             ${gridlinesHTML}
             ${monthDividersHTML}
+            ${eventsLayerHTML}
             ${linesHTML}
             ${dotsHTML}
             ${endLabelsHTML}
@@ -965,7 +1156,7 @@ function buildPricingComboChart(sales, listings, fullHistory = false, widthPx = 
         return `
             <div class="pricing-chart-row">
                 <div class="pricing-chart-canvas">${canvasInner}</div>
-                ${legendMenuHTML}
+                ${legendMenuHTML(eventsInView.length)}
             </div>`;
     }
 
@@ -1096,6 +1287,9 @@ function soleVariantOf([, foilObj]) {
 }
 
 function buildTabPricingPanel(edition, cardName, cardId, editionId) {
+    // Re-fetches the timeline events once their cache is stale; the charts
+    // below draw from the cache now and are redrawn if that changes them.
+    loadPricingTimelineEvents();
     const foils = edition?.foils || {};
     const pricing = edition?.pricing || {};
     // Regular nonfoil/foil printings (and top-level "special" foils, which

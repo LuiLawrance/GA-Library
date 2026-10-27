@@ -440,7 +440,6 @@
                             <button type="button" class="pill-toggle-btn active" data-filter="all" onclick="switchAdminTimelineFilter('all')">All</button>
                             <button type="button" class="pill-toggle-btn" data-filter="set_release" onclick="switchAdminTimelineFilter('set_release')">Sets</button>
                             <button type="button" class="pill-toggle-btn" data-filter="tournament" onclick="switchAdminTimelineFilter('tournament')">Tournaments</button>
-                            <button type="button" class="pill-toggle-btn" data-filter="banlist" onclick="switchAdminTimelineFilter('banlist')">Banlist</button>
                             <button type="button" class="pill-toggle-btn" data-filter="other" onclick="switchAdminTimelineFilter('other')">Other</button>
                         </div>
                         <div class="admin-pid-summary" id="admin-tl-summary"></div>
@@ -505,6 +504,11 @@
                                  collapsed avoids a flash-then-hide on every Cards load where
                                  Local DB is off. .admin-pid-collapsed (not .hidden) so show/hide
                                  fades and wipes rather than snapping. -->
+                            <!-- One right-aligned slot for whichever action group the mode
+                                 shows — both groups overlap in it (see .admin-pid-actions-slot in
+                                 admin.css), so neither leaves a gap or auto-margin that shifts
+                                 the other off the right edge. -->
+                            <div class="admin-pid-actions-slot">
                             <div class="admin-pid-refresh-group admin-pid-collapsed">
                                 <button class="admin-pid-refresh-btn admin-pid-refresh-btn-secondary" id="admin-pid-refresh-btn-sales"
                                         onclick="refreshSelectedAdminPricing('sales')" disabled>Refresh Sales</button>
@@ -519,6 +523,7 @@
                             <div class="admin-na-bulk-group">
                                 <button class="admin-pid-refresh-btn" id="admin-na-bulk-btn"
                                         onclick="bulkResolveAdminNeedsAction()" disabled>Resolve Selected</button>
+                            </div>
                             </div>
                         </div>
                     </div>

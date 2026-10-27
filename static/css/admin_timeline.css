@@ -172,7 +172,6 @@
 
 .admin-tl-dot-set_release  { color: #e3b565; background: #e3b565; }
 .admin-tl-dot-tournament   { color: var(--accent); background: var(--accent); }
-.admin-tl-dot-banlist      { color: #9aa8c0; background: #9aa8c0; }
 .admin-tl-dot-announcement { color: #6ec8a9; background: #6ec8a9; }
 .admin-tl-dot-other        { color: var(--text-muted); background: var(--text-muted); }
 
@@ -300,6 +299,68 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+}
+
+/* A category-dependent field (applyAdminTlSections in admin_timeline.js).
+   The negative margin cancels the editor's 16px flex gap and the padding
+   re-adds it inside the section, so the height wipe (collapsePadding)
+   closes that gap too — the fields below glide up instead of jumping 16px
+   when the section finally goes display:none. */
+.admin-tl-section {
+    margin-top: -16px;
+    padding-top: 16px;
+    transition: opacity 0.2s ease;
+}
+
+.admin-tl-section-out {
+    opacity: 0;
+}
+
+/* End date sits in the right-hand column, under Date. */
+.admin-tl-field-end {
+    grid-column: 2;
+}
+
+/* Sets: chosen sets as removable chips above the "+ Add a set" dropdown. */
+.admin-tl-sets {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-tl-set-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.admin-tl-set-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: #e3b565;
+    background: rgba(227, 181, 101, 0.1);
+    border: 1px solid rgba(227, 181, 101, 0.25);
+    border-radius: var(--radius-sm);
+    padding: 4px 6px 4px 9px;
+}
+
+.admin-tl-set-chip-remove {
+    font-size: 0.62rem;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.6;
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.admin-tl-set-chip-remove:hover {
+    opacity: 1;
 }
 
 .admin-tl-optional {

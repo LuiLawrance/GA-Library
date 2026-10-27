@@ -336,7 +336,22 @@
     overflow: hidden;
 }
 
-.pricing-legend-menu.has-both .pricing-legend-menu-group:last-child {
+/* nth-child(2), not last-child — the Timeline group can follow it. */
+.pricing-legend-menu.has-both .pricing-legend-menu-group:nth-child(2) {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+}
+
+/* The Timeline toggle (timeline events on the chart) — pinned to the menu's
+   bottom as an auto-height row, so the Sales / Listings halves above stay
+   equal. */
+.pricing-legend-menu.has-both.has-events {
+    grid-template-rows: 1fr 1fr auto;
+}
+
+.pricing-legend-menu-events {
+    flex-shrink: 0;
+    margin-top: auto;
     border-top: 1px solid var(--border);
     padding-top: 8px;
 }

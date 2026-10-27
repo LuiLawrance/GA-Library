@@ -3097,11 +3097,31 @@
     grid-template-columns: 28px 2fr 0.6fr 0.8fr 56px;
 }
 
-/* "Resolve Selected" sits where the Refresh group would be — Needs Action
-   only, with the same fade+wipe the Refresh group uses to hide. */
+/* The toolbar's right-hand action slot: the Refresh group (Pricing) and the
+   "Resolve Selected" group (Needs Action) stacked in the SAME grid cell,
+   right-aligned. Only one is ever expanded, so the slot is exactly that one's
+   width and it lands flush right — as two separate flex items with their own
+   margin-left:auto they split the row's spare space between them (and the row
+   gap), which pushed the Refresh buttons in from the right edge. */
+.admin-pid-actions-slot {
+    display: grid;
+    justify-items: end;
+    align-items: center;
+    margin-left: auto;
+}
+
+.admin-pid-actions-slot > * {
+    grid-area: 1 / 1;
+}
+
+.admin-pid-actions-slot .admin-pid-refresh-group {
+    margin-left: 0;
+}
+
+/* "Resolve Selected" — Needs Action only, with the same fade+wipe the Refresh
+   group uses to hide. */
 .admin-na-bulk-group {
     display: flex;
-    margin-left: auto;
     overflow: hidden;
     max-width: 0;
     opacity: 0;

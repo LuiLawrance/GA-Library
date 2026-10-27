@@ -817,6 +817,10 @@ def migrate_events() -> None:
     print(f"events: {written}")
 
 
+# Mirrors timeline.RETIRED_CATEGORIES.
+RETIRED_TIMELINE_CATEGORIES = {"banlist": "announcement"}
+
+
 def migrate_timeline() -> None:
     """Admin → Cards → Events entries (timeline.py), upserted by id so a
     re-run updates rather than duplicates them. Entries added in DB mode and
@@ -835,10 +839,12 @@ def migrate_timeline() -> None:
             values = {
                 "id": e["id"],
                 "title": e["title"],
-                "category": e["category"],
+                "category": RETIRED_TIMELINE_CATEGORIES.get(e["category"], e["category"]),
                 "start_date": parse_date(e.get("start_date")),
                 "end_date": parse_date(e.get("end_date")),
-                "set_prefix": e.get("set_prefix"),
+                # Older files hold a single set_prefix instead of the list.
+                "set_prefixes": e.get("set_prefixes")
+                if e.get("set_prefixes") is not None else ([e["set_prefix"]] if e.get("set_prefix") else []),
                 "omnidex_event_id": e.get("omnidex_event_id"),
                 "notes": e.get("notes"),
                 "created_at": parse_ts(e.get("created_at")) or dt.datetime.now(dt.timezone.utc),

@@ -1,6 +1,6 @@
 // ── Admin → Cards → Events (the Timeline) ──
 // Admin-curated dated milestones — set releases, World / Ascent tournaments,
-// banlist updates — stored by timeline.py (/api/admin/timeline), so other
+// announcements — stored by timeline.py (/api/admin/timeline), so other
 // features can line their data up against them later.
 //
 // Not a mode of the card grid like Info / Pricing / Needs Action: Events swaps
@@ -18,10 +18,24 @@
 const ADMIN_TL_CATEGORIES = [
     {value: 'set_release', label: 'Set Release', tag: 'tag--gold'},
     {value: 'tournament', label: 'Tournament', tag: 'tag--accent'},
-    {value: 'banlist', label: 'Banlist', tag: 'tag--slate'},
     {value: 'announcement', label: 'Announcement', tag: 'tag--mint'},
     {value: 'other', label: 'Other', tag: ''},
 ];
+
+// Which optional editor fields each category uses — mirrors
+// timeline.CATEGORY_FIELDS (the server drops the rest on save). Title,
+// category, date and notes always show. Switching category wipes the
+// difference in / out (applyAdminTlSections).
+const ADMIN_TL_CATEGORY_FIELDS = {
+    set_release: ['sets'],
+    tournament: ['end_date', 'omnidex'],
+    announcement: [],
+    other: ['sets', 'end_date', 'omnidex'],
+};
+
+// Show / hide timing for those fields — the height wipe (animateHeightWipe,
+// animation.js) with a fade alongside it.
+const ADMIN_TL_SECTION_WIPE_MS = 260;
 
 // The filter pill's "Other" covers both of the minor categories.
 const ADMIN_TL_FILTER_GROUPS = {other: ['announcement', 'other']};
@@ -278,7 +292,7 @@ function adminTlFilteredEntries() {
         if (adminTlFilter !== 'all' && !group.includes(e.category)) return false;
         if (!query) return true;
         const linked = e.omnidex_event_id ? adminTlOmnidex.get(e.omnidex_event_id) : null;
-        return [e.title, e.notes, e.set_prefix, adminTlCategory(e.category).label, e.start_date,
+        return [e.title, e.notes, (e.set_prefixes || []).join(' '), adminTlCategory(e.category).label, e.start_date,
             e.omnidex_event_id ? `#${e.omnidex_event_id}` : '', linked?.name]
             .some(v => String(v || '').toLowerCase().includes(query));
     });
@@ -293,7 +307,7 @@ function adminTlRowHtml(e, index, reveal, today) {
 
     const chips = [
         adminTlCategoryTagHtml(e.category),
-        e.set_prefix ? `<span class="admin-tl-chip">${escapeHtml(e.set_prefix)}</span>` : '',
+        ...(e.set_prefixes || []).map(prefix => `<span class="admin-tl-chip">${escapeHtml(prefix)}</span>`),
         e.omnidex_event_id ? `<span class="admin-tl-chip admin-tl-chip-omni" title="Linked Omnidex event">🏆 ${
             escapeHtml(linked ? linked.name : `#${e.omnidex_event_id}`)}</span>` : '',
         ongoing ? '<span class="tag tag--success">Now</span>' : '',
@@ -388,7 +402,7 @@ function adminTlNewDraft() {
     const category = adminTlFilter === 'all' ? 'set_release' : (group ? group[0] : adminTlFilter);
     return {
         id: null, title: '', category, start_date: adminTlIsoDay(new Date()), end_date: '',
-        set_prefix: '', omnidex_event_id: null, notes: '',
+        set_prefixes: [], omnidex_event_id: null, notes: '',
     };
 }
 
@@ -399,7 +413,7 @@ function adminTlDraftFrom(entry) {
         category: entry.category,
         start_date: entry.start_date || '',
         end_date: entry.end_date || '',
-        set_prefix: entry.set_prefix || '',
+        set_prefixes: [...(entry.set_prefixes || [])],
         omnidex_event_id: entry.omnidex_event_id ?? null,
         notes: entry.notes || '',
     };
@@ -462,11 +476,74 @@ async function closeAdminTimelineEditor() {
 
 function onAdminTimelineField(field, value) {
     if (!adminTlDraft) return;
+
+    // The Sets picker's "+ Add a set" dropdown appends rather than replaces.
+    if (field === 'set_add') {
+        if (value && !adminTlDraft.set_prefixes.includes(value)) {
+            adminTlDraft.set_prefixes.push(value);
+            setAdminTimelineDirty(true);
+        }
+        renderAdminTlSetSlot();
+        return;
+    }
+
+    if (field === 'category' && value === adminTlDraft.category) return;
     adminTlDraft[field] = value;
     setAdminTimelineDirty(true);
+    if (field === 'category') applyAdminTlSections({animate: true});
     // Only the Omnidex block's "events near this date" suggestions depend on
     // another field.
     if (field === 'start_date') renderAdminTlOmniSuggestions();
+}
+
+function removeAdminTlSet(index) {
+    if (!adminTlDraft) return;
+    adminTlDraft.set_prefixes.splice(index, 1);
+    setAdminTimelineDirty(true);
+    renderAdminTlSetSlot();
+}
+
+function adminTlShowsField(name) {
+    return (ADMIN_TL_CATEGORY_FIELDS[adminTlDraft?.category] || []).includes(name);
+}
+
+// Shows / hides the category-dependent fields ([data-tl-section]) to match
+// the draft's category. With `animate`, each one that changes wipes its
+// height open / shut (animateHeightWipe) while fading; values in a hidden
+// field are kept in the draft, so switching back restores them — the server
+// drops whatever the saved category doesn't use. Rapid switches are safe: a
+// wipe that's been superseded leaves the element to the newer one.
+function applyAdminTlSections({animate = false} = {}) {
+    document.querySelectorAll('#admin-tl-editor [data-tl-section]').forEach(el => {
+        const show = adminTlShowsField(el.dataset.tlSection);
+        // dataset.shown is unset on a freshly rendered editor — always settle it.
+        if (el.dataset.shown !== undefined && (el.dataset.shown === '1') === show) return;
+        el.dataset.shown = show ? '1' : '0';
+
+        if (!animate) {
+            el.classList.toggle('hidden', !show);
+            el.classList.toggle('admin-tl-section-out', !show);
+            return;
+        }
+
+        if (show) {
+            el.classList.add('admin-tl-section-out');
+            el.classList.remove('hidden');
+            animateHeightWipe(el, true, {duration: ADMIN_TL_SECTION_WIPE_MS, collapsePadding: true});
+            // Flush the transparent start state so dropping the class fades
+            // it in (no rAF — that never fires in a background tab, which
+            // would strand the field invisible).
+            void el.offsetWidth;
+            el.classList.remove('admin-tl-section-out');
+        } else {
+            el.classList.add('admin-tl-section-out');
+            animateHeightWipe(el, false, {duration: ADMIN_TL_SECTION_WIPE_MS, collapsePadding: true}).then(() => {
+                if (el.dataset.shown !== '0') return;   // switched back meanwhile
+                el.classList.add('hidden');
+                resetHeightWipe(el);
+            });
+        }
+    });
 }
 
 // Updates just the footer buttons — the inputs keep focus while typing.
@@ -494,20 +571,43 @@ async function adminTlEnsureSets() {
         adminTlSets = [];
     }
     // Swap just the Set picker in — the rest of the form may be mid-edit.
+    renderAdminTlSetSlot();
+}
+
+function renderAdminTlSetSlot() {
     const slot = document.getElementById('admin-tl-set-slot');
     if (slot && adminTlDraft) slot.innerHTML = adminTlSetPickerHtml();
 }
 
+// Sets: the chosen ones as removable chips, plus a dropdown that adds one
+// more (it lists only the sets not already picked, then resets).
 function adminTlSetPickerHtml() {
+    const chosen = adminTlDraft.set_prefixes;
+    const label = prefix => {
+        const set = adminTlSets?.find(s => s.prefix === prefix);
+        return set?.name && set.name !== prefix ? `${prefix} — ${set.name}` : prefix;
+    };
+    const chips = chosen.map((prefix, i) => `
+        <span class="admin-tl-set-chip" title="${escapeHtml(label(prefix))}">
+            ${escapeHtml(prefix)}
+            <button type="button" class="admin-tl-set-chip-remove" aria-label="Remove ${escapeHtml(prefix)}"
+                    onclick="removeAdminTlSet(${i})">&#x2715;</button>
+        </span>`).join('');
+
+    let adder;
     if (!adminTlSets) {
-        return '<div class="select-dropdown"><button type="button" class="select-dropdown-btn" disabled>'
+        adder = '<div class="select-dropdown"><button type="button" class="select-dropdown-btn" disabled>'
             + '<span class="select-dropdown-label">Loading sets…</span></button></div>';
+    } else {
+        const remaining = adminTlSets.filter(s => !chosen.includes(s.prefix));
+        const options = [{value: '', label: chosen.length ? '+ Add another set' : '+ Add a set'},
+            ...remaining.map(s => ({value: s.prefix, label: label(s.prefix)}))];
+        adder = selectDropdownHTML(options, '');
     }
-    const options = [{value: '', label: 'None'},
-        ...adminTlSets.map(s => ({value: s.prefix, label: s.name && s.name !== s.prefix ? `${s.prefix} — ${s.name}` : s.prefix}))];
-    const current = adminTlDraft.set_prefix || '';
-    if (current && !options.some(o => o.value === current)) options.push({value: current, label: current});
-    return selectDropdownHTML(options, current);
+
+    return `
+        ${chosen.length ? `<div class="admin-tl-set-chips">${chips}</div>` : ''}
+        <div class="admin-tl-set-adder" data-tl-field="set_add">${adder}</div>`;
 }
 
 function renderAdminTimelineEditor() {
@@ -519,7 +619,7 @@ function renderAdminTimelineEditor() {
         editor.innerHTML = `
             <div class="admin-tl-editor-empty">
                 <span class="label label--muted">Timeline</span>
-                <p>Record set releases, World / Ascent tournaments, banlist updates and other dates worth lining data up against.</p>
+                <p>Record set releases, World / Ascent tournaments, announcements and other dates worth lining data up against.</p>
                 <p>Select an event from the timeline, or add a new one.</p>
                 <button type="button" class="admin-pid-refresh-btn" onclick="newAdminTimelineEntry()">+ Add Event</button>
             </div>`;
@@ -550,28 +650,37 @@ function renderAdminTimelineEditor() {
                 <span class="label label--muted label--sm">Category</span>
                 ${selectDropdownHTML(ADMIN_TL_CATEGORIES.map(c => ({value: c.value, label: c.label})), d.category)}
             </div>
-            <div class="admin-tl-field" data-tl-field="set_prefix">
-                <span class="label label--muted label--sm">Set <span class="admin-tl-optional">optional</span></span>
-                <div id="admin-tl-set-slot">${adminTlSetPickerHtml()}</div>
-            </div>
-        </div>
-
-        <div class="admin-tl-field-row">
             <label class="admin-tl-field">
                 <span class="label label--muted label--sm">Date</span>
                 <input type="date" class="input admin-tl-input" id="admin-tl-start" value="${escapeHtml(d.start_date)}"
                        onchange="onAdminTimelineField('start_date', this.value)">
             </label>
-            <label class="admin-tl-field">
-                <span class="label label--muted label--sm">End date <span class="admin-tl-optional">optional</span></span>
-                <input type="date" class="input admin-tl-input" id="admin-tl-end" value="${escapeHtml(d.end_date)}"
-                       onchange="onAdminTimelineField('end_date', this.value)">
-            </label>
         </div>
 
-        <div class="admin-tl-field">
-            <span class="label label--muted label--sm">Omnidex event <span class="admin-tl-optional">optional</span></span>
-            <div id="admin-tl-omni">${adminTlOmniHtml()}</div>
+        <!-- Category-dependent fields (ADMIN_TL_CATEGORY_FIELDS) — each one
+             wipes in / out on a category switch, see applyAdminTlSections. -->
+        <div class="admin-tl-section" data-tl-section="end_date">
+            <div class="admin-tl-field-row">
+                <label class="admin-tl-field admin-tl-field-end">
+                    <span class="label label--muted label--sm">End date <span class="admin-tl-optional">optional</span></span>
+                    <input type="date" class="input admin-tl-input" id="admin-tl-end" value="${escapeHtml(d.end_date)}"
+                           onchange="onAdminTimelineField('end_date', this.value)">
+                </label>
+            </div>
+        </div>
+
+        <div class="admin-tl-section" data-tl-section="sets">
+            <div class="admin-tl-field">
+                <span class="label label--muted label--sm">Sets <span class="admin-tl-optional">optional</span></span>
+                <div class="admin-tl-sets" id="admin-tl-set-slot">${adminTlSetPickerHtml()}</div>
+            </div>
+        </div>
+
+        <div class="admin-tl-section" data-tl-section="omnidex">
+            <div class="admin-tl-field">
+                <span class="label label--muted label--sm">Omnidex event <span class="admin-tl-optional">optional</span></span>
+                <div id="admin-tl-omni">${adminTlOmniHtml()}</div>
+            </div>
         </div>
 
         <label class="admin-tl-field">
@@ -594,6 +703,7 @@ function renderAdminTimelineEditor() {
         </div>
     `;
 
+    applyAdminTlSections();
     adminTlEnsureSets();
 }
 
@@ -610,7 +720,9 @@ async function saveAdminTimelineEntry() {
     if (!d || adminTlSaving) return;
     if (!d.title.trim()) return setAdminTimelineMsg('Give the event a title.');
     if (!d.start_date) return setAdminTimelineMsg('Pick a date.');
-    if (d.end_date && d.end_date < d.start_date) return setAdminTimelineMsg("The end date can't be before the start.");
+    if (adminTlShowsField('end_date') && d.end_date && d.end_date < d.start_date) {
+        return setAdminTimelineMsg("The end date can't be before the start.");
+    }
 
     adminTlSaving = true;
     const btn = document.getElementById('admin-tl-save-btn');
@@ -622,13 +734,14 @@ async function saveAdminTimelineEntry() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 title: d.title, category: d.category, start_date: d.start_date, end_date: d.end_date || null,
-                set_prefix: d.set_prefix || null, omnidex_event_id: d.omnidex_event_id, notes: d.notes,
+                set_prefixes: d.set_prefixes, omnidex_event_id: d.omnidex_event_id, notes: d.notes,
             }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Could not save the event');
 
         const entry = data.entry;
+        invalidatePricingTimelineEvents();   // the price charts' event lines (drawer.js)
         adminTlEntries = adminTlEntries.filter(e => e.id !== entry.id).concat(entry);
         adminTlSortEntries();
         adminTlSelectedId = entry.id;
@@ -656,6 +769,7 @@ async function deleteAdminTimelineEntry() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || 'Could not delete the event');
 
+        invalidatePricingTimelineEvents();
         adminTlEntries = adminTlEntries.filter(e => e.id !== d.id);
         await fadeSwap(document.getElementById('admin-tl-editor'), () => {
             adminTlSelectedId = null;

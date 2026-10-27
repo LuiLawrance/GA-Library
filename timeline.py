@@ -1,5 +1,5 @@
 """The Timeline — admin-curated dated milestones (set releases, World /
-Ascent tournaments, banlist updates, ...) recorded from Admin → Cards →
+Ascent tournaments, announcements, ...) recorded from Admin → Cards →
 Events (see admin.js), so other features can line their data up against
 them later (e.g. price history around a set release).
 
@@ -27,10 +27,28 @@ import threading
 
 JSON_TIMELINE = "DATA_GA/TIMELINE.json"
 
-CATEGORIES = ("set_release", "tournament", "banlist", "announcement", "other")
+CATEGORIES = ("set_release", "tournament", "announcement", "other")
+
+# The optional fields each category keeps (title, category, start date and
+# notes always apply). Anything else is dropped on save, so switching an
+# entry's category can't leave stale data behind. Mirrored by
+# ADMIN_TL_CATEGORY_FIELDS in admin_timeline.js, which shows / hides the
+# editor's fields to match.
+CATEGORY_FIELDS = {
+    "set_release": {"set_prefixes"},
+    "tournament": {"end_date", "omnidex_event_id"},
+    "announcement": set(),
+    "other": {"set_prefixes", "end_date", "omnidex_event_id"},
+}
+
+# Retired categories and what an existing entry becomes (JSON mode on load;
+# the DB rows were converted by migration 4b7d9e2f6a13).
+RETIRED_CATEGORIES = {"banlist": "announcement"}
+
 TITLE_MAX = 200
 NOTES_MAX = 2000
 SET_PREFIX_MAX = 40
+SET_PREFIXES_MAX = 20
 
 # JSON mode's read-modify-write isn't atomic across concurrent requests.
 _json_lock = threading.Lock()
@@ -60,10 +78,30 @@ def _parse_date(value, field: str, required: bool) -> date | None:
         raise TimelineError(f"{field} must be a YYYY-MM-DD date")
 
 
+def _clean_set_prefixes(data: dict) -> list[str]:
+    """The payload's set_prefixes list — or a legacy single set_prefix —
+    trimmed, de-duplicated (first wins), in the order given."""
+    raw = data.get("set_prefixes")
+    if raw is None:
+        raw = [data.get("set_prefix")] if data.get("set_prefix") else []
+    if not isinstance(raw, list):
+        raise TimelineError("Sets must be a list")
+
+    prefixes = []
+    for value in raw:
+        prefix = str(value or "").strip()[:SET_PREFIX_MAX]
+        if prefix and prefix not in prefixes:
+            prefixes.append(prefix)
+    if len(prefixes) > SET_PREFIXES_MAX:
+        raise TimelineError(f"At most {SET_PREFIXES_MAX} sets")
+    return prefixes
+
+
 def _clean(data: dict) -> dict:
     """Validates and normalizes an editor payload into column values. Raises
     TimelineError on a missing title/date, an unknown category, or an end
-    date before the start."""
+    date before the start. Fields the category doesn't use (CATEGORY_FIELDS)
+    are cleared."""
     title = str(data.get("title") or "").strip()[:TITLE_MAX]
     if not title:
         raise TimelineError("Title is required")
@@ -72,15 +110,23 @@ def _clean(data: dict) -> dict:
     if category not in CATEGORIES:
         raise TimelineError("Unknown category")
 
+    # Fields the category doesn't use are skipped before validation, not just
+    # dropped after it — the editor keeps hidden values in its draft (so a
+    # category switch back restores them) and still sends them, so a stale
+    # hidden end date must not fail the save.
+    allowed = CATEGORY_FIELDS[category]
+
     start = _parse_date(data.get("start_date"), "Date", required=True)
-    end = _parse_date(data.get("end_date"), "End date", required=False)
-    if end is not None and end < start:
-        raise TimelineError("End date can't be before the start date")
-    if end == start:
-        end = None
+    end = None
+    if "end_date" in allowed:
+        end = _parse_date(data.get("end_date"), "End date", required=False)
+        if end is not None and end < start:
+            raise TimelineError("End date can't be before the start date")
+        if end == start:
+            end = None
 
     omnidex_event_id = data.get("omnidex_event_id")
-    if omnidex_event_id in ("", None):
+    if "omnidex_event_id" not in allowed or omnidex_event_id in ("", None):
         omnidex_event_id = None
     else:
         try:
@@ -93,7 +139,7 @@ def _clean(data: dict) -> dict:
         "category": category,
         "start_date": start,
         "end_date": end,
-        "set_prefix": str(data.get("set_prefix") or "").strip()[:SET_PREFIX_MAX] or None,
+        "set_prefixes": _clean_set_prefixes(data) if "set_prefixes" in allowed else [],
         "omnidex_event_id": omnidex_event_id,
         "notes": str(data.get("notes") or "").strip()[:NOTES_MAX] or None,
     }
@@ -106,7 +152,7 @@ def _entry_dict(row: TimelineEvent) -> dict:
         "category": row.category,
         "start_date": _iso(row.start_date),
         "end_date": _iso(row.end_date),
-        "set_prefix": row.set_prefix,
+        "set_prefixes": list(row.set_prefixes or []),
         "omnidex_event_id": row.omnidex_event_id,
         "notes": row.notes,
         "created_at": _iso(row.created_at),
@@ -123,7 +169,21 @@ def _load_json() -> dict:
         data = json.load(f)
     data.setdefault("next_id", 1)
     data.setdefault("entries", [])
+    for entry in data["entries"]:
+        _upgrade_json_entry(entry)
     return data
+
+
+def _upgrade_json_entry(entry: dict) -> None:
+    """JSON-mode counterpart of migration 4b7d9e2f6a13, applied on read: a
+    legacy single set_prefix becomes set_prefixes, a retired category its
+    replacement. The next save writes the new shape back."""
+    if "set_prefixes" not in entry:
+        legacy = entry.pop("set_prefix", None)
+        entry["set_prefixes"] = [legacy] if legacy else []
+    else:
+        entry.pop("set_prefix", None)
+    entry["category"] = RETIRED_CATEGORIES.get(entry.get("category"), entry.get("category"))
 
 
 def _save_json(data: dict) -> None:

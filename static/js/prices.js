@@ -252,7 +252,9 @@ async function showPriceGraph(cardId, editionId, foilId, cardName, updateUrl = t
     body.classList.remove('switching');
 
     try {
-        const res = await fetch(`/api/cards/${cardId}`);
+        // The timeline events the chart marks (see pricingChartEventsHTML in
+        // drawer.js) load alongside, so they're drawn on the first render.
+        const [res] = await Promise.all([fetch(`/api/cards/${cardId}`), loadPricingTimelineEvents()]);
         if (!res.ok) throw new Error('Failed to load card');
         const data = await res.json();
         const edition = data.card?.editions?.[editionId];

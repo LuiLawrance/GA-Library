@@ -696,7 +696,9 @@ class TimelineEvent(Base):
     its Omnidex event when the API has one; it's a plain column, not a
     foreign key, so the link survives that event being deleted locally (and
     re-fetched later) and doesn't require the event to be stored to save.
-    set_prefix is likewise a plain column (the user-facing set code)."""
+    set_prefixes is likewise plain data (the user-facing set codes, as a JSON
+    list — a release can cover several sets). Which fields a category uses
+    is timeline.CATEGORY_FIELDS."""
     __tablename__ = "timeline_events"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -704,7 +706,9 @@ class TimelineEvent(Base):
     category: Mapped[str] = mapped_column(Text, nullable=False)
     start_date: Mapped[dt.date] = mapped_column(Date, nullable=False, index=True)
     end_date: Mapped[dt.date | None] = mapped_column(Date)
-    set_prefix: Mapped[str | None] = mapped_column(Text)
+    set_prefixes: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
+    )
     omnidex_event_id: Mapped[int | None] = mapped_column(index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)

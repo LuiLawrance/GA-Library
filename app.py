@@ -2923,6 +2923,20 @@ async def api_admin_timeline(request: Request):
     return JSONResponse({"entries": entries, "categories": list(timeline.CATEGORIES)})
 
 
+@app.get("/api/timeline")
+async def api_timeline(request: Request):
+    """The public side of the Timeline: just the dated summary of every entry,
+    which the drawer's and Prices page's price charts mark as vertical lines
+    (see pricingChartEventsHTML in drawer.js)."""
+    try:
+        entries = await run_in_threadpool(timeline.list_entries)
+    except ProgrammingError:
+        entries = []  # DB mode before the timeline migration has run
+    return JSONResponse({"entries": [
+        {k: e[k] for k in ("id", "title", "category", "start_date", "end_date")} for e in entries
+    ]})
+
+
 @app.post("/api/admin/timeline")
 async def api_admin_timeline_create(request: Request):
     username = require_cards_admin(request)
